@@ -42,6 +42,7 @@ interface WorkspaceRecord {
 	aliases: string[];
 	created_at: string;
 	updated_at: string;
+	last_used_at?: string;
 }
 
 interface DispatchRequestRecord {
@@ -101,6 +102,7 @@ interface QueueEnvelope {
 		| 'job_append_note'
 		| 'job_submit_review'
 		| 'workspace_register'
+		| 'workspace_activate'
 		| 'workspace_get'
 		| 'workspace_find_similar'
 		| 'workspace_list'
@@ -193,6 +195,15 @@ function errorStatus(error: unknown): number {
 
 function errorCodeFor(error: unknown, fallback: string): string {
 	const message = error instanceof Error ? error.message : String(error);
+	if (message.includes('Merge conflict')) {
+		return 'pr_merge_conflict';
+	}
+	if (message.includes('Pull Request is not mergeable')) {
+		return 'pr_not_mergeable';
+	}
+	if (message.includes('Base branch was modified')) {
+		return 'pr_head_sha_mismatch';
+	}
 	if (message.includes('workflow not allowlisted')) {
 		return 'workflow_not_allowlisted';
 	}
@@ -376,6 +387,7 @@ function validateWorkflowInputs(inputs: Record<string, unknown>): void {
 		'pr_body',
 		'dry_run',
 		'auto_improve',
+		'runner_label',
 	]);
 	for (const key of Object.keys(inputs)) {
 		if (!allowedKeys.has(key)) {
@@ -466,6 +478,10 @@ function workspaceStorageKey(repoKey: string): string {
 	return `workspace:${repoKey.toLowerCase()}`;
 }
 
+function activeWorkspaceStorageKey(): string {
+	return 'workspace:active_repo_key';
+}
+
 function parseIsoMs(value: string | undefined): number | null {
 	if (!value) {
 		return null;
@@ -525,7 +541,7 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 				'- 목표: <구체적인 수정 내용>',
 				'- 변경 파일: <path들>',
 				'- dry_run: false',
-				'- 완료 기준: 검증 완료, branch push, PR 생성, 그리고 main 반영에 필요한 마지막 액션 정리까지',
+				'- 완료 기준: 검증 완료, branch push, PR 생성, 가능하면 merge까지',
 			].join('\n'),
 		},
 		dry_run: {
@@ -546,6 +562,14 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 				'PR / workflow / queue 기준으로 다음 액션을 정리해줘.',
 			].join('\n'),
 		},
+		merge: {
+			label: 'Merge approved PR',
+			prompt: [
+				'iusung111/OpenGPT에서 PR #<번호>를 main에 merge해줘.',
+				'- merge_method: merge',
+				'- 가능하면 merge 후 main 상태까지 확인해줘.',
+			].join('\n'),
+		},
 		branch_cleanup: {
 			label: 'Branch cleanup',
 			prompt: 'iusung111/OpenGPT에서 정리 가능한 agent 브랜치를 확인하고, 있으면 cleanup 흐름으로 정리해줘.',
@@ -562,9 +586,16 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		{
 			id: 'main_ready',
 			label: 'main 반영 직전까지 준비',
-			when_to_use: 'main 기준으로 마무리하고 싶지만 merge 자체는 별도일 수 있을 때',
+			when_to_use: 'main 기준으로 마무리하고 싶고, 가능하면 merge까지 이어가고 싶을 때',
 			request_pattern: 'repo + 목표 + 변경 파일 + dry_run=false + main 반영 기준 완료 기준',
 			recommended_template: templates.main_ready,
+		},
+		{
+			id: 'merge_pr',
+			label: '승인된 PR merge',
+			when_to_use: '이미 준비된 PR을 allowlisted repo의 base branch로 합칠 때',
+			request_pattern: 'repo + PR 번호 + optional merge_method',
+			recommended_template: templates.merge,
 		},
 		{
 			id: 'dry_run',
@@ -603,11 +634,11 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		how_to_ask: {
 			required_minimum: ['repo', '목표'],
 			recommended_fields: commonFields,
-			notes: [
-				'실제 변경이면 dry_run=false가 자연스럽습니다.',
-				'main 반영 요청은 merge-ready 상태까지 준비하는 의미로 해석합니다.',
-			],
-		},
+		notes: [
+			'실제 변경이면 dry_run=false가 자연스럽습니다.',
+			'main 반영 요청은 가능하면 merge까지 시도하고, 불가능하면 정확한 남은 액션을 알려줍니다.',
+		],
+	},
 		progress_tracking: {
 			read_tools: ['repo_work_context', 'job_progress', 'audit_list'],
 			write_tools: ['job_append_note'],
@@ -631,13 +662,23 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 	if (normalized.includes('main')) {
 		return {
 			...basePayload,
-			summary: 'main 반영 요청은 실제 변경으로 해석하고, 검증과 PR 준비까지 마무리한 뒤 남은 merge 액션을 알려줍니다.',
+			summary: 'main 반영 요청은 실제 변경으로 해석하고, 검증과 PR 준비 뒤 merge 도구가 가능하면 main merge까지 시도합니다.',
 			recommended_workflow: 'main_ready',
 			recommended_template: templates.main_ready,
 			next_actions: [
 				'dry_run=false로 요청하면 가장 자연스럽습니다.',
 				'merge 자체가 수행되지 않았으면 main이 이미 바뀌었다고 말하지 않습니다.',
 			],
+		};
+	}
+
+	if (normalized.includes('merge') || normalized.includes('머지')) {
+		return {
+			...basePayload,
+			summary: '승인된 PR이 mergeable 상태라면 allowlisted repo의 base branch로 직접 merge할 수 있습니다.',
+			recommended_workflow: 'merge_pr',
+			recommended_template: templates.merge,
+			recommended_tools: ['pr_get', 'pr_merge'],
 		};
 	}
 
@@ -711,8 +752,11 @@ export async function buildDispatchFingerprint(
 	);
 }
 
-function normalizeLookup(value: string): string {
-	return value.trim().toLowerCase().replace(/[\s_]+/g, '-');
+function normalizeLookup(value: unknown): string {
+	return String(value ?? '')
+		.trim()
+		.toLowerCase()
+		.replace(/[\s_]+/g, '-');
 }
 
 async function sha256HmacHex(secret: string, payload: string): Promise<string> {
@@ -794,6 +838,10 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async getWorkspace(repoKey: string): Promise<WorkspaceRecord | null> {
 		return ((await this.ctx.storage.get(workspaceStorageKey(repoKey))) as WorkspaceRecord | undefined) ?? null;
+	}
+
+	private async getActiveWorkspaceRepoKey(): Promise<string | null> {
+		return ((await this.ctx.storage.get(activeWorkspaceStorageKey())) as string | undefined) ?? null;
 	}
 
 	private async listAuditRecords(eventType?: string, jobId?: string, limit = 20): Promise<AuditRecord[]> {
@@ -1145,13 +1193,36 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return jobs.sort((left, right) => left.updated_at.localeCompare(right.updated_at));
 	}
 
-	private async listWorkspaces(): Promise<WorkspaceRecord[]> {
+	private async listWorkspaces(): Promise<Array<WorkspaceRecord & { is_active?: boolean }>> {
 		const workspaces: WorkspaceRecord[] = [];
 		const records = await this.ctx.storage.list<WorkspaceRecord>({ prefix: 'workspace:' });
 		for (const [, value] of records) {
 			workspaces.push(value);
 		}
-		return workspaces.sort((left, right) => left.repo_key.localeCompare(right.repo_key));
+		const activeRepoKey = await this.getActiveWorkspaceRepoKey();
+		return workspaces
+			.sort((left, right) => {
+				const leftActive = left.repo_key === activeRepoKey ? 1 : 0;
+				const rightActive = right.repo_key === activeRepoKey ? 1 : 0;
+				if (leftActive !== rightActive) {
+					return rightActive - leftActive;
+				}
+				const leftUsed = parseIsoMs(left.last_used_at) ?? 0;
+				const rightUsed = parseIsoMs(right.last_used_at) ?? 0;
+				if (leftUsed !== rightUsed) {
+					return rightUsed - leftUsed;
+				}
+				const leftUpdated = parseIsoMs(left.updated_at) ?? 0;
+				const rightUpdated = parseIsoMs(right.updated_at) ?? 0;
+				if (leftUpdated !== rightUpdated) {
+					return rightUpdated - leftUpdated;
+				}
+				return left.repo_key.localeCompare(right.repo_key);
+			})
+			.map((workspace) => ({
+				...workspace,
+				is_active: workspace.repo_key === activeRepoKey,
+			}));
 	}
 
 	private async findByRepoAndBranch(repo: string, workBranch?: string): Promise<JobRecord | null> {
@@ -1228,6 +1299,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			aliases,
 			created_at: input.created_at ?? timestamp,
 			updated_at: timestamp,
+			last_used_at: input.last_used_at,
 		};
 	}
 
@@ -1253,6 +1325,32 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return ok({ workspace });
 	}
 
+	private async activateWorkspace(repoKey: string): Promise<ToolResultEnvelope> {
+		const trimmedRepoKey = repoKey.trim();
+		const activeAt = nowIso();
+		const workspace = await this.getWorkspace(trimmedRepoKey);
+		if (workspace) {
+			workspace.last_used_at = activeAt;
+			await this.ctx.storage.put(workspaceStorageKey(workspace.repo_key), workspace);
+		}
+		await this.ctx.storage.put(activeWorkspaceStorageKey(), trimmedRepoKey);
+		await this.writeAudit('workspace_activate', {
+			repo_key: trimmedRepoKey,
+			workspace_registered: Boolean(workspace),
+			last_used_at: activeAt,
+		});
+		return ok({
+			repo_key: trimmedRepoKey,
+			active_repo_key: trimmedRepoKey,
+			workspace: workspace
+				? {
+						...workspace,
+						is_active: true,
+				  }
+				: null,
+		});
+	}
+
 	private async findSimilarWorkspaces(query?: string, repoKey?: string): Promise<ToolResultEnvelope> {
 		const workspaces = await this.listWorkspaces();
 		const target = normalizeLookup(query || repoKey || '');
@@ -1264,7 +1362,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 					workspace.repo_slug,
 					workspace.display_name,
 					workspace.workspace_path,
-					...workspace.aliases,
+					...(workspace.aliases ?? []),
 				].map(normalizeLookup);
 				let score = 0;
 				if (repoKey && candidates.includes(normalizeLookup(repoKey))) {
@@ -1545,16 +1643,31 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 						await this.registerWorkspace(body.workspace as Partial<WorkspaceRecord> & { repo_key: string }),
 					);
 				}
+				if (body.action === 'workspace_activate' && body.repo_key) {
+					return jsonResponse(await this.activateWorkspace(body.repo_key));
+				}
 				if (body.action === 'workspace_get' && body.repo_key) {
 					const workspace = await this.getWorkspace(body.repo_key);
-					return jsonResponse(workspace ? ok({ workspace }) : fail('not_found', 'workspace not found'));
+					const activeRepoKey = await this.getActiveWorkspaceRepoKey();
+					return jsonResponse(
+						workspace
+							? ok({
+									workspace: {
+										...workspace,
+										is_active: workspace.repo_key === activeRepoKey,
+									},
+									active_repo_key: activeRepoKey,
+							  })
+							: fail('not_found', 'workspace not found'),
+					);
 				}
 				if (body.action === 'workspace_find_similar') {
 					return jsonResponse(await this.findSimilarWorkspaces(body.query, body.repo_key));
 				}
 				if (body.action === 'workspace_list') {
 					const workspaces = await this.listWorkspaces();
-					return jsonResponse(ok({ workspaces }));
+					const activeRepoKey = await this.getActiveWorkspaceRepoKey();
+					return jsonResponse(ok({ active_repo_key: activeRepoKey, workspaces }));
 				}
 				if (body.action === 'job_upsert' && body.job?.job_id) {
 					const job = await this.upsertJob(body.job as Partial<JobRecord> & { job_id: string });
@@ -1637,6 +1750,17 @@ async function queueFetch(env: AppEnv, payload: QueueEnvelope): Promise<Response
 async function queueJson(env: AppEnv, payload: QueueEnvelope): Promise<ToolResultEnvelope> {
 	const response = await queueFetch(env, payload);
 	return (await response.json()) as ToolResultEnvelope;
+}
+
+async function activateRepoWorkspace(env: AppEnv, repoKey: string): Promise<void> {
+	try {
+		await queueJson(env, { action: 'workspace_activate', repo_key: repoKey });
+	} catch (error) {
+		diagnosticLog('workspace_activate_error', {
+			repo_key: repoKey,
+			error: error instanceof Error ? error.message : String(error),
+		});
+	}
 }
 
 async function handleWebhook(request: Request, env: AppEnv): Promise<Response> {
@@ -1748,6 +1872,7 @@ function buildMcpServer(env: AppEnv): McpServer {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
+				await activateRepoWorkspace(env, repoKey);
 				const [repoData, prsData, runsData, jobsData, workspaceData] = await Promise.all([
 					githubGet(env, `/repos/${owner}/${repo}`) as Promise<Record<string, unknown>>,
 					githubGet(env, `/repos/${owner}/${repo}/pulls`, {
@@ -1849,6 +1974,26 @@ function buildMcpServer(env: AppEnv): McpServer {
 	);
 
 	server.registerTool(
+		'workspace_activate',
+		{
+			description:
+				'Mark one registered repository workspace as the current active repo context so recent workspace ordering stays unified around the repo you are actively working in.',
+			inputSchema: {
+				repo_key: z.string(),
+			},
+			annotations: writeAnnotations,
+		},
+		async ({ repo_key }) => {
+			try {
+				const result = await queueJson(env, { action: 'workspace_activate', repo_key });
+				return toolText(result);
+			} catch (error) {
+				return toolText(fail('workspace_activate_failed', error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
 		'workspace_resolve',
 		{
 			description:
@@ -1904,6 +2049,7 @@ function buildMcpServer(env: AppEnv): McpServer {
 					action: 'workspace_register',
 					workspace: { repo_key, workspace_path, display_name, aliases },
 				});
+				await activateRepoWorkspace(env, repo_key);
 				return toolText(result);
 			} catch (error) {
 				return toolText(fail('workspace_register_failed', error, writeAnnotations));
@@ -2117,6 +2263,7 @@ function buildMcpServer(env: AppEnv): McpServer {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
+				await activateRepoWorkspace(env, repoKey);
 				ensureBranchAllowed(env, branch_name);
 				ensureNotDefaultBranch(env, branch_name);
 				const [pulls, jobsData] = await Promise.all([
@@ -2316,6 +2463,7 @@ function buildMcpServer(env: AppEnv): McpServer {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
 				ensureBranchAllowed(env, branch_name);
+				await activateRepoWorkspace(env, repoKey);
 				const baseRef = (await githubGet(
 					env,
 					`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base_branch || getDefaultBaseBranch(env))}`,
@@ -2357,6 +2505,7 @@ function buildMcpServer(env: AppEnv): McpServer {
 				ensureBranchAllowed(env, branch);
 				ensureNotDefaultBranch(env, branch);
 				ensureSafePath(path);
+				await activateRepoWorkspace(env, repoKey);
 				atob(content_b64);
 				const payload: Record<string, unknown> = {
 					message,
@@ -2394,7 +2543,9 @@ function buildMcpServer(env: AppEnv): McpServer {
 		},
 		async ({ owner, repo, title, body, head, base }) => {
 			try {
-				ensureRepoAllowed(env, `${owner}/${repo}`);
+				const repoKey = `${owner}/${repo}`;
+				ensureRepoAllowed(env, repoKey);
+				await activateRepoWorkspace(env, repoKey);
 				const data = (await githubPost(env, `/repos/${owner}/${repo}/pulls`, {
 					title,
 					body,
@@ -2404,6 +2555,61 @@ function buildMcpServer(env: AppEnv): McpServer {
 				return toolText(ok(data, writeAnnotations));
 			} catch (error) {
 				return toolText(fail('pr_create_failed', error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
+		'pr_merge',
+		{
+			description: 'Merge an open pull request in an allowlisted repository when it is ready to land on the base branch.',
+			inputSchema: {
+				owner: z.string(),
+				repo: z.string(),
+				pull_number: z.number().int().positive(),
+				merge_method: z.enum(['merge', 'squash', 'rebase']).default('merge'),
+				commit_title: z.string().optional(),
+				commit_message: z.string().optional(),
+				expected_head_sha: z.string().optional(),
+			},
+			annotations: {
+				...writeAnnotations,
+				destructiveHint: true,
+			},
+		},
+		async ({ owner, repo, pull_number, merge_method, commit_title, commit_message, expected_head_sha }) => {
+			try {
+				const repoKey = `${owner}/${repo}`;
+				ensureRepoAllowed(env, repoKey);
+				await activateRepoWorkspace(env, repoKey);
+				const payload: Record<string, unknown> = { merge_method };
+				if (commit_title) {
+					payload.commit_title = commit_title;
+				}
+				if (commit_message) {
+					payload.commit_message = commit_message;
+				}
+				if (expected_head_sha) {
+					payload.sha = expected_head_sha;
+				}
+				const data = (await githubPut(
+					env,
+					`/repos/${owner}/${repo}/pulls/${pull_number}/merge`,
+					payload,
+				)) as Record<string, unknown>;
+				return toolText(
+					ok(data, {
+						...writeAnnotations,
+						destructiveHint: true,
+					}),
+				);
+			} catch (error) {
+				return toolText(
+					fail(errorCodeFor(error, 'pr_merge_failed'), error, {
+						...writeAnnotations,
+						destructiveHint: true,
+					}),
+				);
 			}
 		},
 	);
@@ -2451,6 +2657,7 @@ function buildMcpServer(env: AppEnv): McpServer {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
+				await activateRepoWorkspace(env, repoKey);
 				if (ref !== getDefaultBaseBranch(env)) {
 					ensureBranchAllowed(env, ref);
 				}
@@ -2589,6 +2796,7 @@ function buildMcpServer(env: AppEnv): McpServer {
 		async (input) => {
 			try {
 				ensureRepoAllowed(env, input.repo);
+				await activateRepoWorkspace(env, input.repo);
 				if (input.work_branch) {
 					ensureBranchAllowed(env, input.work_branch);
 				}

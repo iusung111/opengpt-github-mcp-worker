@@ -536,6 +536,7 @@ describe('opengpt-github-mcp-worker', () => {
 		expect(tools.tools.some((tool) => tool.name === 'repo_work_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'workspace_resolve')).toBe(true);
 
 		const createResult = await client.callTool({
@@ -691,6 +692,79 @@ describe('opengpt-github-mcp-worker', () => {
 					label: 'Main-ready change',
 				},
 			},
+		});
+		await client.close();
+	});
+
+	it('keeps a single active workspace and sorts workspace_list by active repo first', async () => {
+		const client = await createMcpClient();
+		await client.callTool({
+			name: 'workspace_register',
+			arguments: {
+				repo_key: 'iusung111/OpenGPT',
+				workspace_path: '/home/uieseong/workspace/OpenGPT',
+			},
+		});
+		await client.callTool({
+			name: 'workspace_register',
+			arguments: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+				workspace_path: '/home/uieseong/workspace/opengpt-github-mcp-worker',
+			},
+		});
+
+		await client.callTool({
+			name: 'workspace_activate',
+			arguments: {
+				repo_key: 'iusung111/OpenGPT',
+			},
+		});
+		let listResult = await client.callTool({
+			name: 'workspace_list',
+			arguments: {},
+		});
+		let listText = 'text' in listResult.content[0] ? listResult.content[0].text : '';
+		let listJson = JSON.parse(listText);
+		expect(listJson).toMatchObject({
+			ok: true,
+			data: {
+				active_repo_key: 'iusung111/OpenGPT',
+			},
+		});
+		expect(listJson.data.workspaces[0]).toMatchObject({
+			repo_key: 'iusung111/OpenGPT',
+			is_active: true,
+		});
+		expect(listJson.data.workspaces[1]).toMatchObject({
+			repo_key: 'iusung111/opengpt-github-mcp-worker',
+			is_active: false,
+		});
+
+		await client.callTool({
+			name: 'workspace_activate',
+			arguments: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+			},
+		});
+		listResult = await client.callTool({
+			name: 'workspace_list',
+			arguments: {},
+		});
+		listText = 'text' in listResult.content[0] ? listResult.content[0].text : '';
+		listJson = JSON.parse(listText);
+		expect(listJson).toMatchObject({
+			ok: true,
+			data: {
+				active_repo_key: 'iusung111/opengpt-github-mcp-worker',
+			},
+		});
+		expect(listJson.data.workspaces[0]).toMatchObject({
+			repo_key: 'iusung111/opengpt-github-mcp-worker',
+			is_active: true,
+		});
+		expect(listJson.data.workspaces[1]).toMatchObject({
+			repo_key: 'iusung111/OpenGPT',
+			is_active: false,
 		});
 		await client.close();
 	});

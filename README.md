@@ -42,6 +42,7 @@ Write/action tools:
 - `repo_create_branch`
 - `repo_update_file`
 - `pr_create`
+- `pr_merge`
 - `comment_create`
 - `workflow_dispatch`
 - `job_create`
@@ -133,7 +134,7 @@ Target repo assumptions for phase 1:
 
 - allowlisted repo only
 - direct writes only on `agent/*`
-- no merge/force-push
+- no force-push
 - GitHub Actions workflows allowlisted to `agent-run.yml` and `pr-validate.yml`
 
 Branch cleanup guardrails:
@@ -151,6 +152,7 @@ GitHub App minimum permissions:
 - Pull requests: Read and write
 - Issues: Read and write
 - Actions: Read and write
+- Workflows: Read and write
 - Metadata: Read only
 
 Recommended webhook events:
@@ -182,6 +184,7 @@ Operational safety additions:
 - workspace registration rejects non-absolute or traversal-style paths
 - queue-side validation failures are returned as structured JSON errors instead of uncaught Durable Object exceptions
 - selected write tools now return more specific failure codes such as `workflow_not_allowlisted` and `branch_has_active_job`
+- approved pull requests can be merged directly through the `pr_merge` MCP tool when the repo and PR state allow it
 
 ## Change Request Templates
 
@@ -253,6 +256,7 @@ If the user says `main에 반영`, interpret that as:
 
 - this is a real change request, not a dry run
 - complete validation and create or update the PR needed for merge
+- if merge tooling is available and the PR is ready, attempt the merge
 - if direct merge is unavailable, report the exact remaining merge step instead of pretending `main` was updated directly
 
 ## Chat UX Guidance
@@ -276,6 +280,7 @@ The MCP server now also exposes workspace-registry tools so web ChatGPT can:
 - look up the default GitHub workspace folder for a repo
 - find similar registered workspace folders before creating a new one
 - register a confirmed workspace path for future reuse
+- keep a single active repo context so workspace recency stays unified around the repo currently being worked on
 
 For longer read or investigation phases, web ChatGPT can make progress visible by:
 

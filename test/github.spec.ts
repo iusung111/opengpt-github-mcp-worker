@@ -1,8 +1,9 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildGitHubAppJwt, githubAuthConfigured, githubGet } from '../src/github';
+import { buildGitHubAppJwt, githubAuthConfigured, githubGet, githubPut, resetGitHubAuthCache } from '../src/github';
 
 afterEach(() => {
+	resetGitHubAuthCache();
 	vi.restoreAllMocks();
 });
 
@@ -71,5 +72,43 @@ describe('github auth helpers', () => {
 
 		expect(result).toMatchObject({ ok: true });
 		expect(fetchMock).toHaveBeenCalledTimes(4);
+	});
+
+	it('sends JSON payloads for githubPut requests', async () => {
+		const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						token: 'token-1',
+						expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ merged: true, sha: 'merged-sha' }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' },
+				}),
+			);
+
+		const result = await githubPut(
+			{
+				GITHUB_API_URL: 'https://api.github.test',
+				GITHUB_APP_ID: '123',
+				GITHUB_APP_INSTALLATION_ID: '456',
+				GITHUB_APP_PRIVATE_KEY_PEM: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+			} as Env,
+			'/repos/iusung111/OpenGPT/pulls/6/merge',
+			{ merge_method: 'squash', commit_title: 'Merge PR #6' },
+		);
+
+		expect(result).toMatchObject({ merged: true, sha: 'merged-sha' });
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		const requestInit = fetchMock.mock.calls[1]?.[1];
+		expect(requestInit?.method).toBe('PUT');
+		expect(requestInit?.body).toBe(JSON.stringify({ merge_method: 'squash', commit_title: 'Merge PR #6' }));
 	});
 });

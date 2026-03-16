@@ -23,6 +23,10 @@ interface GitHubRequestOptions {
 
 let cachedInstallationToken: InstallationToken | null = null;
 
+export function resetGitHubAuthCache(): void {
+	cachedInstallationToken = null;
+}
+
 async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort('github_timeout'), GITHUB_FETCH_TIMEOUT_MS);

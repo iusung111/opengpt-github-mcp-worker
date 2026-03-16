@@ -61,6 +61,7 @@ When the user explicitly wants `main` reflection:
 
 - prefer `dry_run=false`
 - complete validation and create or update the PR needed for merge
+- use `pr_merge` when the PR is approved and mergeable
 - do not claim `main` changed unless a merge actually happened
 - if merge tooling is unavailable, say that the change is ready for `main` and name the remaining merge action
 
