@@ -9,6 +9,7 @@ Make GitHub development feel conversational and low-friction without requiring t
 ## Default Chat UX
 
 - When the user asks for development work in a GitHub repo, infer the operational flow instead of asking for a fully structured prompt.
+- When the user first asks what kinds of work are possible or how to phrase a request, call `help` and answer from that result before starting implementation.
 - Treat the GitHub repository itself as the primary workspace. Do not rely on a local folder as the default source of truth.
 - Translate natural chat requests into the MCP flow internally:
   - resolve repo work context first
@@ -49,11 +50,19 @@ If an open PR or active job already matches the request, prefer continuing that 
 ## Request Interpretation Rules
 
 - If the user says things like "이거 수정해줘", "이 기능 추가해줘", or "PR까지 진행해줘", treat that as an implementation request.
+- If the user says things like "main에 반영해줘" or "main 기준으로 마무리해줘", treat that as a real implementation request that should reach merge-ready state.
 - If the user says "검토", "리뷰", or "문제점 봐줘", switch to a review-first flow.
 - If the user does not mention `dry_run`, choose:
   - `dry_run=false` for clearly intended real changes
   - `dry_run=true` for risky or ambiguous tasks
 - Generate a sensible `job_id` automatically when the user does not provide one.
+
+When the user explicitly wants `main` reflection:
+
+- prefer `dry_run=false`
+- complete validation and create or update the PR needed for merge
+- do not claim `main` changed unless a merge actually happened
+- if merge tooling is unavailable, say that the change is ready for `main` and name the remaining merge action
 
 ## Confirmation Policy
 

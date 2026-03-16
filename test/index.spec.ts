@@ -528,6 +528,7 @@ describe('opengpt-github-mcp-worker', () => {
 	it('serves MCP tools and queue actions over /mcp', async () => {
 		const client = await createMcpClient();
 		const tools = await client.listTools();
+		expect(tools.tools.some((tool) => tool.name === 'help')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'audit_list')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_candidates')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_execute')).toBe(true);
@@ -647,6 +648,40 @@ describe('opengpt-github-mcp-worker', () => {
 					workspace_path: '/home/uieseong/workspace/github/OpenGPT',
 				},
 				requires_confirmation: true,
+			},
+		});
+		await client.close();
+	});
+
+	it('returns help guidance and request templates for supported work', async () => {
+		const client = await createMcpClient();
+		const defaultHelpResult = await client.callTool({
+			name: 'help',
+			arguments: {},
+		});
+		const defaultHelpText = 'text' in defaultHelpResult.content[0] ? defaultHelpResult.content[0].text : '';
+		expect(JSON.parse(defaultHelpText)).toMatchObject({
+			ok: true,
+			data: {
+				summary: expect.stringContaining('GitHub repo 작업'),
+				supported_topics: expect.arrayContaining(['코드 수정과 PR 생성', 'main 반영 직전까지 준비']),
+			},
+		});
+
+		const mainHelpResult = await client.callTool({
+			name: 'help',
+			arguments: {
+				query: 'main에 반영하려면 어떻게 말해?',
+			},
+		});
+		const mainHelpText = 'text' in mainHelpResult.content[0] ? mainHelpResult.content[0].text : '';
+		expect(JSON.parse(mainHelpText)).toMatchObject({
+			ok: true,
+			data: {
+				summary: expect.stringContaining('main 반영 요청'),
+				recommended_template: {
+					label: 'Main-ready change',
+				},
 			},
 		});
 		await client.close();

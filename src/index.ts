@@ -499,6 +499,126 @@ function stableStringify(value: unknown): string {
 	return JSON.stringify(value);
 }
 
+function normalizeHelpQuery(query: string | undefined): string {
+	return (query ?? '').trim().toLowerCase();
+}
+
+function buildHelpPayload(query: string | undefined): Record<string, unknown> {
+	const normalized = normalizeHelpQuery(query);
+	const templates = {
+		real_change: {
+			label: 'Real change with PR',
+			prompt: [
+				'iusung111/OpenGPT에서 다음 변경 진행:',
+				'- job_id: change-001',
+				'- 목표: <구체적인 수정 내용>',
+				'- 변경 파일: <path들>',
+				'- dry_run: false',
+				'- 완료 기준: 가능한 범위의 검증 후 PR 생성',
+			].join('\n'),
+		},
+		main_ready: {
+			label: 'Main-ready change',
+			prompt: [
+				'iusung111/OpenGPT에서 다음 변경을 진행하고 main 반영 기준으로 마무리해줘:',
+				'- job_id: main-ready-001',
+				'- 목표: <구체적인 수정 내용>',
+				'- 변경 파일: <path들>',
+				'- dry_run: false',
+				'- 완료 기준: 검증 완료, branch push, PR 생성, 그리고 main 반영에 필요한 마지막 액션 정리까지',
+			].join('\n'),
+		},
+		dry_run: {
+			label: 'Dry run only',
+			prompt: [
+				'iusung111/OpenGPT에서 다음 작업을 dry-run으로 검증해줘:',
+				'- job_id: dryrun-001',
+				'- 목표: <무엇을 바꿀지>',
+				'- 변경 파일: <path들>',
+				'- dry_run: true',
+				'- 완료 기준: workflow success와 queue 상태 전이 확인',
+			].join('\n'),
+		},
+		review: {
+			label: 'Review follow-up',
+			prompt: [
+				'iusung111/OpenGPT에서 job_id <값>의 현재 상태를 확인하고,',
+				'PR / workflow / queue 기준으로 다음 액션을 정리해줘.',
+			].join('\n'),
+		},
+		branch_cleanup: {
+			label: 'Branch cleanup',
+			prompt: 'iusung111/OpenGPT에서 정리 가능한 agent 브랜치를 확인하고, 있으면 cleanup 흐름으로 정리해줘.',
+		},
+	};
+
+	const defaultTopics = [
+		'코드 수정과 PR 생성',
+		'main 반영 직전까지 준비',
+		'dry-run 검증',
+		'리뷰 후속 액션 정리',
+		'agent 브랜치 정리',
+		'진행 상태 확인',
+	];
+
+	if (!normalized) {
+		return {
+			summary: 'GitHub repo 작업, dry-run 검증, PR 준비, branch cleanup, 진행 상태 확인을 도와줄 수 있습니다.',
+			supported_topics: defaultTopics,
+			suggested_request_fields: ['job_id', '목표', '변경 파일', 'dry_run', '완료 기준'],
+			progress_tools: ['repo_work_context', 'job_progress', 'audit_list'],
+			examples: [templates.real_change, templates.main_ready, templates.dry_run, templates.branch_cleanup],
+		};
+	}
+
+	if (normalized.includes('main')) {
+		return {
+			summary: 'main 반영 요청은 실제 변경으로 해석하고, 검증과 PR 준비까지 마무리한 뒤 남은 merge 액션을 알려줍니다.',
+			recommended_template: templates.main_ready,
+			notes: [
+				'dry_run=false로 진행하는 것이 자연스럽습니다.',
+				'merge 자체가 수행되지 않았으면 main이 이미 바뀌었다고 말하지 않습니다.',
+			],
+		};
+	}
+
+	if (normalized.includes('dry') || normalized.includes('검증')) {
+		return {
+			summary: '위험하거나 모호한 작업은 dry-run 검증으로 먼저 확인할 수 있습니다.',
+			recommended_template: templates.dry_run,
+		};
+	}
+
+	if (normalized.includes('리뷰') || normalized.includes('review')) {
+		return {
+			summary: '기존 job, PR, workflow를 기준으로 리뷰 후속 액션을 정리할 수 있습니다.',
+			recommended_template: templates.review,
+		};
+	}
+
+	if (normalized.includes('브랜치') || normalized.includes('cleanup') || normalized.includes('삭제')) {
+		return {
+			summary: '브랜치 삭제는 workflow 편집이 아니라 branch cleanup 흐름으로 처리합니다.',
+			recommended_template: templates.branch_cleanup,
+			recommended_tools: ['branch_cleanup_candidates', 'branch_cleanup_execute'],
+		};
+	}
+
+	if (normalized.includes('진행') || normalized.includes('상태') || normalized.includes('progress')) {
+		return {
+			summary: '작업 도중 진행 상태는 짧은 메모와 progress 스냅샷으로 확인할 수 있습니다.',
+			recommended_tools: ['job_append_note', 'job_progress', 'audit_list'],
+		};
+	}
+
+	return {
+		summary: '원하는 작업 내용을 repo, 목표, 변경 파일, dry_run 여부, 완료 기준과 함께 말하면 가장 안정적으로 진행할 수 있습니다.',
+		supported_topics: defaultTopics,
+		recommended_template: templates.real_change,
+		related_templates: [templates.main_ready, templates.dry_run, templates.review],
+	};
+}
+
 export async function buildDispatchFingerprint(
 	owner: string,
 	repo: string,
@@ -1525,6 +1645,19 @@ function buildMcpServer(env: AppEnv): McpServer {
 		openWorldHint: false,
 		destructiveHint: false,
 	};
+
+	server.registerTool(
+		'help',
+		{
+			description:
+				'Explain what kinds of GitHub work this MCP server can do and return example request templates. Use this when the user asks what work is possible or how to phrase a request.',
+			inputSchema: {
+				query: z.string().optional(),
+			},
+			annotations: readAnnotations,
+		},
+		async ({ query }) => toolText(ok(buildHelpPayload(query), readAnnotations)),
+	);
 
 	server.registerTool(
 		'repo_work_context',

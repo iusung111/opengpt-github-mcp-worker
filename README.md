@@ -14,6 +14,7 @@ Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Dev
 
 Read tools:
 
+- `help`
 - `repo_work_context`
 - `branch_cleanup_candidates`
 - `workspace_resolve`
@@ -186,6 +187,8 @@ Operational safety additions:
 
 Use these directly in ChatGPT after selecting the MCP connector.
 
+If the user first asks what kinds of work are supported or how to phrase a request, call `help` before starting implementation.
+
 Small real change with PR:
 
 ```text
@@ -206,6 +209,17 @@ iusung111/OpenGPT에서 다음 변경 진행:
 - 변경 파일: <예: app/main.py>
 - dry_run: false
 - 완료 기준: 가능한 범위의 검증 후 PR 생성
+```
+
+Real change intended for `main`:
+
+```text
+iusung111/OpenGPT에서 다음 변경을 진행하고 main 반영 기준으로 마무리해줘:
+- job_id: main-ready-001
+- 목표: <구체적인 수정 내용>
+- 변경 파일: <path들>
+- dry_run: false
+- 완료 기준: 검증 완료, branch push, PR 생성, 그리고 main 반영에 필요한 마지막 액션 정리까지
 ```
 
 Dry-run only:
@@ -233,6 +247,12 @@ Recommended request shape:
 - `변경 파일`: one or more expected target paths
 - `dry_run`: `true` for validation only, `false` for branch and PR creation
 - `완료 기준`: what counts as done
+
+If the user says `main에 반영`, interpret that as:
+
+- this is a real change request, not a dry run
+- complete validation and create or update the PR needed for merge
+- if direct merge is unavailable, report the exact remaining merge step instead of pretending `main` was updated directly
 
 ## Chat UX Guidance
 
