@@ -664,7 +664,14 @@ describe('opengpt-github-mcp-worker', () => {
 			ok: true,
 			data: {
 				summary: expect.stringContaining('GitHub repo 작업'),
-				supported_topics: expect.arrayContaining(['코드 수정과 PR 생성', 'main 반영 직전까지 준비']),
+				recommended_workflow: 'real_change',
+				how_to_ask: {
+					required_minimum: ['repo', '목표'],
+				},
+				workflows: expect.arrayContaining([
+					expect.objectContaining({ id: 'real_change', label: '코드 수정과 PR 생성' }),
+					expect.objectContaining({ id: 'main_ready', label: 'main 반영 직전까지 준비' }),
+				]),
 			},
 		});
 
@@ -679,6 +686,7 @@ describe('opengpt-github-mcp-worker', () => {
 			ok: true,
 			data: {
 				summary: expect.stringContaining('main 반영 요청'),
+				recommended_workflow: 'main_ready',
 				recommended_template: {
 					label: 'Main-ready change',
 				},

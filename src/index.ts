@@ -551,32 +551,91 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 			prompt: 'iusung111/OpenGPT에서 정리 가능한 agent 브랜치를 확인하고, 있으면 cleanup 흐름으로 정리해줘.',
 		},
 	};
-
-	const defaultTopics = [
-		'코드 수정과 PR 생성',
-		'main 반영 직전까지 준비',
-		'dry-run 검증',
-		'리뷰 후속 액션 정리',
-		'agent 브랜치 정리',
-		'진행 상태 확인',
+	const workflows = [
+		{
+			id: 'real_change',
+			label: '코드 수정과 PR 생성',
+			when_to_use: '실제 파일 변경과 PR 생성까지 원할 때',
+			request_pattern: 'repo + 목표 + 변경 파일 + dry_run=false + 완료 기준',
+			recommended_template: templates.real_change,
+		},
+		{
+			id: 'main_ready',
+			label: 'main 반영 직전까지 준비',
+			when_to_use: 'main 기준으로 마무리하고 싶지만 merge 자체는 별도일 수 있을 때',
+			request_pattern: 'repo + 목표 + 변경 파일 + dry_run=false + main 반영 기준 완료 기준',
+			recommended_template: templates.main_ready,
+		},
+		{
+			id: 'dry_run',
+			label: 'dry-run 검증',
+			when_to_use: '위험하거나 모호한 변경을 먼저 검증하고 싶을 때',
+			request_pattern: 'repo + 목표 + 변경 파일 + dry_run=true',
+			recommended_template: templates.dry_run,
+		},
+		{
+			id: 'review_followup',
+			label: '리뷰 후속 액션 정리',
+			when_to_use: '이미 있는 job, PR, workflow 상태를 기준으로 다음 액션이 필요할 때',
+			request_pattern: 'job_id 또는 repo 문맥 + 상태 확인 요청',
+			recommended_template: templates.review,
+		},
+		{
+			id: 'branch_cleanup',
+			label: 'agent 브랜치 정리',
+			when_to_use: '열린 PR과 active job이 없는 agent 브랜치를 정리할 때',
+			request_pattern: 'repo + 브랜치 정리 요청',
+			recommended_template: templates.branch_cleanup,
+		},
 	];
+
+	const commonFields = [
+		{ field: 'job_id', required: false, guidance: '없으면 자동 생성 가능하지만, 이어서 추적하려면 넣는 편이 좋습니다.' },
+		{ field: '목표', required: true, guidance: '바꾸고 싶은 동작이나 결과를 짧게 적습니다.' },
+		{ field: '변경 파일', required: false, guidance: '예상 파일을 적으면 범위를 좁히기 쉽습니다.' },
+		{ field: 'dry_run', required: false, guidance: 'true면 검증만, false면 실제 변경과 PR 준비 흐름입니다.' },
+		{ field: '완료 기준', required: false, guidance: 'PR 생성, workflow 성공, main 반영 직전까지 등 종료 조건을 적습니다.' },
+	];
+
+	const basePayload = {
+		summary: 'GitHub repo 작업, dry-run 검증, PR 준비, branch cleanup, 진행 상태 확인을 도와줄 수 있습니다.',
+		intent: normalized || 'general',
+		how_to_ask: {
+			required_minimum: ['repo', '목표'],
+			recommended_fields: commonFields,
+			notes: [
+				'실제 변경이면 dry_run=false가 자연스럽습니다.',
+				'main 반영 요청은 merge-ready 상태까지 준비하는 의미로 해석합니다.',
+			],
+		},
+		progress_tracking: {
+			read_tools: ['repo_work_context', 'job_progress', 'audit_list'],
+			write_tools: ['job_append_note'],
+			pattern: '긴 읽기나 조사 중에는 짧은 메모를 남기고 progress 스냅샷을 다시 읽습니다.',
+		},
+		workflows,
+		next_actions: [
+			'원하는 repo와 목표를 말해주면 바로 적절한 workflow로 이어갈 수 있습니다.',
+			'모호하면 먼저 dry-run으로 검증해볼 수 있습니다.',
+		],
+	};
 
 	if (!normalized) {
 		return {
-			summary: 'GitHub repo 작업, dry-run 검증, PR 준비, branch cleanup, 진행 상태 확인을 도와줄 수 있습니다.',
-			supported_topics: defaultTopics,
-			suggested_request_fields: ['job_id', '목표', '변경 파일', 'dry_run', '완료 기준'],
-			progress_tools: ['repo_work_context', 'job_progress', 'audit_list'],
+			...basePayload,
+			recommended_workflow: 'real_change',
 			examples: [templates.real_change, templates.main_ready, templates.dry_run, templates.branch_cleanup],
 		};
 	}
 
 	if (normalized.includes('main')) {
 		return {
+			...basePayload,
 			summary: 'main 반영 요청은 실제 변경으로 해석하고, 검증과 PR 준비까지 마무리한 뒤 남은 merge 액션을 알려줍니다.',
+			recommended_workflow: 'main_ready',
 			recommended_template: templates.main_ready,
-			notes: [
-				'dry_run=false로 진행하는 것이 자연스럽습니다.',
+			next_actions: [
+				'dry_run=false로 요청하면 가장 자연스럽습니다.',
 				'merge 자체가 수행되지 않았으면 main이 이미 바뀌었다고 말하지 않습니다.',
 			],
 		};
@@ -584,21 +643,27 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 
 	if (normalized.includes('dry') || normalized.includes('검증')) {
 		return {
+			...basePayload,
 			summary: '위험하거나 모호한 작업은 dry-run 검증으로 먼저 확인할 수 있습니다.',
+			recommended_workflow: 'dry_run',
 			recommended_template: templates.dry_run,
 		};
 	}
 
 	if (normalized.includes('리뷰') || normalized.includes('review')) {
 		return {
+			...basePayload,
 			summary: '기존 job, PR, workflow를 기준으로 리뷰 후속 액션을 정리할 수 있습니다.',
+			recommended_workflow: 'review_followup',
 			recommended_template: templates.review,
 		};
 	}
 
 	if (normalized.includes('브랜치') || normalized.includes('cleanup') || normalized.includes('삭제')) {
 		return {
+			...basePayload,
 			summary: '브랜치 삭제는 workflow 편집이 아니라 branch cleanup 흐름으로 처리합니다.',
+			recommended_workflow: 'branch_cleanup',
 			recommended_template: templates.branch_cleanup,
 			recommended_tools: ['branch_cleanup_candidates', 'branch_cleanup_execute'],
 		};
@@ -606,16 +671,23 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 
 	if (normalized.includes('진행') || normalized.includes('상태') || normalized.includes('progress')) {
 		return {
+			...basePayload,
 			summary: '작업 도중 진행 상태는 짧은 메모와 progress 스냅샷으로 확인할 수 있습니다.',
 			recommended_tools: ['job_append_note', 'job_progress', 'audit_list'],
+			recommended_workflow: 'progress_tracking',
+			next_actions: [
+				'이미 job_id가 있으면 job_progress로 바로 현재 상태를 읽을 수 있습니다.',
+				'중간 메모가 필요하면 job_append_note를 함께 사용합니다.',
+			],
 		};
 	}
 
 	return {
+		...basePayload,
 		summary: '원하는 작업 내용을 repo, 목표, 변경 파일, dry_run 여부, 완료 기준과 함께 말하면 가장 안정적으로 진행할 수 있습니다.',
-		supported_topics: defaultTopics,
+		recommended_workflow: 'real_change',
 		recommended_template: templates.real_change,
-		related_templates: [templates.main_ready, templates.dry_run, templates.review],
+		related_workflows: ['main_ready', 'dry_run', 'review_followup'],
 	};
 }
 

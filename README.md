@@ -188,6 +188,7 @@ Operational safety additions:
 Use these directly in ChatGPT after selecting the MCP connector.
 
 If the user first asks what kinds of work are supported or how to phrase a request, call `help` before starting implementation.
+The `help` response is structured around workflows, recommended request fields, examples, and next actions so web GPT can guide the user without a long free-form explanation.
 
 Small real change with PR:
 
