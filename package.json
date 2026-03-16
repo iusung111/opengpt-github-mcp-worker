@@ -1,0 +1,26 @@
+{
+	"name": "opengpt-github-mcp-worker",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"check": "npm run cf-typegen && npm run typecheck && npm test -- --run",
+		"typecheck": "tsc --noEmit",
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"test": "vitest",
+		"cf-typegen": "wrangler types"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.12.4",
+		"@types/node": "^25.5.0",
+		"typescript": "^5.5.2",
+		"vitest": "~3.2.0",
+		"wrangler": "^4.73.0"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.27.1",
+		"agents": "^0.7.6",
+		"zod": "^4.3.6"
+	}
+}
