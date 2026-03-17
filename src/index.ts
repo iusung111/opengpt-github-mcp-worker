@@ -845,8 +845,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async listAuditRecords(eventType?: string, jobId?: string, limit = 20): Promise<AuditRecord[]> {
-		const audits: AuditRecord[] = [];
+		const safeLimit = Math.max(1, Math.min(limit, 100));
+		const filtered: AuditRecord[] = [];
 		const records = await this.ctx.storage.list<AuditRecord>({ prefix: 'audit:' });
+		
+		// Optimize: Filter and limit early, return in reverse chronological order
 		for (const [, record] of records) {
 			if (eventType && record.event_type !== eventType) {
 				continue;
@@ -854,9 +857,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			if (jobId && record.payload.job_id !== jobId) {
 				continue;
 			}
-			audits.push(record);
+			filtered.push(record);
 		}
-		return audits.reverse().slice(0, Math.max(1, Math.min(limit, 100)));
+		
+		// Return most recent items only (avoid full reverse on large sets)
+		return filtered.slice(Math.max(0, filtered.length - safeLimit)).reverse();
 	}
 
 	private buildJobProgressSnapshot(job: JobRecord, recentAudits: AuditRecord[]): JobProgressSnapshot {
@@ -1200,28 +1205,35 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			workspaces.push(value);
 		}
 		const activeRepoKey = await this.getActiveWorkspaceRepoKey();
-		return workspaces
+		
+		// Optimize: Pre-compute timestamps and build result in one pass
+		const workspacesWithMeta = workspaces.map((workspace) => ({
+			workspace,
+			isActive: workspace.repo_key === activeRepoKey,
+			usedMs: parseIsoMs(workspace.last_used_at) ?? 0,
+			updatedMs: parseIsoMs(workspace.updated_at) ?? 0,
+		}));
+		
+		return workspacesWithMeta
 			.sort((left, right) => {
-				const leftActive = left.repo_key === activeRepoKey ? 1 : 0;
-				const rightActive = right.repo_key === activeRepoKey ? 1 : 0;
-				if (leftActive !== rightActive) {
-					return rightActive - leftActive;
+				// Active workspace first
+				if (left.isActive !== right.isActive) {
+					return right.isActive ? 1 : -1;
 				}
-				const leftUsed = parseIsoMs(left.last_used_at) ?? 0;
-				const rightUsed = parseIsoMs(right.last_used_at) ?? 0;
-				if (leftUsed !== rightUsed) {
-					return rightUsed - leftUsed;
+				// Then by last used time
+				if (left.usedMs !== right.usedMs) {
+					return right.usedMs - left.usedMs;
 				}
-				const leftUpdated = parseIsoMs(left.updated_at) ?? 0;
-				const rightUpdated = parseIsoMs(right.updated_at) ?? 0;
-				if (leftUpdated !== rightUpdated) {
-					return rightUpdated - leftUpdated;
+				// Then by last updated time
+				if (left.updatedMs !== right.updatedMs) {
+					return right.updatedMs - left.updatedMs;
 				}
-				return left.repo_key.localeCompare(right.repo_key);
+				// Finally by repo key
+				return left.workspace.repo_key.localeCompare(right.workspace.repo_key);
 			})
-			.map((workspace) => ({
-				...workspace,
-				is_active: workspace.repo_key === activeRepoKey,
+			.map((item) => ({
+				...item.workspace,
+				is_active: item.isActive,
 			}));
 	}
 

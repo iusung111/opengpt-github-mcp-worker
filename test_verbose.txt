@@ -1,0 +1,298 @@
+
+> opengpt-github-mcp-worker@0.0.0 test
+> vitest --run --reporter=verbose
+
+
+ RUN  v3.2.4 /home/uieseong/workspace/opengpt-github-mcp-worker
+
+[vpw:debug] Adding `enable_nodejs_tty_module` compatibility flag during tests as this feature is needed to support the Vitest runner.
+[vpw:debug] Adding `enable_nodejs_fs_module` compatibility flag during tests as this feature is needed to support the Vitest runner.
+[vpw:debug] Adding `enable_nodejs_http_modules` compatibility flag during tests as this feature is needed to support the Vitest runner.
+[vpw:debug] Adding `enable_nodejs_perf_hooks_module` compatibility flag during tests as this feature is needed to support the Vitest runner.
+[vpw:info] Starting single runtime for vitest.config.mts...
+ ✓ test/github.spec.ts > github auth helpers > reports auth configured only when required env vars exist 5ms
+ ✓ test/github.spec.ts > github auth helpers > builds jwt-like token with three segments from PKCS8 pem 27ms
+ ✓ test/github.spec.ts > github auth helpers > builds jwt-like token with three segments from RSA PKCS1 pem 33ms
+ ✓ test/github.spec.ts > github auth helpers > retries once after auth failure and refreshes installation token 87ms
+ ✓ test/github.spec.ts > github auth helpers > sends JSON payloads for githubPut requests 67ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > creates and fetches queue jobs
+{"ts":"2026-03-17T13:12:28.609Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":67}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > creates and fetches queue jobs
+{"ts":"2026-03-17T13:12:28.619Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":2}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > updates queue state from webhook payload
+{"ts":"2026-03-17T13:12:28.632Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":8}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > returns healthz payload 10ms
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > creates and fetches queue jobs 83ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > updates queue state from webhook payload
+{"ts":"2026-03-17T13:12:28.638Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":null,"action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > updates queue state from webhook payload
+{"ts":"2026-03-17T13:12:28.648Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.735Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.747Z","event":"queue_fetch","action":"job_create","status":200,"duration_ms":11}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > updates queue state from webhook payload 29ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.791Z","event":"queue_fetch","action":"job_update_status","status":200,"duration_ms":15}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.814Z","event":"queue_fetch","action":"job_submit_review","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.896Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.909Z","event":"queue_fetch","action":"job_create","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.930Z","event":"queue_fetch","action":"job_update_status","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.952Z","event":"queue_fetch","action":"job_submit_review","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit
+{"ts":"2026-03-17T13:12:28.969Z","event":"queue_fetch","action":"job_submit_review","status":200,"duration_ms":3}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > treats blocked reviews as terminal and respects review rework limit 321ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > reconciles stale working jobs to rework when no workflow run is linked
+{"ts":"2026-03-17T13:12:28.984Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":9}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > reconciles stale working jobs to rework when no workflow run is linked
+{"ts":"2026-03-17T13:12:29.032Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":8}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > marks stale review jobs for visibility without changing reviewer ownership
+{"ts":"2026-03-17T13:12:29.052Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":16}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > reconciles stale working jobs to rework when no workflow run is linked 62ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > marks stale review jobs for visibility without changing reviewer ownership
+{"ts":"2026-03-17T13:12:29.104Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":12}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > does not append duplicate stale review notes on repeated reads
+{"ts":"2026-03-17T13:12:29.120Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > does not append duplicate stale review notes on repeated reads
+{"ts":"2026-03-17T13:12:29.171Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":12}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > does not append duplicate stale review notes on repeated reads
+{"ts":"2026-03-17T13:12:29.177Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":2}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > marks stale review jobs for visibility without changing reviewer ownership 72ms
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > does not append duplicate stale review notes on repeated reads 72ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > preserves agent work branch when workflow_run is linked by run id from main ref
+{"ts":"2026-03-17T13:12:29.193Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":9}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > preserves agent work branch when workflow_run is linked by run id from main ref
+{"ts":"2026-03-17T13:12:29.200Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":null,"action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > preserves agent work branch when workflow_run is linked by run id from main ref
+{"ts":"2026-03-17T13:12:29.214Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":14}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > preserves agent work branch when workflow_run is linked by run id from main ref
+{"ts":"2026-03-17T13:12:29.221Z","event":"pull_request","repo":"iusung111/OpenGPT","delivery_id":null,"action":"opened"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > preserves agent work branch when workflow_run is linked by run id from main ref
+{"ts":"2026-03-17T13:12:29.237Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":15}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > preserves agent work branch when workflow_run is linked by run id from main ref
+{"ts":"2026-03-17T13:12:29.246Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":3}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated webhook deliveries by GitHub delivery id
+{"ts":"2026-03-17T13:12:29.268Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated webhook deliveries by GitHub delivery id
+{"ts":"2026-03-17T13:12:29.273Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":"delivery-515","action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated webhook deliveries by GitHub delivery id
+{"ts":"2026-03-17T13:12:29.283Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":10}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > preserves agent work branch when workflow_run is linked by run id from main ref 70ms
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > rejects webhook for unallowlisted repo 3ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated webhook deliveries by GitHub delivery id
+{"ts":"2026-03-17T13:12:29.288Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":"delivery-515","action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated webhook deliveries by GitHub delivery id
+{"ts":"2026-03-17T13:12:29.292Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":4}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.298Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":"delivery-a","action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.322Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":24}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.327Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":"delivery-b","action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.340Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":13}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.343Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":"delivery-c","action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.357Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":14}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.361Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":"delivery-d","action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.372Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.377Z","event":"workflow_run","repo":"iusung111/OpenGPT","delivery_id":"delivery-a","action":"completed"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded
+{"ts":"2026-03-17T13:12:29.387Z","event":"queue_fetch","action":"github_event","status":200,"duration_ms":10}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated webhook deliveries by GitHub delivery id 41ms
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > evicts old delivery dedupe records when retention limit is exceeded 96ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.485Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.497Z","event":"queue_fetch","action":"job_create","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.518Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":4}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.546Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.566Z","event":"queue_fetch","action":"job_progress","status":200,"duration_ms":5}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.585Z","event":"queue_fetch","action":"audit_list","status":200,"duration_ms":2}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.624Z","event":"queue_fetch","action":"workspace_register","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.635Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.654Z","event":"queue_fetch","action":"workspace_get","status":200,"duration_ms":3}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp
+{"ts":"2026-03-17T13:12:29.659Z","event":"queue_fetch","action":"workspace_find_similar","status":200,"duration_ms":4}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > serves MCP tools and queue actions over /mcp 270ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.826Z","event":"queue_fetch","action":"workspace_register","status":200,"duration_ms":9}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.840Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":13}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.865Z","event":"queue_fetch","action":"workspace_register","status":200,"duration_ms":13}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.876Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.898Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.932Z","event":"queue_fetch","action":"workspace_list","status":200,"duration_ms":5}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.956Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":12}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first
+{"ts":"2026-03-17T13:12:29.969Z","event":"queue_fetch","action":"workspace_list","status":200,"duration_ms":3}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > returns help guidance and request templates for supported work 83ms
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > keeps a single active workspace and sorts workspace_list by active repo first 228ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns a concise job progress snapshot with recent notes and audits
+{"ts":"2026-03-17T13:12:30.016Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns a concise job progress snapshot with recent notes and audits
+{"ts":"2026-03-17T13:12:30.028Z","event":"queue_fetch","action":"job_create","status":200,"duration_ms":12}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns a concise job progress snapshot with recent notes and audits
+{"ts":"2026-03-17T13:12:30.052Z","event":"queue_fetch","action":"job_update_status","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns a concise job progress snapshot with recent notes and audits
+{"ts":"2026-03-17T13:12:30.072Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns a concise job progress snapshot with recent notes and audits
+{"ts":"2026-03-17T13:12:30.097Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":12}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns a concise job progress snapshot with recent notes and audits
+{"ts":"2026-03-17T13:12:30.121Z","event":"queue_fetch","action":"job_progress","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.183Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":14}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.199Z","event":"queue_fetch","action":"job_create","status":200,"duration_ms":15}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.233Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":17}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > returns a concise job progress snapshot with recent notes and audits 151ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.262Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.291Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":9}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.313Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.338Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":11}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.359Z","event":"queue_fetch","action":"job_append_note","status":200,"duration_ms":9}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit
+{"ts":"2026-03-17T13:12:30.375Z","event":"queue_fetch","action":"audit_list","status":200,"duration_ms":3}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > retains only the most recent audit records per configured limit 255ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns specific failure code when workflow dispatch is not allowlisted
+{"ts":"2026-03-17T13:12:30.444Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":10}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > returns specific failure code when workflow dispatch is not allowlisted
+{"ts":"2026-03-17T13:12:30.446Z","event":"workflow_dispatch_error","owner":"iusung111","repo":"OpenGPT","workflow_id":"not-allowed.yml","ref":"main","duration_ms":12,"error":"workflow not allowlisted: not-allowed.yml"}
+{"ts":"2026-03-17T13:12:30.446Z","event":"workflow_dispatch_complete","owner":"iusung111","repo":"OpenGPT","workflow_id":"not-allowed.yml","ref":"main","duration_ms":12}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > returns specific failure code when workflow dispatch is not allowlisted 70ms
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated workflow dispatch requests for the same working job
+{"ts":"2026-03-17T13:12:30.499Z","event":"queue_fetch","action":"job_upsert","status":200,"duration_ms":9}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated workflow dispatch requests for the same working job
+{"ts":"2026-03-17T13:12:30.524Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":13}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated workflow dispatch requests for the same working job
+{"ts":"2026-03-17T13:12:30.527Z","event":"queue_fetch","action":"job_get","status":200,"duration_ms":2}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated workflow dispatch requests for the same working job
+{"ts":"2026-03-17T13:12:30.529Z","event":"workflow_dispatch_deduplicated","owner":"iusung111","repo":"OpenGPT","workflow_id":"agent-run.yml","ref":"main","job_id":"job-dispatch-dedupe","auto_improve_cycle":0}
+{"ts":"2026-03-17T13:12:30.529Z","event":"workflow_dispatch_complete","owner":"iusung111","repo":"OpenGPT","workflow_id":"agent-run.yml","ref":"main","duration_ms":18}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > rejects unsafe workspace registration paths
+{"ts":"2026-03-17T13:12:30.577Z","event":"queue_action_failed","path":"/queue","error":"unsafe workspace path: ../unsafe"}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > rejects unsafe workspace registration paths
+{"ts":"2026-03-17T13:12:30.578Z","event":"queue_fetch","action":"workspace_register","status":400,"duration_ms":3}
+
+stdout | test/index.spec.ts > opengpt-github-mcp-worker > rejects unsafe workspace registration paths
+{"ts":"2026-03-17T13:12:30.590Z","event":"queue_fetch","action":"workspace_activate","status":200,"duration_ms":10}
+
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > deduplicates repeated workflow dispatch requests for the same working job 83ms
+ ✓ test/index.spec.ts > opengpt-github-mcp-worker > rejects unsafe workspace registration paths 60ms
+
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+   Start at  22:12:24
+   Duration  5.75s (transform 306ms, setup 0ms, collect 1.33s, tests 2.29s, environment 1ms, prepare 703ms)
+
+[vpw:debug] Shutting down runtimes...
+[vpw:debug] Disposing remote proxy sessions...
