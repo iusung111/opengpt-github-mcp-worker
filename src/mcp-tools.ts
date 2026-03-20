@@ -1,16 +1,16 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { seal } from 'tweetsodium';
-import * as z from 'zod/v4';
-import { AppEnv, DispatchRequestRecord } from './types';
+import { AppEnv } from './types';
 import { cloudflarePut } from './cloudflare';
 import { registerCollabTools } from './mcp-collab-tools';
 import { registerOverviewTools } from './mcp-overview-tools';
+import { registerQueueTools } from './mcp-queue-tools';
 import { registerRepoReadTools } from './mcp-repo-read-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
+import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWriteTools } from './mcp-write-tools';
 import {
 	activateRepoWorkspace,
-	buildDispatchFingerprint,
 	decodeBase64Text,
 	diagnosticLog,
 	encodeBase64Text,
@@ -20,7 +20,6 @@ import {
 	ensureNotDefaultBranch,
 	ensureRepoAllowed,
 	ensureSafePath,
-	ensureWorkflowAllowed,
 	errorCodeFor,
 	fail,
 	getAllowedWorkflows,
@@ -36,15 +35,11 @@ import {
 	getSelfRepoKey,
 	githubDelete,
 	githubGet,
-	githubPost,
 	githubPut,
-	isOlderThan,
-	nowIso,
 	ok,
 	queueJson,
 	selfRequiresMirrorForLive,
 	toolText,
-	validateWorkflowInputs,
 } from './utils';
 
 function queueActionResult(
@@ -429,326 +424,8 @@ export function buildMcpServer(env: AppEnv): McpServer {
 	registerCollabTools(server, env, readAnnotations, writeAnnotations);
 	registerWorkflowReadTools(server, env, readAnnotations);
 	registerWriteTools(server, env, writeAnnotations);
-
-	server.registerTool(
-		'workflow_dispatch',
-		{
-			description: 'Dispatch an allowlisted workflow in an allowlisted repository.',
-			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
-				workflow_id: z.string(),
-				ref: z.string(),
-				inputs: z.record(z.string(), z.unknown()).default({}),
-			},
-			annotations: writeAnnotations,
-		},
-		async ({ owner, repo, workflow_id, ref, inputs }) => {
-			const startedAt = Date.now();
-			try {
-				const repoKey = `${owner}/${repo}`;
-				ensureRepoAllowed(env, repoKey);
-				await activateRepoWorkspace(env, repoKey);
-				if (ref !== getDefaultBaseBranch(env)) {
-					ensureBranchAllowed(env, ref);
-				}
-				ensureWorkflowAllowed(env, workflow_id);
-				validateWorkflowInputs(inputs);
-				const jobId = typeof inputs.job_id === 'string' ? inputs.job_id : undefined;
-				let existingJob:
-					| {
-							work_branch?: string;
-							status?: string;
-							next_actor?: string;
-							auto_improve_cycle?: number;
-							worker_manifest?: Record<string, unknown>;
-					  }
-					| null = null;
-				if (jobId) {
-					const existingJobResult = await queueJson(env, {
-						action: 'job_get',
-						job_id: jobId,
-					});
-					existingJob = ((existingJobResult.data?.job ?? null) as
-						| {
-								work_branch?: string;
-								status?: string;
-								next_actor?: string;
-								auto_improve_cycle?: number;
-								worker_manifest?: Record<string, unknown>;
-						  }
-						| null);
-				}
-				const autoImproveCycle =
-					typeof existingJob?.auto_improve_cycle === 'number' ? existingJob.auto_improve_cycle : 0;
-				const fingerprint = await buildDispatchFingerprint(owner, repo, workflow_id, ref, inputs, autoImproveCycle);
-				const existingDispatch = (existingJob?.worker_manifest?.dispatch_request ?? null) as
-					| Partial<DispatchRequestRecord>
-					| null;
-				const workflowState = (existingJob?.worker_manifest?.last_workflow_run ?? null) as
-					| {
-							status?: string;
-					  }
-					| null;
-				if (
-					jobId &&
-					existingJob?.status === 'working' &&
-					existingJob?.next_actor === 'system' &&
-					existingDispatch?.fingerprint === fingerprint &&
-					workflowState?.status !== 'completed' &&
-					!isOlderThan(existingDispatch?.dispatched_at || nowIso(), getDispatchDedupeWindowMs(env))
-				) {
-					diagnosticLog('workflow_dispatch_deduplicated', {
-						owner,
-						repo,
-						workflow_id,
-						ref,
-						job_id: jobId,
-						auto_improve_cycle: autoImproveCycle,
-					});
-					return toolText(ok({ workflow_id, ref, inputs, deduplicated: true }, writeAnnotations));
-				}
-				const dispatchedAtIso = nowIso();
-				await githubPost(env, `/repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches`, {
-					ref,
-					inputs,
-				});
-				if (jobId) {
-					const existingWorkBranch =
-						typeof existingJob?.work_branch === 'string' ? existingJob.work_branch : undefined;
-					await queueJson(env, {
-						action: 'job_upsert',
-						job: {
-							job_id: jobId,
-							status: 'working',
-							next_actor: 'system',
-							worker_manifest: {
-								...(existingJob?.worker_manifest ?? {}),
-								dispatch_request: {
-									owner,
-									repo,
-									workflow_id,
-									ref,
-									inputs,
-									fingerprint,
-									dispatched_at: dispatchedAtIso,
-								},
-							},
-							// If we are dispatching on a branch that matches the job's work branch, preserve it.
-							// Otherwise if we are dispatching on main, we might not be setting a work branch here.
-							work_branch: existingWorkBranch,
-						},
-					});
-				}
-				return toolText(ok({ workflow_id, ref, inputs, dispatched_at: dispatchedAtIso }, writeAnnotations));
-			} catch (error) {
-				diagnosticLog('workflow_dispatch_error', {
-					owner,
-					repo,
-					duration_ms: Date.now() - startedAt,
-					error: error instanceof Error ? error.message : String(error),
-				});
-				return toolText(fail(errorCodeFor(error, 'workflow_dispatch_failed'), error, writeAnnotations));
-			} finally {
-				diagnosticLog('workflow_dispatch_complete', {
-					owner,
-					repo,
-					duration_ms: Date.now() - startedAt,
-				});
-			}
-		},
-	);
-
-	server.registerTool(
-		'job_create',
-		{
-			description: 'Create a persistent queue job for worker or reviewer loops.',
-			inputSchema: {
-				job_id: z.string(),
-				repo: z.string(),
-				base_branch: z.string().default(getDefaultBaseBranch(env)),
-				work_branch: z.string().optional(),
-				operation_type: z.string().optional(),
-				target_paths: z.array(z.string()).default([]),
-				next_actor: z.enum(['worker', 'reviewer', 'system']).default('worker'),
-				auto_improve_enabled: z.boolean().default(false),
-				auto_improve_max_cycles: z.number().int().min(0).default(getDefaultAutoImproveMaxCycles(env)),
-			},
-			annotations: writeAnnotations,
-		},
-		async (input) => {
-			try {
-				ensureRepoAllowed(env, input.repo);
-				await activateRepoWorkspace(env, input.repo);
-				if (input.work_branch) {
-					ensureBranchAllowed(env, input.work_branch);
-				}
-				const result = await queueJson(env, {
-					action: 'job_create',
-					job: {
-						...input,
-						status: 'queued',
-						next_actor: input.next_actor,
-						auto_improve_cycle: 0,
-						worker_manifest: {},
-						review_findings: [],
-						notes: [],
-					},
-				});
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'job_create_failed'), error, writeAnnotations));
-			}
-		},
-	);
-
-	server.registerTool(
-		'job_get',
-		{
-			description: 'Get a queue job by job_id.',
-			inputSchema: {
-				job_id: z.string(),
-			},
-			annotations: readAnnotations,
-		},
-		async ({ job_id }) => {
-			try {
-				const result = await queueJson(env, { action: 'job_get', job_id });
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'job_get_failed'), error, readAnnotations));
-			}
-		},
-	);
-
-	server.registerTool(
-		'job_progress',
-		{
-			description:
-				'Get a concise progress snapshot for a queue job, including current status, latest note, and recent audit events. Use this during long read or investigation phases to make progress visible.',
-			inputSchema: {
-				job_id: z.string(),
-			},
-			annotations: readAnnotations,
-		},
-		async ({ job_id }) => {
-			try {
-				const result = await queueJson(env, { action: 'job_progress', job_id });
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'job_progress_failed'), error, readAnnotations));
-			}
-		},
-	);
-
-	server.registerTool(
-		'jobs_list',
-		{
-			description: 'List queue jobs filtered by status or next actor.',
-			inputSchema: {
-				status: z.enum(['queued', 'working', 'review_pending', 'rework_pending', 'done', 'failed']).optional(),
-				next_actor: z.enum(['worker', 'reviewer', 'system']).optional(),
-			},
-			annotations: readAnnotations,
-		},
-		async ({ status, next_actor }) => {
-			try {
-				const result = await queueJson(env, { action: 'jobs_list', status, next_actor });
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'jobs_list_failed'), error, readAnnotations));
-			}
-		},
-	);
-
-	server.registerTool(
-		'audit_list',
-		{
-			description: 'List recent audit events for a specific job or global events.',
-			inputSchema: {
-				job_id: z.string().optional(),
-				limit: z.number().int().positive().max(50).default(20),
-			},
-			annotations: readAnnotations,
-		},
-		async ({ job_id, limit }) => {
-			try {
-				const result = await queueJson(env, { action: 'audit_list', job_id, limit });
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'audit_list_failed'), error, readAnnotations));
-			}
-		},
-	);
-
-	server.registerTool(
-		'job_update_status',
-		{
-			description: 'Manually update the status and next actor of a job.',
-			inputSchema: {
-				job_id: z.string(),
-				status: z.enum(['queued', 'working', 'review_pending', 'rework_pending', 'done', 'failed']),
-				next_actor: z.enum(['worker', 'reviewer', 'system']),
-			},
-			annotations: writeAnnotations,
-		},
-		async ({ job_id, status, next_actor }) => {
-			try {
-				const result = await queueJson(env, { action: 'job_update_status', job_id, status, next_actor });
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'job_update_status_failed'), error, writeAnnotations));
-			}
-		},
-	);
-
-	server.registerTool(
-		'job_append_note',
-		{
-			description: 'Append a short text note to a job for progress tracking.',
-			inputSchema: {
-				job_id: z.string(),
-				note: z.string(),
-			},
-			annotations: writeAnnotations,
-		},
-		async ({ job_id, note }) => {
-			try {
-				const result = await queueJson(env, { action: 'job_append_note', job_id, note });
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'job_append_note_failed'), error, writeAnnotations));
-			}
-		},
-	);
-
-	server.registerTool(
-		'job_submit_review',
-		{
-			description: 'Submit a review verdict for a job in review_pending state.',
-			inputSchema: {
-				job_id: z.string(),
-				review_verdict: z.enum(['approved', 'changes_requested', 'blocked']),
-				findings: z.array(z.any()).default([]),
-				next_action: z.string().optional(),
-			},
-			annotations: writeAnnotations,
-		},
-		async ({ job_id, review_verdict, findings, next_action }) => {
-			try {
-				const result = await queueJson(env, {
-					action: 'job_submit_review',
-					job_id,
-					review_verdict,
-					findings,
-					next_action,
-				});
-				return toolText(result);
-			} catch (error) {
-				return toolText(fail(errorCodeFor(error, 'job_submit_review_failed'), error, writeAnnotations));
-			}
-		},
-	);
+	registerWorkflowDispatchTools(server, env, writeAnnotations);
+	registerQueueTools(server, env, readAnnotations, writeAnnotations);
 
 	return server;
 }
