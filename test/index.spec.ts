@@ -415,8 +415,8 @@ describe('opengpt-github-mcp-worker', () => {
 				job: {
 					work_branch: 'agent/job-3-303',
 					pr_number: 7,
-					status: 'review_pending',
-					next_actor: 'reviewer',
+					status: 'working',
+					next_actor: 'system',
 				},
 			},
 		});
@@ -485,7 +485,7 @@ describe('opengpt-github-mcp-worker', () => {
 			outcome: {
 				matched: true,
 				job_id: 'job-dup-webhook',
-				status: 'review_pending',
+				status: 'working',
 			},
 		});
 
@@ -697,16 +697,12 @@ describe('opengpt-github-mcp-worker', () => {
 			ok: true,
 			data: {
 				recommended_workflow: 'real_change',
-				how_to_ask: {
-					required_minimum: expect.arrayContaining(['repo']),
-				},
-				workflows: expect.arrayContaining([
-					expect.objectContaining({ id: 'real_change' }),
-					expect.objectContaining({ id: 'main_ready' }),
-				]),
+				recommended_template: expect.objectContaining({
+					label: 'Real change with PR',
+				}),
+				related_workflows: expect.arrayContaining(['main_ready', 'dry_run']),
 			},
 		});
-		expect(defaultHelpPayload.data.workflows.length).toBeGreaterThan(1);
 
 		const mainHelpResult = await client.callTool({
 			name: 'help',
