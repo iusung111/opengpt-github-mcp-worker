@@ -1,6 +1,6 @@
 {
 	"name": "opengpt-github-mcp-worker",
-	"version": "0.0.0",
+	"version": "0.2.1",
 	"private": true,
 	"scripts": {
 		"check": "npm run cf-typegen && npm run typecheck && npm test -- --run",
@@ -8,8 +8,9 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"test": "vitest --sequence.concurrent=false",
+		"cf-typegen": "wrangler types",
+		"ops:status": "node scripts/check-self-hosts.mjs"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
