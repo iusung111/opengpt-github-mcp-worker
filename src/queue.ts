@@ -826,7 +826,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 					if (pr.head.ref !== job.work_branch) {
 						job.work_branch = pr.head.ref;
 					}
-					if (pr.state === 'open' && job.status === 'working') {
+					if (pr.state === 'open' && (job.status === 'queued' || job.status === 'working')) {
 						this.transitionJob(job, 'review_pending', 'reviewer');
 					}
 					job.updated_at = nowIso();

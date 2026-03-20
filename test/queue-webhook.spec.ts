@@ -177,6 +177,52 @@ describe('queue webhook reconciliation', () => {
 		});
 	});
 
+	it('promotes a queued job to review_pending from PR webhook metadata in webhook-only flow', async () => {
+		await SELF.fetch('https://example.com/queue/job', {
+			method: 'POST',
+			headers: queueJsonHeaders,
+			body: JSON.stringify({
+				job_id: 'job-queued-pr-only',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				status: 'queued',
+				next_actor: 'worker',
+			}),
+		});
+
+		const prBody = JSON.stringify({
+			action: 'opened',
+			repository: { full_name: 'iusung111/OpenGPT' },
+			pull_request: {
+				number: 12,
+				state: 'open',
+				body: '<!-- opengpt-job\njob_id: job-queued-pr-only\nrun_id: 1212\nworkflow: agent-run.yml\nbranch: agent/job-queued-pr-only-808\n-->',
+				head: { ref: 'agent/job-queued-pr-only-808' },
+			},
+		});
+		const prResponse = await SELF.fetch('https://example.com/webhooks/github', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'X-GitHub-Event': 'pull_request',
+				'X-Hub-Signature-256': await webhookSignature(prBody),
+			},
+			body: prBody,
+		});
+		expect(prResponse.status).toBe(200);
+		await expect(prResponse.json()).resolves.toMatchObject({
+			ok: true,
+			outcome: {
+				matched: true,
+				job_id: 'job-queued-pr-only',
+				pr_number: 12,
+				work_branch: 'agent/job-queued-pr-only-808',
+				status: 'review_pending',
+				next_actor: 'reviewer',
+			},
+		});
+	});
+
 	it('prefers exact PR body job_id over ambiguous branch-prefix matches', async () => {
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
