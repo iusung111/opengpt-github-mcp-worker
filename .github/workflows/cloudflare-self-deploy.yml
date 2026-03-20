@@ -69,8 +69,8 @@ jobs:
 
       - name: Verify mirror auth secrets
         run: |
-          if [ -z "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" ]; then
-            echo "Missing required GitHub Actions secret: GITHUB_APP_PRIVATE_KEY_PEM"
+          if [ -z "${{ secrets.APP_PRIVATE_KEY_PEM }}" ]; then
+            echo "Missing required GitHub Actions secret: APP_PRIVATE_KEY_PEM"
             exit 1
           fi
           if [ -z "${{ secrets.WEBHOOK_SECRET }}" ]; then
@@ -84,8 +84,8 @@ jobs:
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
             TARGET_ARGS="--env mirror"
           fi
-          if [ -n "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" ]; then
-            printf "%s" "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" | npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${TARGET_ARGS}
+          if [ -n "${{ secrets.APP_PRIVATE_KEY_PEM }}" ]; then
+            printf "%s" "${{ secrets.APP_PRIVATE_KEY_PEM }}" | npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${TARGET_ARGS}
           else
             echo "Skipping GitHub App private key sync because the repository secret is not set."
           fi
