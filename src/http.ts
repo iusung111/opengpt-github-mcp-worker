@@ -1,4 +1,5 @@
 import { createMcpHandler } from 'agents/mcp';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { githubAuthConfigured, githubGet } from './github';
 import { buildMcpServer } from './mcp-tools';
 import { verifyWebhookSignature } from './queue';
@@ -21,7 +22,7 @@ import {
 } from './utils';
 import { queueRequestAuthorized } from './auth';
 
-const mcpHandlerCache = new WeakMap<AppEnv, ReturnType<typeof createMcpHandler>>();
+const mcpServerCache = new WeakMap<AppEnv, McpServer>();
 
 export async function handleWebhook(request: Request, env: AppEnv): Promise<Response> {
 	if (env.REQUIRE_WEBHOOK_SECRET === 'true' && !env.WEBHOOK_SECRET) {
@@ -115,15 +116,19 @@ export async function handleGitHubAppInstallation(env: AppEnv): Promise<Response
 	}
 }
 
-export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
-	const cached = mcpHandlerCache.get(env);
+function getMcpServer(env: AppEnv): McpServer {
+	const cached = mcpServerCache.get(env);
 	if (cached) {
 		return cached;
 	}
-	const handler = createMcpHandler(buildMcpServer(env) as never, {
+	const server = buildMcpServer(env);
+	mcpServerCache.set(env, server);
+	return server;
+}
+
+export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
+	return createMcpHandler(getMcpServer(env) as never, {
 		route: '/mcp',
 		enableJsonResponse: true,
 	});
-	mcpHandlerCache.set(env, handler);
-	return handler;
 }
