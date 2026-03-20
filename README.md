@@ -15,6 +15,8 @@ Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Dev
 Read tools:
 
 - `help`
+- `self_host_status`
+- `self_deploy`
 - `repo_work_context`
 - `branch_cleanup_candidates`
 - `workspace_resolve`
@@ -64,6 +66,7 @@ npm run dev
 npm run cf-typegen
 npm run typecheck
 npm test -- --run
+npm run ops:status
 ```
 
 ## Required Secrets
@@ -89,6 +92,13 @@ These come from `wrangler.jsonc` vars and can be adjusted there:
 - `AGENT_BRANCH_PREFIX`
 - `DEFAULT_BASE_BRANCH`
 - `DEFAULT_AUTO_IMPROVE_MAX_CYCLES`
+- `SELF_REPO_KEY`
+- `SELF_DEPLOY_WORKFLOW`
+- `SELF_LIVE_URL`
+- `SELF_MIRROR_URL`
+- `SELF_CURRENT_URL`
+- `SELF_DEFAULT_DEPLOY_TARGET`
+- `SELF_REQUIRE_MIRROR_FOR_LIVE`
 - `WORKING_STALE_AFTER_MS`
 - `REVIEW_STALE_AFTER_MS`
 - `DISPATCH_DEDUPE_WINDOW_MS`
@@ -99,6 +109,16 @@ These come from `wrangler.jsonc` vars and can be adjusted there:
 - `GITHUB_APP_INSTALLATION_ID`
 
 For local development, copy `.dev.vars.example` to `.dev.vars` and fill in real values.
+
+Self-host tracking defaults:
+
+- `SELF_LIVE_URL`: public Cloudflare live endpoint used for maintenance health checks
+- `SELF_MIRROR_URL`: secondary mirror endpoint; it can temporarily point at the same Worker until a separate mirror exists
+- `SELF_CURRENT_URL`: the URL of the environment currently running this config, used to avoid misleading self-health fetches
+- `SELF_REPO_KEY`: GitHub self-repo used by `self_host_status`
+- `SELF_DEPLOY_WORKFLOW`: GitHub Actions workflow that deploys this Worker
+- `SELF_DEFAULT_DEPLOY_TARGET`: default target for self deploy requests; set to `mirror` for safer self-improvement
+- `SELF_REQUIRE_MIRROR_FOR_LIVE`: when `true`, live promotion is blocked until a distinct healthy mirror exists
 
 Queue stability defaults:
 
@@ -127,6 +147,29 @@ After deploy, note the Worker URL and use:
 - MCP endpoint: `https://<worker-url>/mcp`
 - webhook endpoint: `https://<worker-url>/webhooks/github`
 - health check: `https://<worker-url>/healthz`
+
+For maintenance and self-improvement checks, `self_host_status` reads the configured live/mirror URLs, pings `/healthz`, and also inspects the self GitHub repo plus recent self-deploy workflow runs.
+Use `self_deploy` to dispatch mirror-first self deploys from MCP instead of sending the self repo directly to live.
+
+For GitHub Actions based self deploys, also add these repository secrets so the workflow can sync Worker secrets to `live` and `mirror`:
+
+- `GITHUB_APP_PRIVATE_KEY_PEM`
+- `WEBHOOK_SECRET`
+
+## Mirror-First Self Improvement
+
+Recommended flow for changes to this repo:
+
+1. Merge or push the self-repo change.
+2. Let `main` deploy automatically to the `mirror` Worker.
+3. Verify the mirror with `self_host_status` or `npm run ops:status`.
+4. Promote to live with `self_deploy` using `deploy_target=live`.
+
+The GitHub workflow now defaults to:
+
+- `push main` -> deploy `mirror`
+- manual `workflow_dispatch` -> choose `mirror` or `live`
+- `live` promotion can require a healthy mirror first
 
 ## GitHub App / Repo Setup
 
