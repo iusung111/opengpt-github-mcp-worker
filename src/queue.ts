@@ -36,7 +36,6 @@ import {
 	auditStorageKey,
 	branchMatchScore,
 	deliveryStorageKey,
-	ensureSafeWorkspacePath,
 	jobStorageKey,
 	normalizeLookup,
 	parseJobIdFromPrBody,
@@ -45,6 +44,7 @@ import {
 } from './queue-helpers';
 import { applyPullRequestEventToJob } from './queue-events';
 import { findLatestWorkflowRunId, getWorkflowRunSnapshot } from './queue-github';
+import { handleQueueAction } from './queue-requests';
 import {
 	buildJobIndexEntries,
 	JobIndexPointer,
@@ -62,7 +62,7 @@ import {
 } from './queue-reconcile';
 import { getDispatchRequest, isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob } from './queue-state';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
-import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
+import { findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
 
 export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	constructor(ctx: DurableObjectState, env: AppEnv) {
@@ -678,213 +678,44 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return ok({ matches });
 	}
 
+	private async putWorkspace(workspace: WorkspaceRecord): Promise<void> {
+		await this.ctx.storage.put(workspaceStorageKey(workspace.repo_key), workspace);
+	}
+
+	private async setActiveWorkspace(repoKey: string): Promise<void> {
+		await this.ctx.storage.put(activeWorkspaceStorageKey(), repoKey);
+	}
+
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		if (request.method === 'POST' && url.pathname === '/queue') {
 			try {
 				const payload = (await request.json()) as QueueEnvelope;
-				switch (payload.action) {
-					case 'job_create':
-						if (payload.job && payload.job.job_id) {
-							await this.upsertJob(payload.job as JobRecord);
-							const job = await this.getJob(payload.job.job_id);
-							if (job) {
-								await this.writeAudit('job_create', this.buildJobAudit(job));
-							}
-							return jsonResponse(ok({ job }));
-						}
-						break;
-					case 'job_upsert':
-						if (payload.job && payload.job.job_id) {
-							await this.upsertJob(payload.job as JobRecord);
-							const job = await this.getJob(payload.job.job_id);
-							return jsonResponse(ok({ job }));
-						}
-						break;
-					case 'job_get':
-						if (payload.job_id) {
-							const job = await this.getJob(payload.job_id);
-							if (!job) {
-								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
-							}
-							const reconciled = await this.reconcileJob(job);
-							return jsonResponse(ok({ job: reconciled }));
-						}
-						break;
-					case 'jobs_list':
-						const jobs = await this.listJobs(payload.status, payload.next_actor);
-						return jsonResponse(ok({ jobs }));
-					case 'job_update_status':
-						if (payload.job_id && payload.status && payload.next_actor) {
-							const job = await this.getJob(payload.job_id);
-							if (!job) {
-								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
-							}
-							const previous = structuredClone(job);
-							transitionJob(job, payload.status, payload.next_actor);
-							if (payload.job) {
-								if (payload.job.work_branch !== undefined) job.work_branch = payload.job.work_branch;
-								if (payload.job.workflow_run_id !== undefined) job.workflow_run_id = payload.job.workflow_run_id;
-								if (payload.job.pr_number !== undefined) job.pr_number = payload.job.pr_number;
-								if (payload.job.last_error !== undefined) job.last_error = payload.job.last_error;
-								if (payload.job.worker_manifest !== undefined) {
-									job.worker_manifest = { ...job.worker_manifest, ...payload.job.worker_manifest };
-								}
-								if (payload.job.auto_improve_cycle !== undefined) job.auto_improve_cycle = payload.job.auto_improve_cycle;
-							}
-							job.updated_at = nowIso();
-							await this.persistJob(job, previous);
-							return jsonResponse(ok({ job }));
-						}
-						break;
-					case 'job_append_note':
-						if (payload.job_id && payload.note) {
-							const job = await this.getJob(payload.job_id);
-							if (!job) {
-								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
-							}
-							const previous = structuredClone(job);
-							pushJobNote(job, payload.note);
-							job.updated_at = nowIso();
-							await this.persistJob(job, previous);
-							await this.writeAudit('job_append_note', { job_id: job.job_id, note: payload.note });
-							return jsonResponse(ok({ job }));
-						}
-						break;
-					case 'job_submit_review':
-						if (payload.job_id && payload.review_verdict) {
-							const job = await this.getJob(payload.job_id);
-							if (!job) {
-								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
-							}
-							if (job.status !== 'review_pending' || job.next_actor !== 'reviewer') {
-								return jsonResponse(
-									fail('invalid_state', 'job is not waiting for reviewer input'),
-									409,
-								);
-							}
-							const previous = structuredClone(job);
-							job.review_verdict = payload.review_verdict;
-							job.review_findings = payload.findings ?? [];
-							if (payload.review_verdict === 'blocked') {
-								transitionJob(job, 'failed', 'system');
-								job.last_error = `review blocked: ${payload.next_action}`;
-							} else if (payload.review_verdict === 'approved') {
-								transitionJob(job, 'done', 'system');
-							} else {
-								if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
-									job.auto_improve_cycle += 1;
-									transitionJob(job, 'rework_pending', 'worker');
-								} else {
-									transitionJob(job, 'failed', 'system');
-									job.last_error = 'rework limit reached';
-								}
-							}
-							job.updated_at = nowIso();
-							await this.persistJob(job, previous);
-							await this.writeAudit('job_submit_review', {
-								job_id: job.job_id,
-								verdict: payload.review_verdict,
-								findings: payload.findings,
-							});
-							return jsonResponse(ok({ job }));
-						}
-						break;
-					case 'job_progress':
-						if (payload.job_id) {
-							const job = await this.getJob(payload.job_id);
-							if (!job) {
-								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
-							}
-							const audits = await this.listAuditRecords(undefined, payload.job_id, 5);
-							return jsonResponse(
-								ok({ progress: this.buildJobProgressSnapshot(job, audits) }),
-							);
-						}
-						break;
-					case 'workspace_register':
-						if (payload.workspace) {
-							const timestamp = nowIso();
-							const existing = payload.workspace.repo_key
-								? await this.getWorkspace(payload.workspace.repo_key)
-								: null;
-							const ws = buildWorkspaceRecord(
-								payload.workspace as WorkspaceRecord,
-								existing,
-								timestamp,
-							);
-							ensureSafeWorkspacePath(ws.workspace_path);
-							await this.ctx.storage.put(workspaceStorageKey(ws.repo_key), ws);
-							await this.ctx.storage.put(activeWorkspaceStorageKey(), ws.repo_key);
-							return jsonResponse(ok({ workspace: ws }));
-						}
-						break;
-					case 'workspace_activate':
-						if (payload.repo_key) {
-							const existing = await this.getWorkspace(payload.repo_key);
-							if (!existing) {
-								return jsonResponse(fail('workspace_not_found', `workspace ${payload.repo_key} not found`), 404);
-							}
-							existing.last_used_at = nowIso();
-							await this.ctx.storage.put(workspaceStorageKey(existing.repo_key), existing);
-							await this.ctx.storage.put(activeWorkspaceStorageKey(), existing.repo_key);
-							return jsonResponse(ok({ workspace: existing }));
-						}
-						break;
-					case 'workspace_get':
-						if (payload.repo_key) {
-							const workspace = await this.getWorkspace(payload.repo_key);
-							if (!workspace) {
-								return jsonResponse(fail('workspace_not_found', `workspace ${payload.repo_key} not found`), 404);
-							}
-							return jsonResponse(ok({ workspace }));
-						}
-						break;
-					case 'workspace_list':
-						const workspaces = await this.listWorkspaces();
-						return jsonResponse(
-							ok({
-								active_repo_key: await this.getActiveWorkspaceRepoKey(),
-								workspaces,
-							}),
-						);
-					case 'workspace_find_similar':
-						return jsonResponse(await this.findSimilarWorkspaces(payload.query, payload.repo_key));
-					case 'audit_list':
-						const records = await this.listAuditRecords(
-							payload.event_type,
-							payload.job_id,
-							payload.limit,
-						);
-						return jsonResponse(ok({ audits: records }));
-					case 'github_event':
-						if (payload.payload && typeof payload.payload === 'object') {
-							const deliveryId = (payload.delivery_id ||
-								request.headers.get('x-github-delivery') ||
-								`delivery-${Date.now()}`) as string;
-							const registered = await this.tryRegisterDelivery(deliveryId);
-							if (!registered) {
-								return jsonResponse(
-									ok({
-										outcome: {
-											matched: false,
-											duplicate: true,
-											delivery_id: deliveryId,
-										},
-									}),
-								);
-							}
-							const outcome = await this.applyGithubEvent(
-								payload.payload as Record<string, unknown>,
-								deliveryId,
-							);
-							await this.writeAudit('github_event_processed', {
-								delivery_id: deliveryId,
-								outcome,
-							});
-							return jsonResponse(ok({ outcome }));
-						}
-						break;
+				const response = await handleQueueAction(
+					{
+						upsertJob: this.upsertJob.bind(this),
+						getJob: this.getJob.bind(this),
+						reconcileJob: this.reconcileJob.bind(this),
+						persistJob: this.persistJob.bind(this),
+						writeAudit: this.writeAudit.bind(this),
+						buildJobAudit: this.buildJobAudit.bind(this),
+						buildJobProgressSnapshot: this.buildJobProgressSnapshot.bind(this),
+						listAuditRecords: this.listAuditRecords.bind(this),
+						listJobs: this.listJobs.bind(this),
+						getWorkspace: this.getWorkspace.bind(this),
+						listWorkspaces: this.listWorkspaces.bind(this),
+						getActiveWorkspaceRepoKey: this.getActiveWorkspaceRepoKey.bind(this),
+						findSimilarWorkspaces: this.findSimilarWorkspaces.bind(this),
+						tryRegisterDelivery: this.tryRegisterDelivery.bind(this),
+						applyGithubEvent: this.applyGithubEvent.bind(this),
+						putWorkspace: this.putWorkspace.bind(this),
+						setActiveWorkspace: this.setActiveWorkspace.bind(this),
+					},
+					payload,
+					request,
+				);
+				if (response) {
+					return response;
 				}
 				return jsonResponse(fail('invalid_action', 'unknown action or missing parameters'), 400);
 			} catch (error) {
