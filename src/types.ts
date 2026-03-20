@@ -38,7 +38,9 @@ export interface ReviewFinding {
 	severity: 'low' | 'medium' | 'high' | 'critical';
 	file: string;
 	line_hint?: string;
+	summary: string;
 	rationale: string;
+	required_fix?: string;
 }
 
 export interface WorkspaceRecord {

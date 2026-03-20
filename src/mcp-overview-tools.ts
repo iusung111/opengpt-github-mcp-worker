@@ -217,6 +217,16 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 			'request a single permission bundle early if the run will need multiple write actions',
 			'prefer job_progress for concise status and audit_list only for full timeline review',
 		],
+		reviewer_workflow: [
+			'call review_prepare_context when a branch or PR is ready for review',
+			'compare the original request, target paths, and changed files before deciding the verdict',
+			'check workflow runs for failing validation or incomplete execution',
+			'submit job_submit_review with structured findings instead of a free-form verdict',
+		],
+		review_finding_shape: {
+			required: ['severity', 'file', 'summary', 'rationale'],
+			optional: ['line_hint', 'required_fix'],
+		},
 		request_checklist: ['repo', 'request', 'target_paths', 'dry_run', 'done_when'],
 		permission_bundle_recommendation: {
 			preset: context.recommended_permission_preset,

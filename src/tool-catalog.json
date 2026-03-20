@@ -60,8 +60,9 @@
     {
       "id": "collaboration",
       "label": "Collaboration and cleanup",
-      "description": "Branch cleanup discovery and execution under repo guardrails.",
+      "description": "Reviewer context preparation plus branch cleanup discovery and execution under repo guardrails.",
       "tools": [
+        "review_prepare_context",
         "branch_cleanup_candidates",
         "branch_cleanup_execute"
       ]
@@ -111,7 +112,7 @@
       "label": "Review follow-up",
       "description": "Respond to review findings, update PR state, and track reviewer/worker handoff.",
       "capabilities": ["read", "write", "review", "queue"],
-      "groupIds": ["overview", "repo_read", "repo_write", "queue"]
+      "groupIds": ["overview", "repo_read", "repo_write", "collaboration", "queue"]
     },
     {
       "id": "maintainer_cleanup",

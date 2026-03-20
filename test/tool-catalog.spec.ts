@@ -25,4 +25,14 @@ describe('tool catalog permission bundles', () => {
 			id: 'implementation_with_workflow',
 		});
 	});
+
+	it('includes reviewer context tools in the review follow-up preset', () => {
+		const bundle = resolvePermissionBundle({
+			preset: 'review_followup',
+		});
+		expect(bundle.capabilities).toEqual(['queue', 'read', 'review', 'write']);
+		expect(bundle.groups.some((group) => group.id === 'collaboration')).toBe(true);
+		expect(bundle.tools).toContain('review_prepare_context');
+		expect(bundle.tools).toContain('job_submit_review');
+	});
 });

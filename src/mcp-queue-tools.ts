@@ -14,6 +14,15 @@ import {
 	toolText,
 } from './utils';
 
+const reviewFindingSchema = z.object({
+	severity: z.enum(['low', 'medium', 'high', 'critical']),
+	file: z.string().min(1),
+	line_hint: z.string().optional(),
+	summary: z.string().min(1),
+	rationale: z.string().min(1),
+	required_fix: z.string().optional(),
+});
+
 export function registerQueueTools(
 	server: McpServer,
 	env: AppEnv,
@@ -186,11 +195,12 @@ export function registerQueueTools(
 	server.registerTool(
 		'job_submit_review',
 		{
-			description: 'Submit a review verdict for a job in review_pending state.',
+			description:
+				'Submit a structured review verdict for a job in review_pending state. Use findings with severity, file, summary, rationale, and required_fix so the worker can address exact review issues.',
 			inputSchema: {
 				job_id: z.string(),
 				review_verdict: z.enum(['approved', 'changes_requested', 'blocked']),
-				findings: z.array(z.any()).default([]),
+				findings: z.array(reviewFindingSchema).default([]),
 				next_action: z.string().optional(),
 			},
 			annotations: writeAnnotations,

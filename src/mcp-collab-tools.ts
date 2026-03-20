@@ -25,6 +25,132 @@ export function registerCollabTools(
 	writeAnnotations: ToolAnnotations,
 ): void {
 	server.registerTool(
+		'review_prepare_context',
+		{
+			description:
+				'Prepare a reviewer context bundle for a queued job. Returns the original request, PR details, changed files, workflow runs, queue progress, and a review checklist so GPT can verify correctness before approving or requesting changes.',
+			inputSchema: {
+				job_id: z.string(),
+				include_recent_audits: z.boolean().default(true),
+				include_workflow_runs: z.boolean().default(true),
+				workflow_run_limit: z.number().int().positive().max(10).default(5),
+			},
+			annotations: readAnnotations,
+		},
+		async ({ job_id, include_recent_audits, include_workflow_runs, workflow_run_limit }) => {
+			try {
+				const jobResult = await queueJson(env, { action: 'job_get', job_id });
+				const job = (jobResult.data?.job ?? null) as Record<string, unknown> | null;
+				if (!jobResult.ok || !job) {
+					return toolText(jobResult);
+				}
+
+				const repoKey = String(job.repo ?? '');
+				ensureRepoAllowed(env, repoKey);
+				await activateRepoWorkspace(env, repoKey);
+				const [owner, repo] = repoKey.split('/');
+				const prNumber = typeof job.pr_number === 'number' ? job.pr_number : null;
+				const workBranch = typeof job.work_branch === 'string' ? job.work_branch : null;
+				const dispatchRequest = (job.worker_manifest as Record<string, unknown> | undefined)?.dispatch_request as
+					| Record<string, unknown>
+					| undefined;
+
+				const [progressResult, auditResult, prResult, prFilesResult, workflowRunsResult] = await Promise.all([
+					queueJson(env, { action: 'job_progress', job_id }),
+					include_recent_audits ? queueJson(env, { action: 'audit_list', job_id, limit: 10 }) : Promise.resolve(null),
+					prNumber
+						? (githubGet(env, `/repos/${owner}/${repo}/pulls/${prNumber}`) as Promise<Record<string, unknown>>)
+						: Promise.resolve(null),
+					prNumber
+						? (githubGet(env, `/repos/${owner}/${repo}/pulls/${prNumber}/files`, {
+								params: { page: 1, per_page: 100 },
+						  }) as Promise<Array<Record<string, unknown>>>)
+						: Promise.resolve([]),
+					include_workflow_runs
+						? (githubGet(env, `/repos/${owner}/${repo}/actions/runs`, {
+								params: {
+									per_page: workflow_run_limit,
+									...(workBranch ? { branch: workBranch } : {}),
+								},
+						  }) as Promise<{ workflow_runs?: Array<Record<string, unknown>> }>)
+						: Promise.resolve({ workflow_runs: [] }),
+				]);
+
+				const requestedChange =
+					typeof dispatchRequest?.inputs === 'object' && dispatchRequest.inputs
+						? ((dispatchRequest.inputs as Record<string, unknown>).request ?? null)
+						: null;
+
+				const changedFiles = (prFilesResult ?? []).map((file) => ({
+					filename: file.filename ?? null,
+					status: file.status ?? null,
+					additions: file.additions ?? null,
+					deletions: file.deletions ?? null,
+					changes: file.changes ?? null,
+					patch: file.patch ?? null,
+				}));
+
+				return toolText(
+					ok(
+						{
+							job_id,
+							repo: repoKey,
+							reviewer_steps: [
+								'confirm the requested change and target paths before reading the diff',
+								'compare changed files against the expected target paths',
+								'check workflow results and queue progress for failed validation or stale state',
+								'verify the PR only contains the intended change and no unrelated edits',
+								'submit structured findings with severity, file, summary, rationale, and required_fix',
+							],
+							finding_schema: {
+								severity: ['low', 'medium', 'high', 'critical'],
+								required_fields: ['severity', 'file', 'summary', 'rationale'],
+								optional_fields: ['line_hint', 'required_fix'],
+							},
+							context: {
+								job,
+								original_request: {
+									request: requestedChange,
+									target_paths: job.target_paths ?? [],
+									operation_type: job.operation_type ?? null,
+									base_branch: job.base_branch ?? null,
+									work_branch: workBranch,
+								},
+								pr: prResult
+									? {
+											number: prResult.number ?? null,
+											title: prResult.title ?? null,
+											state: prResult.state ?? null,
+											html_url: prResult.html_url ?? null,
+											head_ref: (prResult.head as Record<string, unknown> | undefined)?.ref ?? null,
+											base_ref: (prResult.base as Record<string, unknown> | undefined)?.ref ?? null,
+									  }
+									: null,
+								changed_files: changedFiles,
+								workflow_runs: (workflowRunsResult.workflow_runs ?? []).map((run) => ({
+									id: run.id ?? null,
+									name: run.name ?? null,
+									event: run.event ?? null,
+									status: run.status ?? null,
+									conclusion: run.conclusion ?? null,
+									html_url: run.html_url ?? null,
+									head_branch: run.head_branch ?? null,
+									created_at: run.created_at ?? null,
+								})),
+								queue_progress: progressResult?.data?.progress ?? null,
+								recent_audits: auditResult?.data?.audits ?? [],
+							},
+						},
+						readAnnotations,
+					),
+				);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'review_prepare_context_failed'), error, readAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
 		'branch_cleanup_candidates',
 		{
 			description:

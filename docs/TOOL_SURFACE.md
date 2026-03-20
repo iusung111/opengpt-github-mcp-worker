@@ -55,8 +55,9 @@ Branch creation, file edits, PR creation and merge, comments, and workflow dispa
 
 ### Collaboration and cleanup
 
-Branch cleanup discovery and execution under repo guardrails.
+Reviewer context preparation plus branch cleanup discovery and execution under repo guardrails.
 
+- `review_prepare_context`
 - `branch_cleanup_candidates`
 - `branch_cleanup_execute`
 
@@ -103,7 +104,7 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - preset id: `review_followup`
 - description: Respond to review findings, update PR state, and track reviewer/worker handoff.
 - capabilities: `read`, `write`, `review`, `queue`
-- group ids: `overview`, `repo_read`, `repo_write`, `queue`
+- group ids: `overview`, `repo_read`, `repo_write`, `collaboration`, `queue`
 
 ### Maintainer cleanup
 

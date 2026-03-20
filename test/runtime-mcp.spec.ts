@@ -115,6 +115,7 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_execute')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_progress')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_work_context')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'review_prepare_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'request_permission_bundle')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
@@ -282,6 +283,11 @@ describe('runtime mcp surface', () => {
 				title: 'GitHub MCP work selection guide',
 				recommended_workflow: 'real_change',
 				request_checklist: expect.arrayContaining(['repo', 'request', 'target_paths']),
+				reviewer_workflow: expect.arrayContaining(['call review_prepare_context when a branch or PR is ready for review']),
+				review_finding_shape: {
+					required: ['severity', 'file', 'summary', 'rationale'],
+					optional: ['line_hint', 'required_fix'],
+				},
 				permission_bundle_recommendation: {
 					preset: 'implementation_with_pr',
 				},

@@ -181,6 +181,8 @@ The tool returns:
 - approval request text
 - recommended follow-up guidance
 
+For review work, use the `review_followup` preset. It includes the reviewer context path so GPT can gather the original request, PR diff, workflow results, and queue state before submitting a verdict.
+
 The bundle definitions come from [src/tool-catalog.json](/d:/VScode/opengpt-github-mcp-worker/src/tool-catalog.json), which is also the source for the generated [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
 
 ## Mirror-First Self Improvement
@@ -266,6 +268,8 @@ For request templates and project-instruction text, use:
 For ad hoc prompting inside ChatGPT:
 
 - call `help` first when the user is unsure how to phrase work; it now returns workflow choice, request checklist, and permission bundle guidance
+- call `review_prepare_context` before `job_submit_review` when GPT is acting as reviewer
+- submit review findings with `severity`, `file`, `summary`, and `rationale`; add `line_hint` and `required_fix` when the fix needs to be explicit
 - prefer `job_progress` for concise status and `audit_list` only for full history
 - use queue state and GitHub state as the source of truth, not an unregistered local folder
 
