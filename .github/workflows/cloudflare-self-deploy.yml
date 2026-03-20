@@ -180,17 +180,7 @@ jobs:
           for i in {1..6}; do
             HEALTH_JSON=$(curl --silent --show-error --fail "${{ env.DEPLOY_URL }}/healthz") || STATUS=$?
             if [ -n "${HEALTH_JSON}" ]; then
-              HEALTH_JSON="${HEALTH_JSON}" python - <<'PY'
-import json, os, sys
-payload = json.loads(os.environ["HEALTH_JSON"])
-ok = bool(payload.get("ok"))
-auth_configured = bool(payload.get("auth_configured"))
-if ok and auth_configured:
-    print("Health check passed with auth_configured=true")
-    sys.exit(0)
-print(json.dumps(payload))
-sys.exit(1)
-PY
+              HEALTH_JSON="${HEALTH_JSON}" python -c "import json, os, sys; payload=json.loads(os.environ['HEALTH_JSON']); ok=bool(payload.get('ok')); auth=bool(payload.get('auth_configured')); print('Health check passed with auth_configured=true' if ok and auth else json.dumps(payload)); sys.exit(0 if ok and auth else 1)"
               if [ $? -eq 0 ]; then
                 exit 0
               fi
