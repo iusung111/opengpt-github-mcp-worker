@@ -98,6 +98,7 @@ jobs:
           fi
 
       - name: Sync GitHub App private key to target Worker
+        continue-on-error: true
         run: |
           TARGET_ARGS=""
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
@@ -117,6 +118,7 @@ jobs:
           APP_PRIVATE_KEY_PEM: ${{ secrets.APP_PRIVATE_KEY_PEM }}
 
       - name: Sync webhook secret to target Worker
+        continue-on-error: true
         run: |
           TARGET_ARGS=""
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
@@ -176,13 +178,26 @@ jobs:
         run: |
           echo "Verifying health for: ${{ env.DEPLOY_URL }}/healthz"
           for i in {1..6}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.DEPLOY_URL }}/healthz")
-            if [ "$STATUS" -eq 200 ]; then
-              echo "Health check passed!"
-              exit 0
+            HEALTH_JSON=$(curl --silent --show-error --fail "${{ env.DEPLOY_URL }}/healthz") || STATUS=$?
+            if [ -n "${HEALTH_JSON}" ]; then
+              HEALTH_JSON="${HEALTH_JSON}" python - <<'PY'
+import json, os, sys
+payload = json.loads(os.environ["HEALTH_JSON"])
+ok = bool(payload.get("ok"))
+auth_configured = bool(payload.get("auth_configured"))
+if ok and auth_configured:
+    print("Health check passed with auth_configured=true")
+    sys.exit(0)
+print(json.dumps(payload))
+sys.exit(1)
+PY
+              if [ $? -eq 0 ]; then
+                exit 0
+              fi
             fi
-            echo "Attempt $i: Health check failed with status $STATUS. Retrying in 5s..."
+            echo "Attempt $i: Health check failed. Retrying in 5s..."
             sleep 5
+            unset HEALTH_JSON
           done
-          echo "Health check timed out. Deployment might be broken."
+          echo "Health check timed out or auth_configured=false. Deployment might be broken."
           exit 1
