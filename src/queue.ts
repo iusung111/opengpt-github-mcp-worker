@@ -44,7 +44,7 @@ import {
 	workspaceStorageKey,
 } from './queue-helpers';
 import { applyPullRequestEventToJob } from './queue-events';
-import { findLatestWorkflowRunId } from './queue-github';
+import { findLatestWorkflowRunId, getWorkflowRunSnapshot } from './queue-github';
 import {
 	buildJobIndexEntries,
 	JobIndexPointer,
@@ -53,6 +53,13 @@ import {
 	jobRunIndexKey,
 	jobStatusIndexPrefix,
 } from './queue-index';
+import {
+	getWorkflowRunDiscoveryCandidate,
+	isGitHubReconcileCandidate,
+	shouldAttemptWorkingTimeoutRedispatch,
+	shouldHandleReviewTimeout,
+	shouldHandleWorkingTimeout,
+} from './queue-reconcile';
 import { getDispatchRequest, isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob } from './queue-state';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
 import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
@@ -326,13 +333,12 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async reconcileJob(job: JobRecord): Promise<JobRecord> {
 		job.last_reconciled_at = nowIso();
-		if (job.status === 'working' && !job.workflow_run_id && isOlderThan(job.updated_at, getWorkingStaleAfterMs(this.env))) {
+		if (shouldHandleWorkingTimeout(job, getWorkingStaleAfterMs(this.env))) {
 			const previous = structuredClone(job);
 			const staleChanged = job.stale_reason !== 'working_timeout';
 			job.stale_reason = 'working_timeout';
 			if (githubAuthConfigured(this.env) && repoAllowed(this.env, job.repo)) {
-				const dispatchRequest = getDispatchRequest(job);
-				if (dispatchRequest && job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
+				if (getDispatchRequest(job) && shouldAttemptWorkingTimeoutRedispatch(job)) {
 					job.auto_improve_cycle += 1;
 					const redispatched = await this.autoRedispatchJob(job, 'working job stale without workflow run');
 					if (!redispatched) {
@@ -356,32 +362,24 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			return job;
 		}
 		if (!githubAuthConfigured(this.env) || !repoAllowed(this.env, job.repo)) {
-			if (job.status === 'review_pending' && isOlderThan(job.updated_at, getReviewStaleAfterMs(this.env))) {
+			if (shouldHandleReviewTimeout(job, getReviewStaleAfterMs(this.env))) {
 				await this.markJobStale(job, 'review_timeout', 'review pending beyond configured threshold');
 			}
 			return job;
 		}
-		if (job.status !== 'working' && job.status !== 'review_pending') {
+		if (!isGitHubReconcileCandidate(job)) {
 			return job;
 		}
-		const dispatchRequest = (job.worker_manifest.dispatch_request ?? null) as
-			| {
-					owner?: string;
-					repo?: string;
-					workflow_id?: string;
-					ref?: string;
-					dispatched_at?: string;
-			  }
-			| null;
-		if (!job.workflow_run_id && dispatchRequest?.owner && dispatchRequest?.repo && dispatchRequest.workflow_id && dispatchRequest.ref && dispatchRequest.dispatched_at) {
+		const runCandidate = getWorkflowRunDiscoveryCandidate(job);
+		if (!job.workflow_run_id && runCandidate) {
 			try {
 				const discoveredRun = await findLatestWorkflowRunId(
 					this.env,
-					dispatchRequest.owner,
-					dispatchRequest.repo,
-					dispatchRequest.workflow_id,
-					dispatchRequest.ref,
-					dispatchRequest.dispatched_at,
+					runCandidate.owner,
+					runCandidate.repo,
+					runCandidate.workflow_id,
+					runCandidate.ref,
+					runCandidate.dispatched_at,
 					1,
 					0,
 				);
@@ -393,29 +391,14 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			}
 		}
 		if (!job.workflow_run_id) {
-			if (job.status === 'review_pending' && isOlderThan(job.updated_at, getReviewStaleAfterMs(this.env))) {
+			if (shouldHandleReviewTimeout(job, getReviewStaleAfterMs(this.env))) {
 				await this.markJobStale(job, 'review_timeout', 'review pending beyond configured threshold');
 			}
 			return job;
 		}
-		let run:
-			| {
-					name?: string;
-					status?: string;
-					conclusion?: string;
-					html_url?: string;
-			  }
-			| undefined;
+		let run;
 		try {
-			run = (await githubGet(
-				this.env,
-				`/repos/${job.repo}/actions/runs/${job.workflow_run_id}`,
-			)) as {
-				name?: string;
-				status?: string;
-				conclusion?: string;
-				html_url?: string;
-			};
+			run = await getWorkflowRunSnapshot(this.env, job.repo, job.workflow_run_id);
 		} catch {
 			return job;
 		}
@@ -442,7 +425,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		} else {
 			recordWorkflowSnapshot(job, run);
 		}
-		if (job.status === 'review_pending' && isOlderThan(job.updated_at, getReviewStaleAfterMs(this.env))) {
+		if (shouldHandleReviewTimeout(job, getReviewStaleAfterMs(this.env))) {
 			await this.markJobStale(job, 'review_timeout', 'review pending beyond configured threshold');
 		}
 		return job;

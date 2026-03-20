@@ -1,6 +1,13 @@
 import { AppEnv } from './types';
 import { githubGet } from './utils';
 
+export interface GitHubWorkflowRunSnapshot {
+	name?: string;
+	status?: string;
+	conclusion?: string;
+	html_url?: string;
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -65,4 +72,12 @@ export async function findLatestWorkflowRunId(
 		}
 	}
 	return undefined;
+}
+
+export async function getWorkflowRunSnapshot(
+	env: AppEnv,
+	repo: string,
+	runId: number,
+): Promise<GitHubWorkflowRunSnapshot | null> {
+	return (await githubGet(env, `/repos/${repo}/actions/runs/${runId}`)) as GitHubWorkflowRunSnapshot;
 }
