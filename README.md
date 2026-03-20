@@ -76,11 +76,16 @@ Set these with `wrangler secret put` before deploy:
 - `GITHUB_APP_PRIVATE_KEY_PEM`
 - `WEBHOOK_SECRET`
 
+Optional but recommended:
+
+- `QUEUE_API_TOKEN`
+
 Example:
 
 ```bash
 npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM
 npx wrangler secret put WEBHOOK_SECRET
+npx wrangler secret put QUEUE_API_TOKEN
 ```
 
 ## Non-Secret Config
@@ -164,10 +169,11 @@ The maintenance queue endpoints under `/queue/*` are no longer public.
 
 Use one of these headers when calling `/queue/job` or `/queue/jobs` directly:
 
-- `X-Queue-Token: <WEBHOOK_SECRET>`
-- `Authorization: Bearer <WEBHOOK_SECRET>`
+- `X-Queue-Token: <QUEUE_API_TOKEN>`
+- `Authorization: Bearer <QUEUE_API_TOKEN>`
 
-This reuses the existing `WEBHOOK_SECRET` so webhook validation and queue maintenance stay aligned.
+`QUEUE_API_TOKEN` is preferred so queue maintenance auth is separated from GitHub webhook verification.
+If `QUEUE_API_TOKEN` is unset, the worker falls back to `WEBHOOK_SECRET` for backward compatibility.
 GitHub webhook deliveries still authenticate with `X-Hub-Signature-256`; they do not use `X-Queue-Token`.
 
 ## Mirror-First Self Improvement

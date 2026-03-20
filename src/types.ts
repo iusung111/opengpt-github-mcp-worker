@@ -6,6 +6,7 @@ export type ReviewVerdict = 'approved' | 'changes_requested' | 'blocked';
 
 export type AppEnv = Env & {
 	WEBHOOK_SECRET?: string;
+	QUEUE_API_TOKEN?: string;
 	GITHUB_APP_PRIVATE_KEY_PEM?: string;
 	GITHUB_ALLOWED_REPOS?: string;
 	GITHUB_ALLOWED_WORKFLOWS?: string;
