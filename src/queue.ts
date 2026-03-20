@@ -15,22 +15,18 @@ import {
 import {
 	getAuditRetentionCount,
 	getDeliveryRetentionCount,
-	getDispatchDedupeWindowMs,
 	getReviewStaleAfterMs,
 	getWorkingStaleAfterMs,
 	githubGet,
-	githubPost,
 	repoAllowed,
-	buildDispatchFingerprint,
 	nowIso,
-	parseIsoMs,
-	isOlderThan,
 	jsonResponse,
 	diagnosticLog,
 	ok,
 	fail
 } from './utils';
 import { githubAuthConfigured } from './github';
+import { autoRedispatchJob as autoRedispatchQueueJob } from './queue-dispatch';
 import {
 	activeWorkspaceStorageKey,
 	auditStorageKey,
@@ -242,86 +238,8 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return true;
 	}
 
-	private async shouldDeduplicateDispatch(
-		job: JobRecord,
-		owner: string,
-		repo: string,
-		workflowId: string,
-		ref: string,
-		inputs: Record<string, unknown>,
-	): Promise<boolean> {
-		if (job.status !== 'working') {
-			return false;
-		}
-		const dispatchRequest = getDispatchRequest(job);
-		if (!dispatchRequest || !dispatchRequest.fingerprint) {
-			return false;
-		}
-		const workflow = (job.worker_manifest.last_workflow_run ?? null) as
-			| {
-					status?: string;
-			  }
-			| null;
-		if (workflow?.status === 'completed') {
-			return false;
-		}
-		if (parseIsoMs(dispatchRequest.dispatched_at) === null) {
-			return false;
-		}
-		if (isOlderThan(dispatchRequest.dispatched_at, getDispatchDedupeWindowMs(this.env))) {
-			return false;
-		}
-		const requestedFingerprint = await buildDispatchFingerprint(
-			owner,
-			repo,
-			workflowId,
-			ref,
-			inputs,
-			job.auto_improve_cycle,
-		);
-		return dispatchRequest.fingerprint === requestedFingerprint;
-	}
-
 	private async autoRedispatchJob(job: JobRecord, reason: string): Promise<boolean> {
-		const dispatchRequest = getDispatchRequest(job);
-		if (!dispatchRequest || !githubAuthConfigured(this.env)) {
-			return false;
-		}
-		const fingerprint = await buildDispatchFingerprint(
-			dispatchRequest.owner,
-			dispatchRequest.repo,
-			dispatchRequest.workflow_id,
-			dispatchRequest.ref,
-			dispatchRequest.inputs,
-			job.auto_improve_cycle,
-		);
-		await githubPost(
-			this.env,
-			`/repos/${dispatchRequest.owner}/${dispatchRequest.repo}/actions/workflows/${dispatchRequest.workflow_id}/dispatches`,
-			{
-				ref: dispatchRequest.ref,
-				inputs: dispatchRequest.inputs,
-			},
-		);
-		transitionJob(job, 'working', 'system');
-		job.workflow_run_id = undefined;
-		job.last_error = undefined;
-		job.stale_reason = undefined;
-		pushJobNote(job, `auto redispatch triggered: ${reason}`);
-		job.worker_manifest = {
-			...job.worker_manifest,
-			dispatch_request: {
-				...dispatchRequest,
-				fingerprint,
-				dispatched_at: nowIso(),
-			},
-			last_workflow_run: {
-				status: 'queued',
-				conclusion: null,
-				html_url: null,
-			},
-		};
-		return true;
+		return autoRedispatchQueueJob({ env: this.env }, job, reason);
 	}
 
 	private async reconcileJob(job: JobRecord): Promise<JobRecord> {
