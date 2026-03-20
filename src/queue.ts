@@ -43,7 +43,9 @@ import {
 	verifyWebhookSignature,
 	workspaceStorageKey,
 } from './queue-helpers';
+import { applyPullRequestEventToJob } from './queue-events';
 import { findLatestWorkflowRunId } from './queue-github';
+import { getDispatchRequest, isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob } from './queue-state';
 import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
 
 export class JobQueueDurableObject extends DurableObject<AppEnv> {
@@ -158,29 +160,12 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return null;
 	}
 
-	private transitionJob(job: JobRecord, status: JobStatus, nextActor: NextActor): void {
-		if (job.status !== status || job.next_actor !== nextActor) {
-			job.status = status;
-			job.next_actor = nextActor;
-			job.last_transition_at = nowIso();
-		} else {
-			job.status = status;
-			job.next_actor = nextActor;
-		}
-	}
-
-	private pushJobNote(job: JobRecord, note: string): void {
-		if (!job.notes.includes(note)) {
-			job.notes.push(note);
-		}
-	}
-
 	private async markJobStale(job: JobRecord, reason: string, note: string): Promise<boolean> {
 		if (job.stale_reason === reason) {
 			return false;
 		}
 		job.stale_reason = reason;
-		this.pushJobNote(job, note);
+		pushJobNote(job, note);
 		job.updated_at = nowIso();
 		await this.ctx.storage.put(jobStorageKey(job.job_id), job);
 		await this.writeAudit('job_reconcile_stale', this.buildJobAudit(job, { reason }));
@@ -215,43 +200,6 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return true;
 	}
 
-	private getDispatchRequest(job: JobRecord): DispatchRequestRecord | null {
-		const raw = (job.worker_manifest.dispatch_request ?? null) as Partial<DispatchRequestRecord> | null;
-		if (!raw?.owner || !raw.repo || !raw.workflow_id || !raw.ref || !raw.dispatched_at) {
-			return null;
-		}
-		return {
-			owner: raw.owner,
-			repo: raw.repo,
-			workflow_id: raw.workflow_id,
-			ref: raw.ref,
-			inputs: raw.inputs ?? {},
-			fingerprint: raw.fingerprint,
-			dispatched_at: raw.dispatched_at,
-		};
-	}
-
-	private isDryRunJob(job: JobRecord): boolean {
-		const dispatchRequest = this.getDispatchRequest(job);
-		const rawDryRun = dispatchRequest?.inputs?.dry_run;
-		return rawDryRun === true || rawDryRun === 'true';
-	}
-
-	private recordWorkflowSnapshot(
-		job: JobRecord,
-		run: { name?: string; status?: string; conclusion?: string; html_url?: string },
-	): void {
-		job.worker_manifest = {
-			...job.worker_manifest,
-			last_workflow_run: {
-				name: run.name,
-				status: run.status,
-				conclusion: run.conclusion,
-				html_url: run.html_url,
-			},
-		};
-	}
-
 	private async shouldDeduplicateDispatch(
 		job: JobRecord,
 		owner: string,
@@ -263,7 +211,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (job.status !== 'working') {
 			return false;
 		}
-		const dispatchRequest = this.getDispatchRequest(job);
+		const dispatchRequest = getDispatchRequest(job);
 		if (!dispatchRequest || !dispatchRequest.fingerprint) {
 			return false;
 		}
@@ -293,7 +241,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async autoRedispatchJob(job: JobRecord, reason: string): Promise<boolean> {
-		const dispatchRequest = this.getDispatchRequest(job);
+		const dispatchRequest = getDispatchRequest(job);
 		if (!dispatchRequest || !githubAuthConfigured(this.env)) {
 			return false;
 		}
@@ -313,11 +261,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 				inputs: dispatchRequest.inputs,
 			},
 		);
-		this.transitionJob(job, 'working', 'system');
+		transitionJob(job, 'working', 'system');
 		job.workflow_run_id = undefined;
 		job.last_error = undefined;
 		job.stale_reason = undefined;
-		this.pushJobNote(job, `auto redispatch triggered: ${reason}`);
+		pushJobNote(job, `auto redispatch triggered: ${reason}`);
 		job.worker_manifest = {
 			...job.worker_manifest,
 			dispatch_request: {
@@ -340,18 +288,18 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			const staleChanged = job.stale_reason !== 'working_timeout';
 			job.stale_reason = 'working_timeout';
 			if (githubAuthConfigured(this.env) && repoAllowed(this.env, job.repo)) {
-				const dispatchRequest = this.getDispatchRequest(job);
+				const dispatchRequest = getDispatchRequest(job);
 				if (dispatchRequest && job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
 					job.auto_improve_cycle += 1;
 					const redispatched = await this.autoRedispatchJob(job, 'working job stale without workflow run');
 					if (!redispatched) {
-						this.transitionJob(job, 'rework_pending', 'worker');
+						transitionJob(job, 'rework_pending', 'worker');
 					}
 				} else {
-					this.transitionJob(job, 'rework_pending', 'worker');
+					transitionJob(job, 'rework_pending', 'worker');
 				}
 			} else {
-				this.transitionJob(job, 'rework_pending', 'worker');
+				transitionJob(job, 'rework_pending', 'worker');
 			}
 			job.updated_at = nowIso();
 			await this.ctx.storage.put(jobStorageKey(job.job_id), job);
@@ -431,20 +379,20 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (!run) {
 			return job;
 		}
-		this.recordWorkflowSnapshot(job, run);
+		recordWorkflowSnapshot(job, run);
 		if (run.status === 'completed') {
-			if (run.conclusion === 'success' && (this.isDryRunJob(job) || job.pr_number)) {
-				this.transitionJob(job, 'review_pending', 'reviewer');
+			if (run.conclusion === 'success' && (isDryRunJob(job) || job.pr_number)) {
+				transitionJob(job, 'review_pending', 'reviewer');
 			} else if (run.conclusion === 'success') {
-				this.pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
+				pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
 			} else if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
 				job.auto_improve_cycle += 1;
 				const redispatched = await this.autoRedispatchJob(job, 'webhook reported failure');
 				if (!redispatched) {
-					this.transitionJob(job, 'rework_pending', 'worker');
+					transitionJob(job, 'rework_pending', 'worker');
 				}
 			} else {
-				this.transitionJob(job, 'failed', 'system');
+				transitionJob(job, 'failed', 'system');
 				job.last_error = `${run.name ?? 'workflow'} concluded with ${run.conclusion ?? 'unknown'}`;
 			}
 			job.stale_reason = undefined;
@@ -605,19 +553,19 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			if (job) {
 				job.last_webhook_event_at = nowIso();
 				job.workflow_run_id = run.id;
-				this.recordWorkflowSnapshot(job, run);
-				if (run.conclusion === 'success' && (this.isDryRunJob(job) || job.pr_number)) {
-					this.transitionJob(job, 'review_pending', 'reviewer');
+				recordWorkflowSnapshot(job, run);
+				if (run.conclusion === 'success' && (isDryRunJob(job) || job.pr_number)) {
+					transitionJob(job, 'review_pending', 'reviewer');
 				} else if (run.conclusion === 'success') {
-					this.pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
+					pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
 				} else if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
 					job.auto_improve_cycle += 1;
 					const redispatched = await this.autoRedispatchJob(job, 'webhook reported failure');
 					if (!redispatched) {
-						this.transitionJob(job, 'rework_pending', 'worker');
+						transitionJob(job, 'rework_pending', 'worker');
 					}
 				} else {
-					this.transitionJob(job, 'failed', 'system');
+					transitionJob(job, 'failed', 'system');
 					job.last_error = `${run.name ?? 'workflow'} failed (webhook)`;
 				}
 				job.updated_at = nowIso();
@@ -645,18 +593,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 					(await this.findByRepoAndJobId(repoFullName, hintedJobId)) ??
 					(await this.findByRepoAndBranch(repoFullName, pr.head.ref));
 				if (job) {
-					job.last_webhook_event_at = nowIso();
-					if (pr.number && job.pr_number !== pr.number) {
-						job.pr_number = pr.number;
-						this.pushJobNote(job, `linked PR #${pr.number}`);
-					}
-					if (pr.head.ref !== job.work_branch) {
-						job.work_branch = pr.head.ref;
-					}
-					if (pr.state === 'open' && (job.status === 'queued' || job.status === 'working')) {
-						this.transitionJob(job, 'review_pending', 'reviewer');
-					}
-					job.updated_at = nowIso();
+					applyPullRequestEventToJob(job, pr, nowIso());
 					await this.ctx.storage.put(jobStorageKey(job.job_id), job);
 					return {
 						matched: true,
@@ -720,7 +657,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 							if (!job) {
 								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
 							}
-							this.transitionJob(job, payload.status, payload.next_actor);
+							transitionJob(job, payload.status, payload.next_actor);
 							if (payload.job) {
 								if (payload.job.work_branch !== undefined) job.work_branch = payload.job.work_branch;
 								if (payload.job.workflow_run_id !== undefined) job.workflow_run_id = payload.job.workflow_run_id;
@@ -742,7 +679,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 							if (!job) {
 								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
 							}
-							this.pushJobNote(job, payload.note);
+							pushJobNote(job, payload.note);
 							job.updated_at = nowIso();
 							await this.ctx.storage.put(jobStorageKey(job.job_id), job);
 							await this.writeAudit('job_append_note', { job_id: job.job_id, note: payload.note });
@@ -764,16 +701,16 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 							job.review_verdict = payload.review_verdict;
 							job.review_findings = payload.findings ?? [];
 							if (payload.review_verdict === 'blocked') {
-								this.transitionJob(job, 'failed', 'system');
+								transitionJob(job, 'failed', 'system');
 								job.last_error = `review blocked: ${payload.next_action}`;
 							} else if (payload.review_verdict === 'approved') {
-								this.transitionJob(job, 'done', 'system');
+								transitionJob(job, 'done', 'system');
 							} else {
 								if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
 									job.auto_improve_cycle += 1;
-									this.transitionJob(job, 'rework_pending', 'worker');
+									transitionJob(job, 'rework_pending', 'worker');
 								} else {
-									this.transitionJob(job, 'failed', 'system');
+									transitionJob(job, 'failed', 'system');
 									job.last_error = 'rework limit reached';
 								}
 							}
