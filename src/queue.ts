@@ -50,14 +50,11 @@ import {
 	JobIndexPointer,
 } from './queue-index';
 import {
-	getWorkflowRunDiscoveryCandidate,
-	isGitHubReconcileCandidate,
-	shouldAttemptWorkingTimeoutRedispatch,
+	handleWorkingTimeoutReconcile,
+	reconcileGitHubRunState,
 	shouldHandleReviewTimeout,
-	shouldHandleWorkingTimeout,
 } from './queue-reconcile';
-import { getDispatchRequest, isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob } from './queue-state';
-import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
+import { getDispatchRequest, isDryRunJob, pushJobNote, transitionJob } from './queue-state';
 import { findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
 
 export class JobQueueDurableObject extends DurableObject<AppEnv> {
@@ -329,32 +326,18 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async reconcileJob(job: JobRecord): Promise<JobRecord> {
 		job.last_reconciled_at = nowIso();
-		if (shouldHandleWorkingTimeout(job, getWorkingStaleAfterMs(this.env))) {
-			const previous = structuredClone(job);
-			const staleChanged = job.stale_reason !== 'working_timeout';
-			job.stale_reason = 'working_timeout';
-			if (githubAuthConfigured(this.env) && repoAllowed(this.env, job.repo)) {
-				if (getDispatchRequest(job) && shouldAttemptWorkingTimeoutRedispatch(job)) {
-					job.auto_improve_cycle += 1;
-					const redispatched = await this.autoRedispatchJob(job, 'working job stale without workflow run');
-					if (!redispatched) {
-						transitionJob(job, 'rework_pending', 'worker');
-					}
-				} else {
-					transitionJob(job, 'rework_pending', 'worker');
-				}
-			} else {
-				transitionJob(job, 'rework_pending', 'worker');
-			}
-			job.updated_at = nowIso();
-			await this.persistJob(job, previous);
-			if (staleChanged) {
-				await this.markJobStale(
-					job,
-					'working_timeout',
-					'working job exceeded stale threshold without a linked workflow run',
-				);
-			}
+		if (
+			await handleWorkingTimeoutReconcile(
+				{
+					env: this.env,
+					persistJob: this.persistJob.bind(this),
+					markJobStale: this.markJobStale.bind(this),
+					autoRedispatchJob: this.autoRedispatchJob.bind(this),
+				},
+				job,
+				getWorkingStaleAfterMs(this.env),
+			)
+		) {
 			return job;
 		}
 		if (!githubAuthConfigured(this.env) || !repoAllowed(this.env, job.repo)) {
@@ -363,63 +346,20 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			}
 			return job;
 		}
-		if (!isGitHubReconcileCandidate(job)) {
-			return job;
-		}
-		const runCandidate = getWorkflowRunDiscoveryCandidate(job);
-		if (!job.workflow_run_id && runCandidate) {
-			try {
-				const discoveredRun = await findLatestWorkflowRunId(
-					this.env,
-					runCandidate.owner,
-					runCandidate.repo,
-					runCandidate.workflow_id,
-					runCandidate.ref,
-					runCandidate.dispatched_at,
-					1,
-					0,
-				);
-				if (discoveredRun?.id) {
-					job.workflow_run_id = discoveredRun.id;
-				}
-			} catch {
-				return job;
-			}
-		}
+		await reconcileGitHubRunState(
+			{
+				env: this.env,
+				persistJob: this.persistJob.bind(this),
+				markJobStale: this.markJobStale.bind(this),
+				autoRedispatchJob: this.autoRedispatchJob.bind(this),
+			},
+			job,
+		);
 		if (!job.workflow_run_id) {
 			if (shouldHandleReviewTimeout(job, getReviewStaleAfterMs(this.env))) {
 				await this.markJobStale(job, 'review_timeout', 'review pending beyond configured threshold');
 			}
 			return job;
-		}
-		let run;
-		try {
-			run = await getWorkflowRunSnapshot(this.env, job.repo, job.workflow_run_id);
-		} catch {
-			return job;
-		}
-		if (!run) {
-			return job;
-		}
-		if (run.status === 'completed') {
-			const previous = structuredClone(job);
-			const decision = decideCompletedWorkflowRun(job, run, 'reconcile');
-			applyCompletedWorkflowRunDecision(job, run, decision);
-			if (decision.shouldAutoRedispatch) {
-				job.auto_improve_cycle += 1;
-				const redispatched = await this.autoRedispatchJob(
-					job,
-					decision.redispatchReason ?? 'github run reconciliation failure',
-				);
-				if (!redispatched) {
-					transitionJob(job, 'rework_pending', 'worker');
-				}
-			}
-			job.stale_reason = undefined;
-			job.updated_at = nowIso();
-			await this.persistJob(job, previous);
-		} else {
-			recordWorkflowSnapshot(job, run);
 		}
 		if (shouldHandleReviewTimeout(job, getReviewStaleAfterMs(this.env))) {
 			await this.markJobStale(job, 'review_timeout', 'review pending beyond configured threshold');
