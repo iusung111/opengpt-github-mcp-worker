@@ -45,6 +45,13 @@ import {
 } from './queue-helpers';
 import { applyPullRequestEventToJob } from './queue-events';
 import { findLatestWorkflowRunId } from './queue-github';
+import {
+	buildJobIndexEntries,
+	JobIndexPointer,
+	jobBranchIndexKey,
+	jobRunIndexKey,
+	jobStatusIndexPrefix,
+} from './queue-index';
 import { getDispatchRequest, isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob } from './queue-state';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
 import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
@@ -99,6 +106,24 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async getJob(jobId: string): Promise<JobRecord | null> {
 		return ((await this.ctx.storage.get(jobStorageKey(jobId))) as JobRecord | undefined) ?? null;
+	}
+
+	private async persistJob(job: JobRecord, previous?: JobRecord | null): Promise<void> {
+		const previousEntries = new Map(previous ? buildJobIndexEntries(previous) : []);
+		const nextEntries = new Map(buildJobIndexEntries(job));
+		const keysToDelete: string[] = [];
+		for (const key of previousEntries.keys()) {
+			if (!nextEntries.has(key)) {
+				keysToDelete.push(key);
+			}
+		}
+		if (keysToDelete.length > 0) {
+			await this.ctx.storage.delete(keysToDelete);
+		}
+		await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+		for (const [key, value] of nextEntries.entries()) {
+			await this.ctx.storage.put(key, value);
+		}
 	}
 
 	private async getWorkspace(repoKey: string): Promise<WorkspaceRecord | null> {
@@ -165,10 +190,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (job.stale_reason === reason) {
 			return false;
 		}
+		const previous = structuredClone(job);
 		job.stale_reason = reason;
 		pushJobNote(job, note);
 		job.updated_at = nowIso();
-		await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+		await this.persistJob(job, previous);
 		await this.writeAudit('job_reconcile_stale', this.buildJobAudit(job, { reason }));
 		return true;
 	}
@@ -286,6 +312,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	private async reconcileJob(job: JobRecord): Promise<JobRecord> {
 		job.last_reconciled_at = nowIso();
 		if (job.status === 'working' && !job.workflow_run_id && isOlderThan(job.updated_at, getWorkingStaleAfterMs(this.env))) {
+			const previous = structuredClone(job);
 			const staleChanged = job.stale_reason !== 'working_timeout';
 			job.stale_reason = 'working_timeout';
 			if (githubAuthConfigured(this.env) && repoAllowed(this.env, job.repo)) {
@@ -303,7 +330,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 				transitionJob(job, 'rework_pending', 'worker');
 			}
 			job.updated_at = nowIso();
-			await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+			await this.persistJob(job, previous);
 			if (staleChanged) {
 				await this.markJobStale(
 					job,
@@ -381,6 +408,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			return job;
 		}
 		if (run.status === 'completed') {
+			const previous = structuredClone(job);
 			const decision = decideCompletedWorkflowRun(job, run, 'reconcile');
 			applyCompletedWorkflowRunDecision(job, run, decision);
 			if (decision.shouldAutoRedispatch) {
@@ -395,7 +423,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			}
 			job.stale_reason = undefined;
 			job.updated_at = nowIso();
-			await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+			await this.persistJob(job, previous);
 		} else {
 			recordWorkflowSnapshot(job, run);
 		}
@@ -407,8 +435,22 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async listJobs(status?: JobStatus, nextActor?: NextActor): Promise<JobRecord[]> {
 		const jobs: JobRecord[] = [];
-		const records = await this.ctx.storage.list<JobRecord>({ prefix: 'job:' });
-		for (const [, value] of records) {
+		const indexedRecords =
+			status || nextActor
+				? await this.ctx.storage.list<JobIndexPointer>({ prefix: jobStatusIndexPrefix(status, nextActor) })
+				: null;
+		const records: Array<JobRecord | null> = [];
+		if (indexedRecords?.size) {
+			for (const pointer of indexedRecords.values()) {
+				records.push(await this.getJob(pointer.job_id));
+			}
+		} else {
+			records.push(...Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()));
+		}
+		for (const value of records) {
+			if (!value) {
+				continue;
+			}
 			const reconciled = await this.reconcileJob(value);
 			if (status && reconciled.status !== status) {
 				continue;
@@ -439,6 +481,13 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (!workBranch) {
 			return null;
 		}
+		const indexedPointer = await this.ctx.storage.get<JobIndexPointer>(jobBranchIndexKey(repo, workBranch));
+		if (indexedPointer?.job_id) {
+			const indexedJob = await this.getJob(indexedPointer.job_id);
+			if (indexedJob?.repo === repo) {
+				return indexedJob;
+			}
+		}
 		const records = await this.ctx.storage.list<JobRecord>({ prefix: 'job:' });
 		let bestMatch: { job: JobRecord; score: number; matchedLength: number } | null = null;
 		for (const [, job] of records) {
@@ -464,6 +513,13 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	private async findByRepoAndRun(repo: string, runId?: number): Promise<JobRecord | null> {
 		if (!runId) {
 			return null;
+		}
+		const indexedPointer = await this.ctx.storage.get<JobIndexPointer>(jobRunIndexKey(repo, runId));
+		if (indexedPointer?.job_id) {
+			const indexedJob = await this.getJob(indexedPointer.job_id);
+			if (indexedJob?.repo === repo && indexedJob.workflow_run_id === runId) {
+				return indexedJob;
+			}
 		}
 		return this.findJob((job) => job.repo === repo && job.workflow_run_id === runId, { reconcile: false });
 	}
@@ -509,10 +565,10 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		const existing = await this.getJob(job.job_id);
 		if (existing) {
 			const merged = { ...existing, ...job, updated_at: nowIso() };
-			await this.ctx.storage.put(jobStorageKey(job.job_id), merged);
+			await this.persistJob(merged, existing);
 		} else {
 			const newJob = this.normalizeJob(job);
-			await this.ctx.storage.put(jobStorageKey(job.job_id), newJob);
+			await this.persistJob(newJob);
 		}
 	}
 
@@ -551,6 +607,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 				(await this.findByRepoAndRun(repoFullName, run.id)) ??
 				(await this.findByRepoAndBranch(repoFullName, run.head_branch));
 			if (job) {
+				const previous = structuredClone(job);
 				job.last_webhook_event_at = nowIso();
 				job.workflow_run_id = run.id;
 				if (run.status === 'completed') {
@@ -571,7 +628,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 					recordWorkflowSnapshot(job, run);
 				}
 				job.updated_at = nowIso();
-				await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+				await this.persistJob(job, previous);
 				return {
 					matched: true,
 					job_id: job.job_id,
@@ -595,8 +652,9 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 					(await this.findByRepoAndJobId(repoFullName, hintedJobId)) ??
 					(await this.findByRepoAndBranch(repoFullName, pr.head.ref));
 				if (job) {
+					const previous = structuredClone(job);
 					applyPullRequestEventToJob(job, pr, nowIso());
-					await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+					await this.persistJob(job, previous);
 					return {
 						matched: true,
 						job_id: job.job_id,
@@ -659,6 +717,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 							if (!job) {
 								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
 							}
+							const previous = structuredClone(job);
 							transitionJob(job, payload.status, payload.next_actor);
 							if (payload.job) {
 								if (payload.job.work_branch !== undefined) job.work_branch = payload.job.work_branch;
@@ -671,7 +730,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 								if (payload.job.auto_improve_cycle !== undefined) job.auto_improve_cycle = payload.job.auto_improve_cycle;
 							}
 							job.updated_at = nowIso();
-							await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+							await this.persistJob(job, previous);
 							return jsonResponse(ok({ job }));
 						}
 						break;
@@ -681,9 +740,10 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 							if (!job) {
 								return jsonResponse(fail('job_not_found', `job ${payload.job_id} not found`), 404);
 							}
+							const previous = structuredClone(job);
 							pushJobNote(job, payload.note);
 							job.updated_at = nowIso();
-							await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+							await this.persistJob(job, previous);
 							await this.writeAudit('job_append_note', { job_id: job.job_id, note: payload.note });
 							return jsonResponse(ok({ job }));
 						}
@@ -700,6 +760,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 									409,
 								);
 							}
+							const previous = structuredClone(job);
 							job.review_verdict = payload.review_verdict;
 							job.review_findings = payload.findings ?? [];
 							if (payload.review_verdict === 'blocked') {
@@ -717,7 +778,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 								}
 							}
 							job.updated_at = nowIso();
-							await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+							await this.persistJob(job, previous);
 							await this.writeAudit('job_submit_review', {
 								job_id: job.job_id,
 								verdict: payload.review_verdict,
