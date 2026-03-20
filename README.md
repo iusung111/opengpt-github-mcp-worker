@@ -65,9 +65,14 @@ Useful commands:
 npm run dev
 npm run cf-typegen
 npm run typecheck
-npm test -- --run
+npm run test:unit
+npm run test:integration
+npm run test:integration:runtime
+npm run test:all
 npm run ops:status
 ```
+
+`test:integration` is a host-aware wrapper. On Windows it skips Durable Object runtime tests and prints the exact command to run on Linux/CI. `test:integration:runtime` always runs the full DO-backed suite.
 
 ## Required Secrets
 

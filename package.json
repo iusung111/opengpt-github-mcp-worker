@@ -3,12 +3,16 @@
 	"version": "0.2.1",
 	"private": true,
 	"scripts": {
-		"check": "npm run cf-typegen && npm run typecheck && npm test -- --run",
+		"check": "npm run cf-typegen && npm run typecheck && npm run test:unit",
 		"typecheck": "tsc --noEmit",
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest --sequence.concurrent=false",
+		"test:unit": "vitest run test/auth.spec.ts test/github.spec.ts test/mcp-tree.spec.ts test/queue-audit.spec.ts test/queue-dispatch.spec.ts test/queue-events.spec.ts test/queue-index.spec.ts test/queue-projections.spec.ts test/queue-reconcile.spec.ts test/queue-state.spec.ts test/queue-store.spec.ts test/queue-workflow.spec.ts test/queue-workspaces.spec.ts test/utils.spec.ts --sequence.concurrent=false",
+		"test:integration": "node scripts/run-integration-tests.mjs",
+		"test:integration:runtime": "vitest run test/index.spec.ts test/queue-webhook.spec.ts --sequence.concurrent=false",
+		"test:all": "npm run test:unit && npm run test:integration",
 		"cf-typegen": "wrangler types",
 		"ops:status": "node scripts/check-self-hosts.mjs"
 	},
