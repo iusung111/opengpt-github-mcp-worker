@@ -72,39 +72,51 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		super(ctx, env);
 	}
 
+	private async getStorageValue<T>(key: string): Promise<T | null> {
+		return (await this.ctx.storage.get<T>(key)) ?? null;
+	}
+
+	private async putStorageValue(key: string, value: unknown): Promise<void> {
+		await this.ctx.storage.put(key, value);
+	}
+
+	private async deleteStorageValue(keys: string[] | string): Promise<void> {
+		if (Array.isArray(keys)) {
+			await this.ctx.storage.delete(keys);
+			return;
+		}
+		await this.ctx.storage.delete(keys);
+	}
+
+	private async listStoredJobs(): Promise<JobRecord[]> {
+		return Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values());
+	}
+
+	private async listStoredAudits(): Promise<Map<string, AuditRecord>> {
+		return this.ctx.storage.list<AuditRecord>({ prefix: 'audit:' });
+	}
+
+	private async listStoredDeliveries(): Promise<Map<string, DeliveryRecord>> {
+		return this.ctx.storage.list<DeliveryRecord>({ prefix: 'delivery:' });
+	}
+
 	private createQueueAuditContext() {
 		return {
 			getAuditRetentionCount: () => getAuditRetentionCount(this.env),
 			getDeliveryRetentionCount: () => getDeliveryRetentionCount(this.env),
-			listAuditStorage: async () => this.ctx.storage.list<AuditRecord>({ prefix: 'audit:' }),
-			listDeliveryStorage: async () => this.ctx.storage.list<DeliveryRecord>({ prefix: 'delivery:' }),
-			putStorage: async (key: string, value: unknown) => {
-				await this.ctx.storage.put(key, value);
-			},
-			deleteStorage: async (keys: string[] | string) => {
-				if (Array.isArray(keys)) {
-					await this.ctx.storage.delete(keys);
-					return;
-				}
-				await this.ctx.storage.delete(keys);
-			},
+			listAuditStorage: this.listStoredAudits.bind(this),
+			listDeliveryStorage: this.listStoredDeliveries.bind(this),
+			putStorage: this.putStorageValue.bind(this),
+			deleteStorage: this.deleteStorageValue.bind(this),
 		};
 	}
 
 	private createQueueStoreContext() {
 		return {
-			getStorage: async <T>(key: string) => ((await this.ctx.storage.get<T>(key)) ?? null),
-			putStorage: async (key: string, value: unknown) => {
-				await this.ctx.storage.put(key, value);
-			},
-			deleteStorage: async (keys: string[] | string) => {
-				if (Array.isArray(keys)) {
-					await this.ctx.storage.delete(keys);
-					return;
-				}
-				await this.ctx.storage.delete(keys);
-			},
-			listJobs: async () => Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()),
+			getStorage: this.getStorageValue.bind(this),
+			putStorage: this.putStorageValue.bind(this),
+			deleteStorage: this.deleteStorageValue.bind(this),
+			listJobs: this.listStoredJobs.bind(this),
 			reconcileJob: this.reconcileJob.bind(this),
 		};
 	}
@@ -232,7 +244,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 				reconcileJob: this.reconcileJob.bind(this),
 				listJobIndexPointers: async (prefix) =>
 					Array.from((await this.ctx.storage.list<JobIndexPointer>({ prefix })).values()),
-				listStoredJobs: async () => Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()),
+				listStoredJobs: this.listStoredJobs.bind(this),
 			},
 			status,
 			nextActor,
@@ -270,11 +282,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async putWorkspace(workspace: WorkspaceRecord): Promise<void> {
-		await this.ctx.storage.put(workspaceStorageKey(workspace.repo_key), workspace);
+		await this.putStorageValue(workspaceStorageKey(workspace.repo_key), workspace);
 	}
 
 	private async setActiveWorkspace(repoKey: string): Promise<void> {
-		await this.ctx.storage.put(activeWorkspaceStorageKey(), repoKey);
+		await this.putStorageValue(activeWorkspaceStorageKey(), repoKey);
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -304,9 +316,8 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 									ensureJobIndexes: this.ensureJobIndexes.bind(this),
 									getJob: this.getJob.bind(this),
 									findJob: this.findJob.bind(this),
-									storageGetIndex: async (key) => (await this.ctx.storage.get(key)) ?? null,
-									storageListJobs: async () =>
-										Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()),
+									storageGetIndex: this.getStorageValue.bind(this),
+									storageListJobs: this.listStoredJobs.bind(this),
 									persistJob: this.persistJob.bind(this),
 									autoRedispatchJob: this.autoRedispatchJob.bind(this),
 								},
