@@ -157,8 +157,7 @@ jobs:
         run: |
           DEPLOY_OUTPUT=$(npx wrangler deploy --env mirror)
           echo "$DEPLOY_OUTPUT"
-          URL=$(echo "$DEPLOY_OUTPUT" | grep -oE "https://[^ ]+\.workers\.dev" | head -1)
-          echo "DEPLOY_URL=$URL" >> $GITHUB_ENV
+          echo "DEPLOY_URL=${SELF_MIRROR_URL}" >> $GITHUB_ENV
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -168,8 +167,7 @@ jobs:
         run: |
           DEPLOY_OUTPUT=$(npx wrangler deploy)
           echo "$DEPLOY_OUTPUT"
-          URL=$(echo "$DEPLOY_OUTPUT" | grep -oE "https://[^ ]+\.workers\.dev" | head -1)
-          echo "DEPLOY_URL=$URL" >> $GITHUB_ENV
+          echo "DEPLOY_URL=${SELF_LIVE_URL}" >> $GITHUB_ENV
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
