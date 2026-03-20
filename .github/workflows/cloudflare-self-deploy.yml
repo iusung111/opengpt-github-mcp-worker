@@ -57,17 +57,31 @@ jobs:
         run: npm run check
 
       - name: Sync GitHub App private key to target Worker
-        if: ${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM != '' }}
         run: |
-          printf "%s" "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" | npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${{ env.DEPLOY_TARGET == 'mirror' && '--env mirror' || '' }}
+          TARGET_ARGS=""
+          if [ "${DEPLOY_TARGET}" = "mirror" ]; then
+            TARGET_ARGS="--env mirror"
+          fi
+          if [ -n "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" ]; then
+            printf "%s" "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" | npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${TARGET_ARGS}
+          else
+            echo "Skipping GitHub App private key sync because the repository secret is not set."
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Sync webhook secret to target Worker
-        if: ${{ secrets.WEBHOOK_SECRET != '' }}
         run: |
-          printf "%s" "${{ secrets.WEBHOOK_SECRET }}" | npx wrangler secret put WEBHOOK_SECRET ${{ env.DEPLOY_TARGET == 'mirror' && '--env mirror' || '' }}
+          TARGET_ARGS=""
+          if [ "${DEPLOY_TARGET}" = "mirror" ]; then
+            TARGET_ARGS="--env mirror"
+          fi
+          if [ -n "${{ secrets.WEBHOOK_SECRET }}" ]; then
+            printf "%s" "${{ secrets.WEBHOOK_SECRET }}" | npx wrangler secret put WEBHOOK_SECRET ${TARGET_ARGS}
+          else
+            echo "Skipping webhook secret sync because the repository secret is not set."
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
