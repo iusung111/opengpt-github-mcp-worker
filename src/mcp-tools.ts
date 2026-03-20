@@ -818,7 +818,7 @@ export function buildMcpServer(env: AppEnv): McpServer {
 				};
 				await writeSecret('CLOUDFLARE_API_TOKEN', cloudflare_api_token);
 				await writeSecret('CLOUDFLARE_ACCOUNT_ID', cloudflare_account_id);
-				await writeSecret('GITHUB_APP_PRIVATE_KEY_PEM', env.GITHUB_APP_PRIVATE_KEY_PEM);
+				await writeSecret('APP_PRIVATE_KEY_PEM', env.GITHUB_APP_PRIVATE_KEY_PEM);
 				await writeSecret('WEBHOOK_SECRET', env.WEBHOOK_SECRET);
 				return toolText(
 					ok(
@@ -827,7 +827,7 @@ export function buildMcpServer(env: AppEnv): McpServer {
 							secrets_written: [
 								'CLOUDFLARE_API_TOKEN',
 								'CLOUDFLARE_ACCOUNT_ID',
-								'GITHUB_APP_PRIVATE_KEY_PEM',
+								'APP_PRIVATE_KEY_PEM',
 								'WEBHOOK_SECRET',
 							],
 						},
