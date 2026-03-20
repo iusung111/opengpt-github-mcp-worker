@@ -153,8 +153,22 @@ Use `self_deploy` to dispatch mirror-first self deploys from MCP instead of send
 
 For GitHub Actions based self deploys, also add these repository secrets so the workflow can sync Worker secrets to `live` and `mirror`:
 
-- `GITHUB_APP_PRIVATE_KEY_PEM`
+- `APP_PRIVATE_KEY_PEM`
 - `WEBHOOK_SECRET`
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+## Queue API Access
+
+The maintenance queue endpoints under `/queue/*` are no longer public.
+
+Use one of these headers when calling `/queue/job` or `/queue/jobs` directly:
+
+- `X-Queue-Token: <WEBHOOK_SECRET>`
+- `Authorization: Bearer <WEBHOOK_SECRET>`
+
+This reuses the existing `WEBHOOK_SECRET` so webhook validation and queue maintenance stay aligned.
+GitHub webhook deliveries still authenticate with `X-Hub-Signature-256`; they do not use `X-Queue-Token`.
 
 ## Mirror-First Self Improvement
 
@@ -239,63 +253,63 @@ The `help` response is structured around workflows, recommended request fields, 
 Small real change with PR:
 
 ```text
-iusung111/OpenGPT에서 다음 변경 진행:
+iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃?吏꾪뻾:
 - job_id: change-001
-- 목표: README.md 마지막에 "Managed by OpenGPT GitHub MCP worker." 한 줄 추가
-- 변경 파일: README.md
+- 紐⑺몴: README.md 留덉?留됱뿉 "Managed by OpenGPT GitHub MCP worker." ??以?異붽?
+- 蹂寃??뚯씪: README.md
 - dry_run: false
-- 완료 기준: branch push와 PR 생성까지
+- ?꾨즺 湲곗?: branch push? PR ?앹꽦源뚯?
 ```
 
 Single file code edit:
 
 ```text
-iusung111/OpenGPT에서 다음 변경 진행:
+iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃?吏꾪뻾:
 - job_id: fix-001
-- 목표: <구체적인 수정 내용>
-- 변경 파일: <예: app/main.py>
+- 紐⑺몴: <援ъ껜?곸씤 ?섏젙 ?댁슜>
+- 蹂寃??뚯씪: <?? app/main.py>
 - dry_run: false
-- 완료 기준: 가능한 범위의 검증 후 PR 생성
+- ?꾨즺 湲곗?: 媛?ν븳 踰붿쐞??寃利???PR ?앹꽦
 ```
 
 Real change intended for `main`:
 
 ```text
-iusung111/OpenGPT에서 다음 변경을 진행하고 main 반영 기준으로 마무리해줘:
+iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃쎌쓣 吏꾪뻾?섍퀬 main 諛섏쁺 湲곗??쇰줈 留덈Т由ы빐以?
 - job_id: main-ready-001
-- 목표: <구체적인 수정 내용>
-- 변경 파일: <path들>
+- 紐⑺몴: <援ъ껜?곸씤 ?섏젙 ?댁슜>
+- 蹂寃??뚯씪: <path??
 - dry_run: false
-- 완료 기준: 검증 완료, branch push, PR 생성, 그리고 main 반영에 필요한 마지막 액션 정리까지
+- ?꾨즺 湲곗?: 寃利??꾨즺, branch push, PR ?앹꽦, 洹몃━怨?main 諛섏쁺???꾩슂??留덉?留??≪뀡 ?뺣━源뚯?
 ```
 
 Dry-run only:
 
 ```text
-iusung111/OpenGPT에서 다음 작업을 dry-run으로 검증해줘:
+iusung111/OpenGPT?먯꽌 ?ㅼ쓬 ?묒뾽??dry-run?쇰줈 寃利앺빐以?
 - job_id: dryrun-001
-- 목표: <무엇을 바꿀지>
-- 변경 파일: <path들>
+- 紐⑺몴: <臾댁뾿??諛붽?吏>
+- 蹂寃??뚯씪: <path??
 - dry_run: true
-- 완료 기준: workflow success와 queue 상태 전이 확인
+- ?꾨즺 湲곗?: workflow success? queue ?곹깭 ?꾩씠 ?뺤씤
 ```
 
 Reviewer follow-up:
 
 ```text
-iusung111/OpenGPT에서 job_id <값>의 현재 상태를 확인하고,
-PR / workflow / queue 기준으로 다음 액션을 정리해줘.
+iusung111/OpenGPT?먯꽌 job_id <媛????꾩옱 ?곹깭瑜??뺤씤?섍퀬,
+PR / workflow / queue 湲곗??쇰줈 ?ㅼ쓬 ?≪뀡???뺣━?댁쨾.
 ```
 
 Recommended request shape:
 
 - `job_id`: unique value like `change-001`, `fix-002`, `docs-003`
-- `목표`: exact user-facing or code-facing change
-- `변경 파일`: one or more expected target paths
+- `紐⑺몴`: exact user-facing or code-facing change
+- `蹂寃??뚯씪`: one or more expected target paths
 - `dry_run`: `true` for validation only, `false` for branch and PR creation
-- `완료 기준`: what counts as done
+- `?꾨즺 湲곗?`: what counts as done
 
-If the user says `main에 반영`, interpret that as:
+If the user says `main??諛섏쁺`, interpret that as:
 
 - this is a real change request, not a dry run
 - complete validation and create or update the PR needed for merge

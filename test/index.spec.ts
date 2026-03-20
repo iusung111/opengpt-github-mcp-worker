@@ -2,7 +2,7 @@ import { env, SELF } from 'cloudflare:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { describe, expect, it } from 'vitest';
-import { buildDispatchFingerprint } from '../src/index';
+import { buildDispatchFingerprint } from '../src/utils';
 
 async function webhookSignature(body: string): Promise<string> {
 	const key = await crypto.subtle.importKey(
@@ -34,6 +34,15 @@ async function waitFor(ms: number): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const queueJsonHeaders = {
+	'content-type': 'application/json',
+	'x-queue-token': 'test-webhook-secret',
+};
+
+const queueAuthHeaders = {
+	'x-queue-token': 'test-webhook-secret',
+};
+
 describe('opengpt-github-mcp-worker', () => {
 	it('returns healthz payload', async () => {
 		const response = await SELF.fetch('https://example.com/healthz');
@@ -48,7 +57,7 @@ describe('opengpt-github-mcp-worker', () => {
 	it('creates and fetches queue jobs', async () => {
 		const createResponse = await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-1',
 				repo: 'iusung111/OpenGPT',
@@ -65,7 +74,9 @@ describe('opengpt-github-mcp-worker', () => {
 		expect(created.ok).toBe(true);
 		expect(created.data.job.job_id).toBe('job-1');
 
-		const getResponse = await SELF.fetch('https://example.com/queue/job/job-1');
+		const getResponse = await SELF.fetch('https://example.com/queue/job/job-1', {
+			headers: queueAuthHeaders,
+		});
 		expect(getResponse.status).toBe(200);
 		const fetched = (await getResponse.json()) as {
 			ok: boolean;
@@ -75,10 +86,20 @@ describe('opengpt-github-mcp-worker', () => {
 		expect(fetched.data.job.work_branch).toBe('agent/job-1');
 	});
 
+	it('rejects unauthenticated queue access', async () => {
+		const response = await SELF.fetch('https://example.com/queue/jobs');
+		expect(response.status).toBe(401);
+		await expect(response.json()).resolves.toMatchObject({
+			ok: false,
+			code: 'unauthorized',
+			error: 'invalid queue token',
+		});
+	});
+
 	it('updates queue state from webhook payload', async () => {
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-2',
 				repo: 'iusung111/OpenGPT',
@@ -227,7 +248,7 @@ describe('opengpt-github-mcp-worker', () => {
 	it('reconciles stale working jobs to rework when no workflow run is linked', async () => {
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-stale-working',
 				repo: 'iusung111/OpenGPT',
@@ -241,7 +262,9 @@ describe('opengpt-github-mcp-worker', () => {
 
 		await waitFor(35);
 
-		const getResponse = await SELF.fetch('https://example.com/queue/job/job-stale-working');
+		const getResponse = await SELF.fetch('https://example.com/queue/job/job-stale-working', {
+			headers: queueAuthHeaders,
+		});
 		await expect(getResponse.json()).resolves.toMatchObject({
 			ok: true,
 			data: {
@@ -257,7 +280,7 @@ describe('opengpt-github-mcp-worker', () => {
 	it('marks stale review jobs for visibility without changing reviewer ownership', async () => {
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-stale-review',
 				repo: 'iusung111/OpenGPT',
@@ -270,7 +293,9 @@ describe('opengpt-github-mcp-worker', () => {
 
 		await waitFor(35);
 
-		const getResponse = await SELF.fetch('https://example.com/queue/job/job-stale-review');
+		const getResponse = await SELF.fetch('https://example.com/queue/job/job-stale-review', {
+			headers: queueAuthHeaders,
+		});
 		await expect(getResponse.json()).resolves.toMatchObject({
 			ok: true,
 			data: {
@@ -286,7 +311,7 @@ describe('opengpt-github-mcp-worker', () => {
 	it('does not append duplicate stale review notes on repeated reads', async () => {
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-stale-review-repeat',
 				repo: 'iusung111/OpenGPT',
@@ -299,8 +324,12 @@ describe('opengpt-github-mcp-worker', () => {
 
 		await waitFor(35);
 
-		await SELF.fetch('https://example.com/queue/job/job-stale-review-repeat');
-		const second = await SELF.fetch('https://example.com/queue/job/job-stale-review-repeat');
+		await SELF.fetch('https://example.com/queue/job/job-stale-review-repeat', {
+			headers: queueAuthHeaders,
+		});
+		const second = await SELF.fetch('https://example.com/queue/job/job-stale-review-repeat', {
+			headers: queueAuthHeaders,
+		});
 		await expect(second.json()).resolves.toMatchObject({
 			ok: true,
 			data: {
@@ -315,7 +344,7 @@ describe('opengpt-github-mcp-worker', () => {
 	it('preserves agent work branch when workflow_run is linked by run id from main ref', async () => {
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-3',
 				repo: 'iusung111/OpenGPT',
@@ -377,7 +406,9 @@ describe('opengpt-github-mcp-worker', () => {
 			},
 		});
 
-		const getResponse = await SELF.fetch('https://example.com/queue/job/job-3');
+		const getResponse = await SELF.fetch('https://example.com/queue/job/job-3', {
+			headers: queueAuthHeaders,
+		});
 		await expect(getResponse.json()).resolves.toMatchObject({
 			ok: true,
 			data: {
@@ -415,7 +446,7 @@ describe('opengpt-github-mcp-worker', () => {
 	it('deduplicates repeated webhook deliveries by GitHub delivery id', async () => {
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-dup-webhook',
 				repo: 'iusung111/OpenGPT',
@@ -664,14 +695,14 @@ describe('opengpt-github-mcp-worker', () => {
 		expect(JSON.parse(defaultHelpText)).toMatchObject({
 			ok: true,
 			data: {
-				summary: expect.stringContaining('GitHub repo 작업'),
+				summary: expect.stringContaining('GitHub repo ?묒뾽'),
 				recommended_workflow: 'real_change',
 				how_to_ask: {
-					required_minimum: ['repo', '목표'],
+					required_minimum: ['repo', '紐⑺몴'],
 				},
 				workflows: expect.arrayContaining([
-					expect.objectContaining({ id: 'real_change', label: '코드 수정과 PR 생성' }),
-					expect.objectContaining({ id: 'main_ready', label: 'main 반영 직전까지 준비' }),
+					expect.objectContaining({ id: 'real_change', label: '肄붾뱶 ?섏젙怨?PR ?앹꽦' }),
+					expect.objectContaining({ id: 'main_ready', label: 'main 諛섏쁺 吏곸쟾源뚯? 以鍮? }),
 				]),
 			},
 		});
@@ -679,14 +710,14 @@ describe('opengpt-github-mcp-worker', () => {
 		const mainHelpResult = await client.callTool({
 			name: 'help',
 			arguments: {
-				query: 'main에 반영하려면 어떻게 말해?',
+				query: 'main??諛섏쁺?섎젮硫??대뼸寃?留먰빐?',
 			},
 		});
 		const mainHelpText = 'text' in mainHelpResult.content[0] ? mainHelpResult.content[0].text : '';
 		expect(JSON.parse(mainHelpText)).toMatchObject({
 			ok: true,
 			data: {
-				summary: expect.stringContaining('main 반영 요청'),
+				summary: expect.stringContaining('main 諛섏쁺 ?붿껌'),
 				recommended_workflow: 'main_ready',
 				recommended_template: {
 					label: 'Main-ready change',
@@ -903,7 +934,7 @@ describe('opengpt-github-mcp-worker', () => {
 
 		await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-dispatch-dedupe',
 				repo: 'iusung111/OpenGPT',
