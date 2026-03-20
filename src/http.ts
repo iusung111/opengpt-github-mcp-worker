@@ -1,7 +1,6 @@
 import { createMcpHandler } from 'agents/mcp';
 import { githubAuthConfigured, githubGet } from './github';
 import { buildMcpServer } from './mcp-tools';
-import { verifyWebhookSignature } from './queue';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import {
 	getAllowedRepos,
@@ -20,6 +19,7 @@ import {
 	jsonResponse,
 } from './utils';
 import { queueRequestAuthorized } from './auth';
+import { verifyWebhookSignature } from './queue-helpers';
 
 export async function handleWebhook(request: Request, env: AppEnv): Promise<Response> {
 	if (env.REQUIRE_WEBHOOK_SECRET === 'true' && !env.WEBHOOK_SECRET) {

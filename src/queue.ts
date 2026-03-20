@@ -31,170 +31,19 @@ import {
 	fail
 } from './utils';
 import { githubAuthConfigured } from './github';
-
-const encoder = new TextEncoder();
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function findLatestWorkflowRunId(
-	env: AppEnv,
-	owner: string,
-	repo: string,
-	workflowId: string,
-	ref: string,
-	dispatchedAtIso: string,
-	maxAttempts = 5,
-	delayMs = 1000,
-): Promise<
-	| {
-			id: number;
-			created_at?: string;
-			head_branch?: string;
-			name?: string;
-			status?: string;
-			conclusion?: string;
-			html_url?: string;
-	  }
-	| undefined
-> {
-	const dispatchedAt = Date.parse(dispatchedAtIso);
-	for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-		const data = (await githubGet(
-			env,
-			`/repos/${owner}/${repo}/actions/workflows/${workflowId}/runs`,
-			{ params: { branch: ref, event: 'workflow_dispatch', per_page: 10 } },
-		)) as {
-			workflow_runs?: Array<{
-				id?: number;
-				created_at?: string;
-				head_branch?: string;
-				name?: string;
-				status?: string;
-				conclusion?: string;
-				html_url?: string;
-			}>;
-		};
-		const run = (data.workflow_runs ?? []).find((item) => {
-			if (!item.id || !item.created_at) {
-				return false;
-			}
-			return Date.parse(item.created_at) >= dispatchedAt - 15_000;
-		});
-		if (run?.id) {
-			return {
-				id: run.id,
-				created_at: run.created_at,
-				head_branch: run.head_branch,
-				name: run.name,
-				status: run.status,
-				conclusion: run.conclusion,
-				html_url: run.html_url,
-			};
-		}
-		if (delayMs > 0) {
-			await sleep(delayMs);
-		}
-	}
-	return undefined;
-}
-
-function jobStorageKey(jobId: string): string {
-	return `job:${jobId}`;
-}
-
-function auditStorageKey(id: string): string {
-	return `audit:${id}`;
-}
-
-function deliveryStorageKey(deliveryId: string): string {
-	return `delivery:${deliveryId}`;
-}
-
-function workspaceStorageKey(repoKey: string): string {
-	return `workspace:${repoKey.toLowerCase()}`;
-}
-
-function activeWorkspaceStorageKey(): string {
-	return 'workspace:active_repo_key';
-}
-
-function branchMatchesJobHint(workBranch: string, job: JobRecord): boolean {
-	if (!workBranch.startsWith('agent/')) {
-		return false;
-	}
-	const encodedJobId = `agent/${job.job_id}`;
-	return workBranch === encodedJobId || workBranch.startsWith(`${encodedJobId}-`);
-}
-
-function parseJobIdFromPrBody(body?: string): string | null {
-	if (!body) {
-		return null;
-	}
-	const metadataMatch = body.match(/job_id:\s*([A-Za-z0-9._-]+)/i);
-	return metadataMatch?.[1] ?? null;
-}
-
-function branchMatchScore(workBranch: string, job: JobRecord): number {
-	if (!workBranch || job.work_branch === workBranch) {
-		return 4;
-	}
-	if (job.work_branch && workBranch.startsWith(`${job.work_branch}-`)) {
-		return 3;
-	}
-	if (branchMatchesJobHint(workBranch, job)) {
-		return 2;
-	}
-	return 0;
-}
-
-function normalizeLookup(value: unknown): string {
-	return String(value ?? '')
-		.trim()
-		.toLowerCase()
-		.replace(/[\s_]+/g, '-');
-}
-
-function isAbsoluteWorkspacePath(path: string): boolean {
-	return (
-		path.startsWith('/') ||
-		/^[A-Za-z]:[\\/]/.test(path) ||
-		path.startsWith('\\\\')
-	);
-}
-
-function ensureSafeWorkspacePath(path: string): void {
-	const normalized = String(path ?? '').trim();
-	if (!normalized || !isAbsoluteWorkspacePath(normalized) || normalized.includes('..')) {
-		throw new Error(`unsafe workspace path: ${path}`);
-	}
-}
-
-async function sha256HmacHex(secret: string, payload: string): Promise<string> {
-	const key = await crypto.subtle.importKey(
-		'raw',
-		encoder.encode(secret),
-		{ name: 'HMAC', hash: 'SHA-256' },
-		false,
-		['sign'],
-	);
-	const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
-	return Array.from(new Uint8Array(signature))
-		.map((byte) => byte.toString(16).padStart(2, '0'))
-		.join('');
-}
-
-export async function verifyWebhookSignature(secret: string, payload: string, signatureHeader: string | null): Promise<boolean> {
-	if (!secret) {
-		return true;
-	}
-	if (!signatureHeader?.startsWith('sha256=')) {
-		return false;
-	}
-	const expected = `sha256=${await sha256HmacHex(secret, payload)}`;
-	return expected === signatureHeader;
-}
+import {
+	activeWorkspaceStorageKey,
+	auditStorageKey,
+	branchMatchScore,
+	deliveryStorageKey,
+	ensureSafeWorkspacePath,
+	jobStorageKey,
+	normalizeLookup,
+	parseJobIdFromPrBody,
+	verifyWebhookSignature,
+	workspaceStorageKey,
+} from './queue-helpers';
+import { findLatestWorkflowRunId } from './queue-github';
 
 export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	constructor(ctx: DurableObjectState, env: AppEnv) {
