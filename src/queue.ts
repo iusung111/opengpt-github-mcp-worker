@@ -46,6 +46,7 @@ import {
 import { applyPullRequestEventToJob } from './queue-events';
 import { findLatestWorkflowRunId } from './queue-github';
 import { getDispatchRequest, isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob } from './queue-state';
+import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
 import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
 
 export class JobQueueDurableObject extends DurableObject<AppEnv> {
@@ -379,25 +380,24 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (!run) {
 			return job;
 		}
-		recordWorkflowSnapshot(job, run);
 		if (run.status === 'completed') {
-			if (run.conclusion === 'success' && (isDryRunJob(job) || job.pr_number)) {
-				transitionJob(job, 'review_pending', 'reviewer');
-			} else if (run.conclusion === 'success') {
-				pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
-			} else if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
+			const decision = decideCompletedWorkflowRun(job, run, 'reconcile');
+			applyCompletedWorkflowRunDecision(job, run, decision);
+			if (decision.shouldAutoRedispatch) {
 				job.auto_improve_cycle += 1;
-				const redispatched = await this.autoRedispatchJob(job, 'webhook reported failure');
+				const redispatched = await this.autoRedispatchJob(
+					job,
+					decision.redispatchReason ?? 'github run reconciliation failure',
+				);
 				if (!redispatched) {
 					transitionJob(job, 'rework_pending', 'worker');
 				}
-			} else {
-				transitionJob(job, 'failed', 'system');
-				job.last_error = `${run.name ?? 'workflow'} concluded with ${run.conclusion ?? 'unknown'}`;
 			}
 			job.stale_reason = undefined;
 			job.updated_at = nowIso();
 			await this.ctx.storage.put(jobStorageKey(job.job_id), job);
+		} else {
+			recordWorkflowSnapshot(job, run);
 		}
 		if (job.status === 'review_pending' && isOlderThan(job.updated_at, getReviewStaleAfterMs(this.env))) {
 			await this.markJobStale(job, 'review_timeout', 'review pending beyond configured threshold');
@@ -553,20 +553,22 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			if (job) {
 				job.last_webhook_event_at = nowIso();
 				job.workflow_run_id = run.id;
-				recordWorkflowSnapshot(job, run);
-				if (run.conclusion === 'success' && (isDryRunJob(job) || job.pr_number)) {
-					transitionJob(job, 'review_pending', 'reviewer');
-				} else if (run.conclusion === 'success') {
-					pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
-				} else if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
-					job.auto_improve_cycle += 1;
-					const redispatched = await this.autoRedispatchJob(job, 'webhook reported failure');
-					if (!redispatched) {
-						transitionJob(job, 'rework_pending', 'worker');
+				if (run.status === 'completed') {
+					const decision = decideCompletedWorkflowRun(job, run, 'webhook');
+					applyCompletedWorkflowRunDecision(job, run, decision);
+					if (decision.shouldAutoRedispatch) {
+						job.auto_improve_cycle += 1;
+						const redispatched = await this.autoRedispatchJob(
+							job,
+							decision.redispatchReason ?? 'webhook reported failure',
+						);
+						if (!redispatched) {
+							transitionJob(job, 'rework_pending', 'worker');
+						}
 					}
+					job.stale_reason = undefined;
 				} else {
-					transitionJob(job, 'failed', 'system');
-					job.last_error = `${run.name ?? 'workflow'} failed (webhook)`;
+					recordWorkflowSnapshot(job, run);
 				}
 				job.updated_at = nowIso();
 				await this.ctx.storage.put(jobStorageKey(job.job_id), job);
