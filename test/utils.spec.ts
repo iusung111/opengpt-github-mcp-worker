@@ -31,11 +31,25 @@ describe('normalizeWorkflowInputs', () => {
 		const malformedJson = '{"write_files":[{"path":"docs/test.md","content":"line1\nline2"}]}';
 		const malformedB64 = Buffer.from(malformedJson, 'utf8').toString('base64');
 
-		expect(() =>
-			normalizeWorkflowInputs({
-				job_id: 'job-2',
-				instructions_b64: malformedB64,
-			}),
-		).toThrow(/instructions_b64 must decode to valid JSON/);
+	expect(() =>
+		normalizeWorkflowInputs({
+			job_id: 'job-2',
+			instructions_b64: malformedB64,
+		}),
+	).toThrow(/instructions_b64 must decode to valid JSON/);
+	});
+
+	it('accepts pr-merge workflow_dispatch inputs', () => {
+		const normalized = normalizeWorkflowInputs({
+			pull_number: '29',
+			merge_method: 'squash',
+			delete_branch: true,
+		});
+
+		expect(normalized).toMatchObject({
+			pull_number: '29',
+			merge_method: 'squash',
+			delete_branch: true,
+		});
 	});
 });

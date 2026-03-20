@@ -178,6 +178,9 @@ export function validateWorkflowInputs(inputs: Record<string, unknown>): void {
 		'reason',
 		'expected_commit_sha',
 		'verify_mirror_first',
+		'pull_number',
+		'merge_method',
+		'delete_branch',
 	]);
 	for (const key of Object.keys(inputs)) {
 		if (!allowedKeys.has(key)) {
