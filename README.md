@@ -80,6 +80,10 @@ Validation policy:
 - Cloudflare live and mirror health checks are the source of truth for deployed behavior.
 - Windows local runs are for fast unit checks and manual smoke work, not for authoritative DO runtime gating.
 - `push main` is expected to validate on Ubuntu first and then deploy to mirror automatically.
+- Runtime integration coverage is split by surface:
+  - `test/runtime-http.spec.ts` covers HTTP routes, queue endpoints, and webhook handling.
+  - `test/runtime-mcp.spec.ts` covers MCP tools and queue actions exposed through `/mcp`.
+  - `test/queue-webhook.spec.ts` keeps focused webhook matching and reconciliation coverage.
 
 ## Required Secrets
 
