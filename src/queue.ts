@@ -663,14 +663,14 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 					workBranch.startsWith(`${job.work_branch}-`) ||
 					branchMatchesJobHint(workBranch, job)
 				);
-			});
+			}, { reconcile: false });
 	}
 
 	private async findByRepoAndRun(repo: string, runId?: number): Promise<JobRecord | null> {
 		if (!runId) {
 			return null;
 		}
-		return this.findJob((job) => job.repo === repo && job.workflow_run_id === runId);
+		return this.findJob((job) => job.repo === repo && job.workflow_run_id === runId, { reconcile: false });
 	}
 
 	private normalizeJob(input: Partial<JobRecord> & { job_id: string }): JobRecord {
