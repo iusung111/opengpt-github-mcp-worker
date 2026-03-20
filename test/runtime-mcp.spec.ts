@@ -279,7 +279,12 @@ describe('runtime mcp surface', () => {
 		expect(defaultHelpPayload).toMatchObject({
 			ok: true,
 			data: {
+				title: 'GitHub MCP work selection guide',
 				recommended_workflow: 'real_change',
+				request_checklist: expect.arrayContaining(['repo', 'request', 'target_paths']),
+				permission_bundle_recommendation: {
+					preset: 'implementation_with_pr',
+				},
 				recommended_template: expect.objectContaining({
 					label: 'Real change with PR',
 				}),
@@ -298,6 +303,9 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				recommended_workflow: 'main_ready',
+				permission_bundle_recommendation: {
+					preset: 'implementation_with_workflow',
+				},
 				recommended_template: {
 					label: 'Main-ready change',
 				},

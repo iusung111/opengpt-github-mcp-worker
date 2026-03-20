@@ -110,6 +110,27 @@ function normalizeHelpQuery(query: string | undefined): string {
 	return (query ?? '').trim().toLowerCase();
 }
 
+function helpContextForWorkflow(workflow: 'real_change' | 'main_ready' | 'dry_run' | 'review_followup') {
+	const permissionPresetByWorkflow = {
+		real_change: 'implementation_with_pr',
+		main_ready: 'implementation_with_workflow',
+		dry_run: 'repo_readonly_review',
+		review_followup: 'review_followup',
+	} as const;
+
+	const whenToUseByWorkflow = {
+		real_change: 'Use this when the user wants a concrete repository change and expects a branch plus pull request.',
+		main_ready: 'Use this when the user wants a merge-ready result, not just a draft branch or dry run.',
+		dry_run: 'Use this when the user wants validation, investigation, or a no-commit rehearsal.',
+		review_followup: 'Use this when the user is responding to review findings on an existing branch or pull request.',
+	} as const;
+
+	return {
+		recommended_permission_preset: permissionPresetByWorkflow[workflow],
+		when_to_use: whenToUseByWorkflow[workflow],
+	};
+}
+
 function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 	const normalized = normalizeHelpQuery(query);
 	const templates = {
@@ -162,38 +183,56 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		label: preset.label,
 		capabilities: preset.capabilities,
 	}));
+
+	let recommendedWorkflow: 'real_change' | 'main_ready' | 'dry_run' | 'review_followup' = 'real_change';
+	let summary =
+		'Include the repo, the exact requested change, expected target paths, dry_run intent, and what counts as done.';
+	let relatedWorkflows = ['main_ready', 'dry_run', 'review_followup'];
+
 	if (normalized.includes('main')) {
-		return {
-			summary: 'Use this when the user wants a real change prepared all the way to a merge-ready PR on main.',
-			recommended_workflow: 'main_ready',
-			recommended_template: templates.main_ready,
-			related_workflows: ['real_change', 'dry_run', 'review_followup'],
-			permission_presets: permissionPresets,
-		};
+		recommendedWorkflow = 'main_ready';
+		summary = 'Use this when the user wants a real change prepared all the way to a merge-ready PR on main.';
+		relatedWorkflows = ['real_change', 'dry_run', 'review_followup'];
+	} else if (normalized.includes('dry') || normalized.includes('test')) {
+		recommendedWorkflow = 'dry_run';
+		summary = 'Use this when the user wants validation, investigation, or a no-commit rehearsal without a real merge path.';
+		relatedWorkflows = ['real_change', 'main_ready'];
+	} else if (normalized.includes('review')) {
+		recommendedWorkflow = 'review_followup';
+		summary = 'Use this when the user is responding to review feedback on an existing branch or pull request.';
+		relatedWorkflows = ['real_change', 'main_ready'];
 	}
-	if (normalized.includes('dry') || normalized.includes('test')) {
-		return {
-			summary: 'Use this when the user wants validation, investigation, or a no-commit rehearsal without a real merge path.',
-			recommended_workflow: 'dry_run',
-			recommended_template: templates.dry_run,
-			related_workflows: ['real_change', 'main_ready'],
-			permission_presets: permissionPresets,
-		};
-	}
-	if (normalized.includes('review')) {
-		return {
-			summary: 'Use this when the user is responding to review feedback on an existing branch or pull request.',
-			recommended_workflow: 'review_followup',
-			recommended_template: templates.review_followup,
-			related_workflows: ['real_change', 'main_ready'],
-			permission_presets: permissionPresets,
-		};
-	}
+
+	const context = helpContextForWorkflow(recommendedWorkflow);
 	return {
-		summary: 'Include the repo, the exact requested change, expected target paths, dry_run intent, and what counts as done.',
-		recommended_workflow: 'real_change',
-		recommended_template: templates.real_change,
-		related_workflows: ['main_ready', 'dry_run', 'review_followup'],
+		title: 'GitHub MCP work selection guide',
+		summary,
+		recommended_workflow: recommendedWorkflow,
+		recommended_template: templates[recommendedWorkflow],
+		related_workflows: relatedWorkflows,
+		when_to_use: context.when_to_use,
+		quick_start: [
+			'pick the workflow that matches the user intent',
+			'fill repo, request, target_paths, dry_run, and done_when explicitly',
+			'request a single permission bundle early if the run will need multiple write actions',
+			'prefer job_progress for concise status and audit_list only for full timeline review',
+		],
+		request_checklist: ['repo', 'request', 'target_paths', 'dry_run', 'done_when'],
+		permission_bundle_recommendation: {
+			preset: context.recommended_permission_preset,
+			why: 'Use one up-front approval bundle when the run will touch multiple tools or follow-up actions.',
+		},
+		workflow_choices: {
+			real_change: { label: templates.real_change.label, when_to_use: helpContextForWorkflow('real_change').when_to_use },
+			main_ready: { label: templates.main_ready.label, when_to_use: helpContextForWorkflow('main_ready').when_to_use },
+			dry_run: { label: templates.dry_run.label, when_to_use: helpContextForWorkflow('dry_run').when_to_use },
+			review_followup: { label: templates.review_followup.label, when_to_use: helpContextForWorkflow('review_followup').when_to_use },
+		},
+		tool_group_summary: listToolGroups().map((group) => ({
+			id: group.id,
+			label: group.label,
+			description: group.description,
+		})),
 		permission_presets: permissionPresets,
 	};
 }

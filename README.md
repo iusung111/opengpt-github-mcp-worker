@@ -265,7 +265,7 @@ For request templates and project-instruction text, use:
 
 For ad hoc prompting inside ChatGPT:
 
-- call `help` first when the user is unsure how to phrase work
+- call `help` first when the user is unsure how to phrase work; it now returns workflow choice, request checklist, and permission bundle guidance
 - prefer `job_progress` for concise status and `audit_list` only for full history
 - use queue state and GitHub state as the source of truth, not an unregistered local folder
 
