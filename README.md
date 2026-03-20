@@ -2,6 +2,17 @@
 
 Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Developer mode.
 
+## Quick Start
+
+1. Install dependencies with `npm install`.
+2. Put required secrets with `npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM` and `npx wrangler secret put WEBHOOK_SECRET`.
+3. Fill local `.dev.vars` from `.dev.vars.example` when developing locally.
+4. Run `npm run check` for local validation.
+5. Deploy with `npm run deploy` or rely on `push main -> cloudflare-ci -> cloudflare-self-deploy`.
+
+For the generated tool catalog, see [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
+For release history, see [CHANGELOG.md](/d:/VScode/opengpt-github-mcp-worker/CHANGELOG.md).
+
 ## What This Repo Does
 
 - Exposes a remote `/mcp` endpoint for ChatGPT Developer mode.
