@@ -3,7 +3,8 @@ import { spawnSync } from 'node:child_process';
 const vitestArgs = [
 	'vitest',
 	'run',
-	'test/index.spec.ts',
+	'test/runtime-http.spec.ts',
+	'test/runtime-mcp.spec.ts',
 	'test/queue-webhook.spec.ts',
 	'--sequence.concurrent=false',
 ];
