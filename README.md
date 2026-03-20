@@ -266,126 +266,18 @@ Operational safety additions:
 - selected write tools now return more specific failure codes such as `workflow_not_allowlisted` and `branch_has_active_job`
 - approved pull requests can be merged directly through the `pr_merge` MCP tool when the repo and PR state allow it
 
-## Change Request Templates
+## ChatGPT Usage Guides
 
-Use these directly in ChatGPT after selecting the MCP connector.
+For request templates and project-instruction text, use:
 
-If the user first asks what kinds of work are supported or how to phrase a request, call `help` before starting implementation.
-The `help` response is structured around workflows, recommended request fields, examples, and next actions so web GPT can guide the user without a long free-form explanation.
+- [CHATGPT_PROJECT_INSTRUCTIONS.md](/d:/VScode/opengpt-github-mcp-worker/CHATGPT_PROJECT_INSTRUCTIONS.md)
+- [CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md](/d:/VScode/opengpt-github-mcp-worker/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md)
 
-Small real change with PR:
+For ad hoc prompting inside ChatGPT:
 
-```text
-Make a real change in iusung111/OpenGPT and open a PR.
-- job_id: change-001
-- request: append "Managed by OpenGPT GitHub MCP worker." to README.md
-- target_paths: README.md
-- dry_run: false
-- done_when: branch is pushed and a PR is created
-```
-
-Single file code edit:
-
-```text
-Make a real change in iusung111/OpenGPT and open a PR.
-- job_id: fix-001
-- request: <exact code change to make>
-- target_paths: <app/main.py>
-- dry_run: false
-- done_when: validation passes and a PR is created
-```
-
-Real change intended for `main`:
-
-```text
-Prepare a real change in iusung111/OpenGPT so it is ready for merge to main.
-- job_id: main-ready-001
-- request: <exact user-facing or code-facing change>
-- target_paths: <path>
-- dry_run: false
-- done_when: validation is complete, branch is pushed, PR is created, and merge is attempted if allowed
-```
-
-Dry-run only:
-
-```text
-Run a dry-run request for iusung111/OpenGPT without creating a final branch or PR.
-- job_id: dryrun-001
-- request: <exact user-facing or code-facing change>
-- target_paths: <path>
-- dry_run: true
-- done_when: validation completes and the queue captures the result without merge intent
-```
-
-Reviewer follow-up:
-
-```text
-Follow up on job_id <existing job id>.
-Use PR, workflow, and queue state to decide the next action and summarize the exact blocker or next step.
-```
-
-Recommended request shape:
-
-- `job_id`: unique value like `change-001`, `fix-002`, `docs-003`
-- `request`: exact user-facing or code-facing change
-- `target_paths`: one or more expected target paths
-- `dry_run`: `true` for validation only, `false` for branch and PR creation
-- `done_when`: what counts as done
-
-If the user says `main ready` or asks for merge-ready output, interpret that as:
-
-- this is a real change request, not a dry run
-- complete validation and create or update the PR needed for merge
-- if merge tooling is available and the PR is ready, attempt the merge
-- if direct merge is unavailable, report the exact remaining merge step instead of pretending `main` was updated directly
-
-## Chat UX Guidance
-
-If you want web ChatGPT to behave more like Codex without requiring rigid user prompts every time, use the project instruction guide in [CHATGPT_PROJECT_INSTRUCTIONS.md](/home/uieseong/workspace/opengpt-github-mcp-worker/CHATGPT_PROJECT_INSTRUCTIONS.md).
-
-For a shorter version that is easier to paste into ChatGPT Project instructions, use [CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md](/home/uieseong/workspace/opengpt-github-mcp-worker/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md).
-
-It includes:
-
-- natural-language-first development flow
-- automatic job id and execution-path selection
-- dedicated GitHub workspace folder defaults
-- similar-folder detection before creating a new repo workspace
-- a short confirmation rule only when reuse is ambiguous
-
-The MCP server now also exposes workspace-registry tools so web ChatGPT can:
-
-- use the GitHub repo itself as the default working context
-- inspect open PRs, active jobs, and recent workflow runs before starting new work
-- look up the default GitHub workspace folder for a repo
-- find similar registered workspace folders before creating a new one
-- register a confirmed workspace path for future reuse
-- keep a single active repo context so workspace recency stays unified around the repo currently being worked on
-
-For longer read or investigation phases, web ChatGPT can make progress visible by:
-
-- appending short milestones with `job_append_note`
-- reading the latest milestone and recent audit trail with `job_progress`
-- using `audit_list` only when the full recent timeline is needed
-
-For write-heavy web runs, web ChatGPT should also avoid late approval stalls by:
-
-- requesting the smallest useful permission bundle near the start of the run
-- including expected follow-up steps such as workflow reruns, PR updates, or branch cleanup in that initial approval request
-- marking approval waits as explicit blocked milestones with `job_append_note`
-- surfacing the blocked state with `job_progress` instead of appearing idle
-
-For completion messages in web ChatGPT:
-
-- show a short summary first by default
-- keep the default close-out focused on outcome, validation, and blockers
-- hold back detailed file lists, logs, and audit history unless the user asks for more detail
-
-Important limit:
-
-- the preferred source of truth is now the GitHub repo and MCP queue state, not a local folder
-- the remote MCP server still cannot inspect your local filesystem directly
-- similar-folder checks work against the registered workspace registry, not your raw disk state
+- call `help` first when the user is unsure how to phrase work
+- prefer `job_progress` for concise status and `audit_list` only for full history
+- use queue state and GitHub state as the source of truth, not an unregistered local folder
 
 ## Important Note
 
