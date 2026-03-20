@@ -44,6 +44,7 @@ import {
 	workspaceStorageKey,
 } from './queue-helpers';
 import { findLatestWorkflowRunId } from './queue-github';
+import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
 
 export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	constructor(ctx: DurableObjectState, env: AppEnv) {
@@ -482,31 +483,8 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			workspaces.push(value);
 		}
 		const activeRepoKey = await this.getActiveWorkspaceRepoKey();
-		
-		const workspacesWithMeta = workspaces.map((workspace) => ({
-			workspace,
-			isActive: workspace.repo_key === activeRepoKey,
-			usedMs: parseIsoMs(workspace.last_used_at) ?? 0,
-			updatedMs: parseIsoMs(workspace.updated_at) ?? 0,
-		}));
-		
-		return workspacesWithMeta
-			.sort((left, right) => {
-				if (left.isActive !== right.isActive) {
-					return right.isActive ? 1 : -1;
-				}
-				if (left.usedMs !== right.usedMs) {
-					return right.usedMs - left.usedMs;
-				}
-				if (left.updatedMs !== right.updatedMs) {
-					return right.updatedMs - left.updatedMs;
-				}
-				return left.workspace.repo_key.localeCompare(right.workspace.repo_key);
-			})
-			.map((item) => ({
-				...item.workspace,
-				is_active: item.isActive,
-			}));
+
+		return sortWorkspaces(workspaces, activeRepoKey);
 	}
 
 	private async findByRepoAndBranch(repo: string, workBranch?: string): Promise<JobRecord | null> {
@@ -696,32 +674,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async findSimilarWorkspaces(query?: string, repoKey?: string): Promise<ToolResultEnvelope> {
 		const workspaces = await this.listWorkspaces();
-		const target = normalizeLookup(query || repoKey || '');
-		const repoSlug = normalizeLookup((repoKey || '').split('/').pop() ?? '');
-		const matches = workspaces
-			.map((workspace) => {
-				const candidates = [
-					workspace.repo_key,
-					workspace.repo_slug,
-					workspace.display_name,
-					workspace.workspace_path,
-					...(workspace.aliases ?? []),
-				].map(normalizeLookup);
-				let score = 0;
-				if (repoKey && candidates.includes(normalizeLookup(repoKey))) {
-					score = 100;
-				} else if (repoSlug && candidates.includes(repoSlug)) {
-					score = 90;
-				} else if (target && candidates.some((item) => item === target)) {
-					score = 80;
-				} else if (target && candidates.some((item) => item.includes(target))) {
-					score = 50;
-				}
-				return { workspace, score };
-			})
-			.filter((match) => match.score > 0)
-			.sort((a, b) => b.score - a.score)
-			.map((match) => match.workspace);
+		const matches = findSimilarWorkspaceMatches(workspaces, query, repoKey);
 		return ok({ matches });
 	}
 
@@ -852,17 +805,12 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 							const existing = payload.workspace.repo_key
 								? await this.getWorkspace(payload.workspace.repo_key)
 								: null;
-							const ws = {
-								...(existing ?? {}),
-								...(payload.workspace as WorkspaceRecord),
-							} as WorkspaceRecord;
+							const ws = buildWorkspaceRecord(
+								payload.workspace as WorkspaceRecord,
+								existing,
+								timestamp,
+							);
 							ensureSafeWorkspacePath(ws.workspace_path);
-							ws.created_at = existing?.created_at ?? timestamp;
-							ws.updated_at = timestamp;
-							ws.last_used_at = timestamp;
-							ws.repo_slug = ws.repo_slug || normalizeLookup(ws.repo_key.split('/').pop());
-							ws.display_name = ws.display_name || ws.repo_key;
-							ws.aliases = ws.aliases ?? [];
 							await this.ctx.storage.put(workspaceStorageKey(ws.repo_key), ws);
 							await this.ctx.storage.put(activeWorkspaceStorageKey(), ws.repo_key);
 							return jsonResponse(ok({ workspace: ws }));
