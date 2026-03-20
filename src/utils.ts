@@ -165,11 +165,15 @@ export function validateWorkflowInputs(inputs: Record<string, unknown>): void {
 		'base_branch',
 		'target_paths',
 		'instructions_b64',
+		'instructions_json',
 		'pr_title',
 		'pr_body',
 		'dry_run',
 		'auto_improve',
 		'runner_label',
+		'request_kind',
+		'project_slug',
+		'create_project_scaffold',
 		'deploy_target',
 		'reason',
 		'expected_commit_sha',
@@ -180,6 +184,52 @@ export function validateWorkflowInputs(inputs: Record<string, unknown>): void {
 			throw new Error(`workflow input not allowed: ${key}`);
 		}
 	}
+	const normalized = { ...inputs };
+	const instructionsJson = normalized.instructions_json;
+	const instructionsB64 = normalized.instructions_b64;
+
+	if (instructionsJson !== undefined && instructionsB64 !== undefined) {
+		throw new Error('provide only one of instructions_json or instructions_b64');
+	}
+
+	if (instructionsJson !== undefined) {
+		const jsonText =
+			typeof instructionsJson === 'string' ? instructionsJson : JSON.stringify(instructionsJson);
+		try {
+			JSON.parse(jsonText);
+		} catch (error) {
+			throw new Error(
+				`instructions_json must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		normalized.instructions_b64 = encodeBase64Text(jsonText);
+		delete normalized.instructions_json;
+	}
+
+	if (typeof normalized.instructions_b64 === 'string') {
+		const decodedText = decodeBase64Text(normalized.instructions_b64);
+		if (decodedText === null) {
+			throw new Error('instructions_b64 must be valid base64');
+		}
+		try {
+			JSON.parse(decodedText);
+		} catch (error) {
+			throw new Error(
+				`instructions_b64 must decode to valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
+	for (const key of Object.keys(inputs)) {
+		delete inputs[key];
+	}
+	Object.assign(inputs, normalized);
+}
+
+export function normalizeWorkflowInputs(inputs: Record<string, unknown>): Record<string, unknown> {
+	const normalized = { ...inputs };
+	validateWorkflowInputs(normalized);
+	return normalized;
 }
 
 export function ensureSafePath(path: string): void {
