@@ -56,6 +56,28 @@ jobs:
       - name: Validate self-deploy inputs
         run: npm run cf-typegen && npm run typecheck
 
+      - name: Verify Cloudflare deploy credentials
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "Missing required GitHub Actions secret: CLOUDFLARE_API_TOKEN"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "Missing required GitHub Actions secret: CLOUDFLARE_ACCOUNT_ID"
+            exit 1
+          fi
+
+      - name: Verify mirror auth secrets
+        run: |
+          if [ -z "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" ]; then
+            echo "Missing required GitHub Actions secret: GITHUB_APP_PRIVATE_KEY_PEM"
+            exit 1
+          fi
+          if [ -z "${{ secrets.WEBHOOK_SECRET }}" ]; then
+            echo "Missing required GitHub Actions secret: WEBHOOK_SECRET"
+            exit 1
+          fi
+
       - name: Sync GitHub App private key to target Worker
         run: |
           TARGET_ARGS=""
