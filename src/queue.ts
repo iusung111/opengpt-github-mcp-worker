@@ -41,13 +41,13 @@ import {
 	workspaceStorageKey,
 } from './queue-helpers';
 import { findLatestWorkflowRunId, getWorkflowRunSnapshot } from './queue-github';
+import { listJobs as listQueueJobs, upsertJob as upsertQueueJob } from './queue-jobs';
 import { handleQueueAction } from './queue-requests';
 import { applyGithubEvent as applyGitHubWebhookEvent } from './queue-webhooks';
 import {
 	buildJobIndexEntries,
 	jobIndexReadyKey,
 	JobIndexPointer,
-	jobStatusIndexPrefix,
 } from './queue-index';
 import {
 	getWorkflowRunDiscoveryCandidate,
@@ -428,36 +428,18 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async listJobs(status?: JobStatus, nextActor?: NextActor): Promise<JobRecord[]> {
-		const jobs: JobRecord[] = [];
-		if (status || nextActor) {
-			await this.ensureJobIndexes();
-		}
-		const indexedRecords =
-			status || nextActor
-				? await this.ctx.storage.list<JobIndexPointer>({ prefix: jobStatusIndexPrefix(status, nextActor) })
-				: null;
-		const records: Array<JobRecord | null> = [];
-		if (indexedRecords?.size) {
-			for (const pointer of indexedRecords.values()) {
-				records.push(await this.getJob(pointer.job_id));
-			}
-		} else {
-			records.push(...Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()));
-		}
-		for (const value of records) {
-			if (!value) {
-				continue;
-			}
-			const reconciled = await this.reconcileJob(value);
-			if (status && reconciled.status !== status) {
-				continue;
-			}
-			if (nextActor && reconciled.next_actor !== nextActor) {
-				continue;
-			}
-			jobs.push(reconciled);
-		}
-		return jobs.sort((left, right) => left.updated_at.localeCompare(right.updated_at));
+		return listQueueJobs(
+			{
+				ensureJobIndexes: this.ensureJobIndexes.bind(this),
+				getJob: this.getJob.bind(this),
+				reconcileJob: this.reconcileJob.bind(this),
+				listJobIndexPointers: async (prefix) =>
+					Array.from((await this.ctx.storage.list<JobIndexPointer>({ prefix })).values()),
+				listStoredJobs: async () => Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()),
+			},
+			status,
+			nextActor,
+		);
 	}
 
 	private async listWorkspaces(): Promise<Array<WorkspaceRecord & { is_active?: boolean }>> {
@@ -474,44 +456,14 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return sortWorkspaces(workspaces, activeRepoKey);
 	}
 
-	private normalizeJob(input: Partial<JobRecord> & { job_id: string }): JobRecord {
-		const timestamp = nowIso();
-		return {
-			job_id: input.job_id,
-			repo: input.repo ?? '',
-			base_branch: input.base_branch ?? 'main',
-			work_branch: input.work_branch,
-			pr_number: input.pr_number,
-			workflow_run_id: input.workflow_run_id,
-			operation_type: input.operation_type,
-			target_paths: input.target_paths ?? [],
-			status: input.status ?? 'queued',
-			next_actor: input.next_actor ?? 'worker',
-			auto_improve_enabled: input.auto_improve_enabled ?? false,
-			auto_improve_max_cycles: input.auto_improve_max_cycles ?? 3,
-			auto_improve_cycle: 0,
-			worker_manifest: input.worker_manifest ?? {},
-			review_findings: [],
-			notes: input.notes ?? [],
-			last_error: input.last_error,
-			created_at: input.created_at ?? timestamp,
-			updated_at: timestamp,
-			last_transition_at: timestamp,
-			last_reconciled_at: undefined,
-			last_webhook_event_at: undefined,
-			stale_reason: undefined,
-		};
-	}
-
 	private async upsertJob(job: Partial<JobRecord> & { job_id: string }): Promise<void> {
-		const existing = await this.getJob(job.job_id);
-		if (existing) {
-			const merged = { ...existing, ...job, updated_at: nowIso() };
-			await this.persistJob(merged, existing);
-		} else {
-			const newJob = this.normalizeJob(job);
-			await this.persistJob(newJob);
-		}
+		await upsertQueueJob(
+			{
+				getJob: this.getJob.bind(this),
+				persistJob: this.persistJob.bind(this),
+			},
+			job,
+		);
 	}
 
 	private async findSimilarWorkspaces(query?: string, repoKey?: string): Promise<ToolResultEnvelope> {
