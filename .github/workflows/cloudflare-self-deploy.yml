@@ -100,6 +100,26 @@ jobs:
       - name: Sync GitHub App private key to target Worker
         continue-on-error: true
         run: |
+          retry_wrangler_secret_put() {
+            local secret_name="$1"
+            local secret_file="$2"
+            local target_args="$3"
+            local attempt=1
+            local max_attempts=5
+            local sleep_seconds=10
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if npx wrangler secret put "$secret_name" ${target_args} < "$secret_file"; then
+                return 0
+              fi
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                return 1
+              fi
+              echo "wrangler secret put failed for ${secret_name}; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
+              sleep "$sleep_seconds"
+              attempt=$((attempt + 1))
+              sleep_seconds=$((sleep_seconds * 2))
+            done
+          }
           TARGET_ARGS=""
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
             TARGET_ARGS="--env mirror"
@@ -108,7 +128,7 @@ jobs:
             PEM_FILE="$(mktemp)"
             trap 'rm -f "$PEM_FILE"' EXIT
             printf "%s" "${APP_PRIVATE_KEY_PEM}" > "$PEM_FILE"
-            npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${TARGET_ARGS} < "$PEM_FILE"
+            retry_wrangler_secret_put GITHUB_APP_PRIVATE_KEY_PEM "$PEM_FILE" "$TARGET_ARGS"
           else
             echo "Skipping GitHub App private key sync because the repository secret is not set."
           fi
@@ -120,6 +140,26 @@ jobs:
       - name: Sync webhook secret to target Worker
         continue-on-error: true
         run: |
+          retry_wrangler_secret_put() {
+            local secret_name="$1"
+            local secret_file="$2"
+            local target_args="$3"
+            local attempt=1
+            local max_attempts=5
+            local sleep_seconds=10
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if npx wrangler secret put "$secret_name" ${target_args} < "$secret_file"; then
+                return 0
+              fi
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                return 1
+              fi
+              echo "wrangler secret put failed for ${secret_name}; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
+              sleep "$sleep_seconds"
+              attempt=$((attempt + 1))
+              sleep_seconds=$((sleep_seconds * 2))
+            done
+          }
           TARGET_ARGS=""
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
             TARGET_ARGS="--env mirror"
@@ -128,7 +168,7 @@ jobs:
             SECRET_FILE="$(mktemp)"
             trap 'rm -f "$SECRET_FILE"' EXIT
             printf "%s" "${WORKER_WEBHOOK_SECRET}" > "$SECRET_FILE"
-            npx wrangler secret put WEBHOOK_SECRET ${TARGET_ARGS} < "$SECRET_FILE"
+            retry_wrangler_secret_put WEBHOOK_SECRET "$SECRET_FILE" "$TARGET_ARGS"
           else
             echo "Skipping webhook secret sync because the repository secret is not set."
           fi
@@ -155,7 +195,25 @@ jobs:
       - name: Deploy to Cloudflare Mirror
         if: ${{ env.DEPLOY_TARGET == 'mirror' }}
         run: |
-          DEPLOY_OUTPUT=$(npx wrangler deploy --env mirror)
+          retry_wrangler_deploy() {
+            local attempt=1
+            local max_attempts=5
+            local sleep_seconds=10
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if DEPLOY_OUTPUT=$(npx wrangler deploy --env mirror); then
+                printf "%s\n" "$DEPLOY_OUTPUT"
+                return 0
+              fi
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                return 1
+              fi
+              echo "wrangler deploy --env mirror failed; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
+              sleep "$sleep_seconds"
+              attempt=$((attempt + 1))
+              sleep_seconds=$((sleep_seconds * 2))
+            done
+          }
+          DEPLOY_OUTPUT=$(retry_wrangler_deploy)
           echo "$DEPLOY_OUTPUT"
           echo "DEPLOY_URL=${SELF_MIRROR_URL}" >> $GITHUB_ENV
         env:
@@ -165,7 +223,25 @@ jobs:
       - name: Deploy to Cloudflare Live
         if: ${{ env.DEPLOY_TARGET == 'live' }}
         run: |
-          DEPLOY_OUTPUT=$(npx wrangler deploy)
+          retry_wrangler_deploy() {
+            local attempt=1
+            local max_attempts=5
+            local sleep_seconds=10
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if DEPLOY_OUTPUT=$(npx wrangler deploy); then
+                printf "%s\n" "$DEPLOY_OUTPUT"
+                return 0
+              fi
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                return 1
+              fi
+              echo "wrangler deploy failed; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
+              sleep "$sleep_seconds"
+              attempt=$((attempt + 1))
+              sleep_seconds=$((sleep_seconds * 2))
+            done
+          }
+          DEPLOY_OUTPUT=$(retry_wrangler_deploy)
           echo "$DEPLOY_OUTPUT"
           echo "DEPLOY_URL=${SELF_LIVE_URL}" >> $GITHUB_ENV
         env:
