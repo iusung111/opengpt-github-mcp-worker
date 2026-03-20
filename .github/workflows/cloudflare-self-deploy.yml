@@ -103,12 +103,10 @@ jobs:
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
             TARGET_ARGS="--env mirror"
           fi
-          if [ -n "${{ secrets.APP_PRIVATE_KEY_PEM }}" ]; then
+          if [ -n "${APP_PRIVATE_KEY_PEM}" ]; then
             PEM_FILE="$(mktemp)"
             trap 'rm -f "$PEM_FILE"' EXIT
-            cat <<'EOF' > "$PEM_FILE"
-${{ secrets.APP_PRIVATE_KEY_PEM }}
-EOF
+            printf "%s" "${APP_PRIVATE_KEY_PEM}" > "$PEM_FILE"
             npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${TARGET_ARGS} < "$PEM_FILE"
           else
             echo "Skipping GitHub App private key sync because the repository secret is not set."
@@ -116,6 +114,7 @@ EOF
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          APP_PRIVATE_KEY_PEM: ${{ secrets.APP_PRIVATE_KEY_PEM }}
 
       - name: Sync webhook secret to target Worker
         run: |
@@ -123,12 +122,10 @@ EOF
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
             TARGET_ARGS="--env mirror"
           fi
-          if [ -n "${{ secrets.WEBHOOK_SECRET }}" ]; then
+          if [ -n "${WORKER_WEBHOOK_SECRET}" ]; then
             SECRET_FILE="$(mktemp)"
             trap 'rm -f "$SECRET_FILE"' EXIT
-            cat <<'EOF' > "$SECRET_FILE"
-${{ secrets.WEBHOOK_SECRET }}
-EOF
+            printf "%s" "${WORKER_WEBHOOK_SECRET}" > "$SECRET_FILE"
             npx wrangler secret put WEBHOOK_SECRET ${TARGET_ARGS} < "$SECRET_FILE"
           else
             echo "Skipping webhook secret sync because the repository secret is not set."
@@ -136,6 +133,7 @@ EOF
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
 
       - name: Verify requested commit
         if: ${{ env.EXPECTED_COMMIT_SHA != '' }}
