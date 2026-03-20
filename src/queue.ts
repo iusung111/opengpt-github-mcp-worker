@@ -128,6 +128,14 @@ function branchMatchesJobHint(workBranch: string, job: JobRecord): boolean {
 	return workBranch === encodedJobId || workBranch.startsWith(`${encodedJobId}-`);
 }
 
+function parseJobIdFromPrBody(body?: string): string | null {
+	if (!body) {
+		return null;
+	}
+	const metadataMatch = body.match(/job_id:\s*([A-Za-z0-9._-]+)/i);
+	return metadataMatch?.[1] ?? null;
+}
+
 function normalizeLookup(value: unknown): string {
 	return String(value ?? '')
 		.trim()
@@ -360,6 +368,27 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		};
 	}
 
+	private isDryRunJob(job: JobRecord): boolean {
+		const dispatchRequest = this.getDispatchRequest(job);
+		const rawDryRun = dispatchRequest?.inputs?.dry_run;
+		return rawDryRun === true || rawDryRun === 'true';
+	}
+
+	private recordWorkflowSnapshot(
+		job: JobRecord,
+		run: { name?: string; status?: string; conclusion?: string; html_url?: string },
+	): void {
+		job.worker_manifest = {
+			...job.worker_manifest,
+			last_workflow_run: {
+				name: run.name,
+				status: run.status,
+				conclusion: run.conclusion,
+				html_url: run.html_url,
+			},
+		};
+	}
+
 	private async shouldDeduplicateDispatch(
 		job: JobRecord,
 		owner: string,
@@ -539,18 +568,12 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (!run) {
 			return job;
 		}
-		job.worker_manifest = {
-			...job.worker_manifest,
-			last_workflow_run: {
-				name: run.name,
-				status: run.status,
-				conclusion: run.conclusion,
-				html_url: run.html_url,
-			},
-		};
+		this.recordWorkflowSnapshot(job, run);
 		if (run.status === 'completed') {
-			if (run.conclusion === 'success') {
+			if (run.conclusion === 'success' && (this.isDryRunJob(job) || job.pr_number)) {
 				this.transitionJob(job, 'review_pending', 'reviewer');
+			} else if (run.conclusion === 'success') {
+				this.pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
 			} else if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
 				job.auto_improve_cycle += 1;
 				const redispatched = await this.autoRedispatchJob(job, 'webhook reported failure');
@@ -727,8 +750,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			if (job) {
 				job.last_webhook_event_at = nowIso();
 				job.workflow_run_id = run.id;
-				if (run.conclusion === 'success') {
+				this.recordWorkflowSnapshot(job, run);
+				if (run.conclusion === 'success' && (this.isDryRunJob(job) || job.pr_number)) {
 					this.transitionJob(job, 'review_pending', 'reviewer');
+				} else if (run.conclusion === 'success') {
+					this.pushJobNote(job, 'workflow completed successfully; awaiting PR linkage');
 				} else if (job.auto_improve_enabled && job.auto_improve_cycle < job.auto_improve_max_cycles) {
 					job.auto_improve_cycle += 1;
 					const redispatched = await this.autoRedispatchJob(job, 'webhook reported failure');
@@ -754,11 +780,15 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 				| {
 						number?: number;
 						head?: { ref?: string };
+						body?: string;
 						state?: string;
 				  }
 				| null;
 			if (pr?.head?.ref) {
-				const job = await this.findByRepoAndBranch(repoFullName, pr.head.ref);
+				const hintedJobId = parseJobIdFromPrBody(pr.body);
+				const job =
+					(await this.findByRepoAndBranch(repoFullName, pr.head.ref)) ??
+					(hintedJobId ? await this.getJob(hintedJobId) : null);
 				if (job) {
 					job.last_webhook_event_at = nowIso();
 					if (pr.number && job.pr_number !== pr.number) {

@@ -130,4 +130,50 @@ describe('queue webhook reconciliation', () => {
 			},
 		});
 	});
+
+	it('matches PR webhook to job_id encoded in PR body metadata', async () => {
+		await SELF.fetch('https://example.com/queue/job', {
+			method: 'POST',
+			headers: queueJsonHeaders,
+			body: JSON.stringify({
+				job_id: 'job-pr-body',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				status: 'working',
+				next_actor: 'system',
+			}),
+		});
+
+		const prBody = JSON.stringify({
+			action: 'opened',
+			repository: { full_name: 'iusung111/OpenGPT' },
+			pull_request: {
+				number: 10,
+				state: 'open',
+				body: '<!-- opengpt-job\njob_id: job-pr-body\nrun_id: 1010\nworkflow: agent-run.yml\n-->',
+				head: { ref: 'agent/unrelated-branch-606' },
+			},
+		});
+		const prResponse = await SELF.fetch('https://example.com/webhooks/github', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'X-GitHub-Event': 'pull_request',
+				'X-Hub-Signature-256': await webhookSignature(prBody),
+			},
+			body: prBody,
+		});
+		expect(prResponse.status).toBe(200);
+		await expect(prResponse.json()).resolves.toMatchObject({
+			ok: true,
+			outcome: {
+				matched: true,
+				job_id: 'job-pr-body',
+				pr_number: 10,
+				work_branch: 'agent/unrelated-branch-606',
+				status: 'review_pending',
+				next_actor: 'reviewer',
+			},
+		});
+	});
 });
