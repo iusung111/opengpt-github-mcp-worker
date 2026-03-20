@@ -115,41 +115,19 @@ jobs:
         if: ${{ env.SYNC_SECRETS == 'true' }}
         continue-on-error: true
         run: |
-          retry_wrangler_secret_put() {
-            local secret_name="$1"
-            local secret_file="$2"
-            local target_args="$3"
-            local attempt=1
-            local max_attempts=5
-            local sleep_seconds=10
-            while [ "$attempt" -le "$max_attempts" ]; do
-              if OUTPUT=$(npx wrangler secret put "$secret_name" ${target_args} < "$secret_file" 2>&1); then
-                printf "%s\n" "$OUTPUT"
-                return 0
-              fi
-              printf "%s\n" "$OUTPUT"
-              if printf "%s" "$OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
-                echo "Cloudflare authentication failed for ${secret_name}; stopping retries."
-                return 1
-              fi
-              if [ "$attempt" -eq "$max_attempts" ]; then
-                return 1
-              fi
-              echo "wrangler secret put failed for ${secret_name}; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
-              sleep "$sleep_seconds"
-              attempt=$((attempt + 1))
-              sleep_seconds=$((sleep_seconds * 2))
-            done
-          }
-          TARGET_ARGS=""
+          TARGET_ARG=""
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
-            TARGET_ARGS="--env mirror"
+            TARGET_ARG="--env"
+            TARGET_ENV="mirror"
+          else
+            TARGET_ENV=""
           fi
           if [ -n "${APP_PRIVATE_KEY_PEM}" ]; then
-            PEM_FILE="$(mktemp)"
-            trap 'rm -f "$PEM_FILE"' EXIT
-            printf "%s" "${APP_PRIVATE_KEY_PEM}" > "$PEM_FILE"
-            retry_wrangler_secret_put GITHUB_APP_PRIVATE_KEY_PEM "$PEM_FILE" "$TARGET_ARGS"
+            if [ -n "${TARGET_ENV}" ]; then
+              node scripts/cloudflare-secret-put.mjs --secret-name GITHUB_APP_PRIVATE_KEY_PEM --secret-value "${APP_PRIVATE_KEY_PEM}" --target-arg "$TARGET_ARG" --target-arg "$TARGET_ENV"
+            else
+              node scripts/cloudflare-secret-put.mjs --secret-name GITHUB_APP_PRIVATE_KEY_PEM --secret-value "${APP_PRIVATE_KEY_PEM}"
+            fi
           else
             echo "Skipping GitHub App private key sync because the repository secret is not set."
           fi
@@ -162,41 +140,19 @@ jobs:
         if: ${{ env.SYNC_SECRETS == 'true' }}
         continue-on-error: true
         run: |
-          retry_wrangler_secret_put() {
-            local secret_name="$1"
-            local secret_file="$2"
-            local target_args="$3"
-            local attempt=1
-            local max_attempts=5
-            local sleep_seconds=10
-            while [ "$attempt" -le "$max_attempts" ]; do
-              if OUTPUT=$(npx wrangler secret put "$secret_name" ${target_args} < "$secret_file" 2>&1); then
-                printf "%s\n" "$OUTPUT"
-                return 0
-              fi
-              printf "%s\n" "$OUTPUT"
-              if printf "%s" "$OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
-                echo "Cloudflare authentication failed for ${secret_name}; stopping retries."
-                return 1
-              fi
-              if [ "$attempt" -eq "$max_attempts" ]; then
-                return 1
-              fi
-              echo "wrangler secret put failed for ${secret_name}; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
-              sleep "$sleep_seconds"
-              attempt=$((attempt + 1))
-              sleep_seconds=$((sleep_seconds * 2))
-            done
-          }
-          TARGET_ARGS=""
+          TARGET_ARG=""
           if [ "${DEPLOY_TARGET}" = "mirror" ]; then
-            TARGET_ARGS="--env mirror"
+            TARGET_ARG="--env"
+            TARGET_ENV="mirror"
+          else
+            TARGET_ENV=""
           fi
           if [ -n "${WORKER_WEBHOOK_SECRET}" ]; then
-            SECRET_FILE="$(mktemp)"
-            trap 'rm -f "$SECRET_FILE"' EXIT
-            printf "%s" "${WORKER_WEBHOOK_SECRET}" > "$SECRET_FILE"
-            retry_wrangler_secret_put WEBHOOK_SECRET "$SECRET_FILE" "$TARGET_ARGS"
+            if [ -n "${TARGET_ENV}" ]; then
+              node scripts/cloudflare-secret-put.mjs --secret-name WEBHOOK_SECRET --secret-value "${WORKER_WEBHOOK_SECRET}" --target-arg "$TARGET_ARG" --target-arg "$TARGET_ENV"
+            else
+              node scripts/cloudflare-secret-put.mjs --secret-name WEBHOOK_SECRET --secret-value "${WORKER_WEBHOOK_SECRET}"
+            fi
           else
             echo "Skipping webhook secret sync because the repository secret is not set."
           fi
@@ -223,32 +179,7 @@ jobs:
       - name: Deploy to Cloudflare Mirror
         if: ${{ env.DEPLOY_TARGET == 'mirror' }}
         run: |
-          retry_wrangler_deploy() {
-            local attempt=1
-            local max_attempts=5
-            local sleep_seconds=10
-            while [ "$attempt" -le "$max_attempts" ]; do
-              if DEPLOY_OUTPUT=$(npx wrangler deploy --env mirror 2>&1); then
-                printf "%s\n" "$DEPLOY_OUTPUT"
-                return 0
-              fi
-              printf "%s\n" "$DEPLOY_OUTPUT"
-              if printf "%s" "$DEPLOY_OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
-                echo "Cloudflare authentication failed during mirror deploy; stopping retries."
-                return 1
-              fi
-              if [ "$attempt" -eq "$max_attempts" ]; then
-                return 1
-              fi
-              echo "wrangler deploy --env mirror failed; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
-              sleep "$sleep_seconds"
-              attempt=$((attempt + 1))
-              sleep_seconds=$((sleep_seconds * 2))
-            done
-          }
-          DEPLOY_OUTPUT=$(retry_wrangler_deploy)
-          echo "$DEPLOY_OUTPUT"
-          echo "DEPLOY_URL=${SELF_MIRROR_URL}" >> $GITHUB_ENV
+          node scripts/cloudflare-deploy.mjs --deploy-target mirror --deploy-url "${SELF_MIRROR_URL}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -256,50 +187,7 @@ jobs:
       - name: Deploy to Cloudflare Live
         if: ${{ env.DEPLOY_TARGET == 'live' }}
         run: |
-          retry_wrangler_deploy() {
-            local attempt=1
-            local max_attempts=5
-            local sleep_seconds=10
-            while [ "$attempt" -le "$max_attempts" ]; do
-              if DEPLOY_OUTPUT=$(npx wrangler deploy 2>&1); then
-                printf "%s\n" "$DEPLOY_OUTPUT"
-                return 0
-              fi
-              printf "%s\n" "$DEPLOY_OUTPUT"
-              if printf "%s" "$DEPLOY_OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
-                echo "Cloudflare authentication failed during live deploy; stopping retries."
-                return 1
-              fi
-              if [ "$attempt" -eq "$max_attempts" ]; then
-                return 1
-              fi
-              echo "wrangler deploy failed; retrying in ${sleep_seconds}s (attempt ${attempt}/${max_attempts})"
-              sleep "$sleep_seconds"
-              attempt=$((attempt + 1))
-              sleep_seconds=$((sleep_seconds * 2))
-            done
-          }
-          DEPLOY_OUTPUT=$(retry_wrangler_deploy)
-          echo "$DEPLOY_OUTPUT"
-          echo "DEPLOY_URL=${SELF_LIVE_URL}" >> $GITHUB_ENV
+          node scripts/cloudflare-deploy.mjs --deploy-target live --deploy-url "${SELF_LIVE_URL}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      - name: Post-Deploy Health Check
-        run: |
-          echo "Verifying health for: ${{ env.DEPLOY_URL }}/healthz"
-          for i in {1..6}; do
-            HEALTH_JSON=$(curl --silent --show-error --fail "${{ env.DEPLOY_URL }}/healthz") || STATUS=$?
-            if [ -n "${HEALTH_JSON}" ]; then
-              HEALTH_JSON="${HEALTH_JSON}" python -c "import json, os, sys; payload=json.loads(os.environ['HEALTH_JSON']); ok=bool(payload.get('ok')); auth=bool(payload.get('auth_configured')); print('Health check passed with auth_configured=true' if ok and auth else json.dumps(payload)); sys.exit(0 if ok and auth else 1)"
-              if [ $? -eq 0 ]; then
-                exit 0
-              fi
-            fi
-            echo "Attempt $i: Health check failed. Retrying in 5s..."
-            sleep 5
-            unset HEALTH_JSON
-          done
-          echo "Health check timed out or auth_configured=false. Deployment might be broken."
-          exit 1
