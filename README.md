@@ -79,7 +79,8 @@ Validation policy:
 - Linux/CI is the source of truth for Durable Object runtime verification.
 - Cloudflare live and mirror health checks are the source of truth for deployed behavior.
 - Windows local runs are for fast unit checks and manual smoke work, not for authoritative DO runtime gating.
-- `push main` is expected to validate on Ubuntu first and then deploy to mirror automatically.
+- `push main` runs `cloudflare-ci` first, and only a successful CI run triggers `cloudflare-self-deploy` to mirror.
+- Manual `cloudflare-self-deploy` dispatch remains the path for explicit mirror or live promotion.
 - Runtime integration coverage is split by surface:
   - `test/runtime-http.spec.ts` covers HTTP routes, queue endpoints, and webhook handling.
   - `test/runtime-mcp.spec.ts` covers MCP tools and queue actions exposed through `/mcp`.
