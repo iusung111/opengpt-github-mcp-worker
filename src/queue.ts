@@ -120,6 +120,14 @@ function activeWorkspaceStorageKey(): string {
 	return 'workspace:active_repo_key';
 }
 
+function branchMatchesJobHint(workBranch: string, job: JobRecord): boolean {
+	if (!workBranch.startsWith('agent/')) {
+		return false;
+	}
+	const encodedJobId = `agent/${job.job_id}`;
+	return workBranch === encodedJobId || workBranch.startsWith(`${encodedJobId}-`);
+}
+
 function normalizeLookup(value: unknown): string {
 	return String(value ?? '')
 		.trim()
@@ -621,12 +629,16 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			return null;
 		}
 		return this.findJob((job) => {
-				if (job.repo !== repo || !job.work_branch) {
+				if (job.repo !== repo) {
 					return false;
+				}
+				if (!job.work_branch) {
+					return branchMatchesJobHint(workBranch, job);
 				}
 				return (
 					job.work_branch === workBranch ||
-					workBranch.startsWith(`${job.work_branch}-`)
+					workBranch.startsWith(`${job.work_branch}-`) ||
+					branchMatchesJobHint(workBranch, job)
 				);
 			});
 	}
@@ -755,6 +767,9 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 					}
 					if (pr.head.ref !== job.work_branch) {
 						job.work_branch = pr.head.ref;
+					}
+					if (pr.state === 'open' && job.status === 'working') {
+						this.transitionJob(job, 'review_pending', 'reviewer');
 					}
 					job.updated_at = nowIso();
 					await this.ctx.storage.put(jobStorageKey(job.job_id), job);
