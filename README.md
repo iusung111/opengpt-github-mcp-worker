@@ -271,63 +271,63 @@ The `help` response is structured around workflows, recommended request fields, 
 Small real change with PR:
 
 ```text
-iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃?吏꾪뻾:
+Make a real change in iusung111/OpenGPT and open a PR.
 - job_id: change-001
-- 紐⑺몴: README.md 留덉?留됱뿉 "Managed by OpenGPT GitHub MCP worker." ??以?異붽?
-- 蹂寃??뚯씪: README.md
+- request: append "Managed by OpenGPT GitHub MCP worker." to README.md
+- target_paths: README.md
 - dry_run: false
-- ?꾨즺 湲곗?: branch push? PR ?앹꽦源뚯?
+- done_when: branch is pushed and a PR is created
 ```
 
 Single file code edit:
 
 ```text
-iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃?吏꾪뻾:
+Make a real change in iusung111/OpenGPT and open a PR.
 - job_id: fix-001
-- 紐⑺몴: <援ъ껜?곸씤 ?섏젙 ?댁슜>
-- 蹂寃??뚯씪: <?? app/main.py>
+- request: <exact code change to make>
+- target_paths: <app/main.py>
 - dry_run: false
-- ?꾨즺 湲곗?: 媛?ν븳 踰붿쐞??寃利???PR ?앹꽦
+- done_when: validation passes and a PR is created
 ```
 
 Real change intended for `main`:
 
 ```text
-iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃쎌쓣 吏꾪뻾?섍퀬 main 諛섏쁺 湲곗??쇰줈 留덈Т由ы빐以?
+Prepare a real change in iusung111/OpenGPT so it is ready for merge to main.
 - job_id: main-ready-001
-- 紐⑺몴: <援ъ껜?곸씤 ?섏젙 ?댁슜>
-- 蹂寃??뚯씪: <path??
+- request: <exact user-facing or code-facing change>
+- target_paths: <path>
 - dry_run: false
-- ?꾨즺 湲곗?: 寃利??꾨즺, branch push, PR ?앹꽦, 洹몃━怨?main 諛섏쁺???꾩슂??留덉?留??≪뀡 ?뺣━源뚯?
+- done_when: validation is complete, branch is pushed, PR is created, and merge is attempted if allowed
 ```
 
 Dry-run only:
 
 ```text
-iusung111/OpenGPT?먯꽌 ?ㅼ쓬 ?묒뾽??dry-run?쇰줈 寃利앺빐以?
+Run a dry-run request for iusung111/OpenGPT without creating a final branch or PR.
 - job_id: dryrun-001
-- 紐⑺몴: <臾댁뾿??諛붽?吏>
-- 蹂寃??뚯씪: <path??
+- request: <exact user-facing or code-facing change>
+- target_paths: <path>
 - dry_run: true
-- ?꾨즺 湲곗?: workflow success? queue ?곹깭 ?꾩씠 ?뺤씤
+- done_when: validation completes and the queue captures the result without merge intent
 ```
 
 Reviewer follow-up:
 
 ```text
-iusung111/OpenGPT?먯꽌 job_id <媛????꾩옱 ?곹깭瑜??뺤씤?섍퀬,
-PR / workflow / queue 湲곗??쇰줈 ?ㅼ쓬 ?≪뀡???뺣━?댁쨾.
+Follow up on job_id <existing job id>.
+Use PR, workflow, and queue state to decide the next action and summarize the exact blocker or next step.
 ```
 
 Recommended request shape:
 
 - `job_id`: unique value like `change-001`, `fix-002`, `docs-003`
-- `紐⑺몴`: exact user-facing or code-facing change
-- `蹂寃??뚯씪`: one or more expected target paths
+- `request`: exact user-facing or code-facing change
+- `target_paths`: one or more expected target paths
 - `dry_run`: `true` for validation only, `false` for branch and PR creation
-- `?꾨즺 湲곗?`: what counts as done
+- `done_when`: what counts as done
 
-If the user says `main??諛섏쁺`, interpret that as:
+If the user says `main ready` or asks for merge-ready output, interpret that as:
 
 - this is a real change request, not a dry run
 - complete validation and create or update the PR needed for merge
