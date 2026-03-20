@@ -115,6 +115,7 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_execute')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_progress')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_work_context')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'request_permission_bundle')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
@@ -235,6 +236,33 @@ describe('runtime mcp surface', () => {
 					workspace_path: '/home/uieseong/workspace/github/OpenGPT',
 				},
 				requires_confirmation: true,
+			},
+		});
+		await client.close();
+	});
+
+	it('builds a batch permission approval bundle', async () => {
+		const client = await createMcpClient();
+		const result = await client.callTool({
+			name: 'request_permission_bundle',
+			arguments: {
+				repos: ['iusung111/OpenGPT'],
+				preset: 'implementation_with_workflow',
+				reason: 'need one approval for branch creation, code edits, workflow rerun, and queue updates',
+			},
+		});
+		const text = 'text' in result.content[0] ? result.content[0].text : '';
+		expect(JSON.parse(text)).toMatchObject({
+			ok: true,
+			data: {
+				status: 'ready_for_approval',
+				bundle: {
+					preset: {
+						id: 'implementation_with_workflow',
+					},
+					repos: ['iusung111/OpenGPT'],
+					approved_tools: expect.arrayContaining(['repo_create_branch', 'workflow_dispatch', 'job_append_note']),
+				},
 			},
 		});
 		await client.close();

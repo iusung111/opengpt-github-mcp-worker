@@ -1,0 +1,131 @@
+{
+  "groups": [
+    {
+      "id": "overview",
+      "label": "Overview and self-host",
+      "description": "Guidance, self-host inspection, deploy controls, and permission planning.",
+      "tools": [
+        "help",
+        "request_permission_bundle",
+        "repo_work_context",
+        "self_host_status",
+        "self_deploy",
+        "self_bootstrap_repo_secrets",
+        "self_sync_mirror_secrets"
+      ]
+    },
+    {
+      "id": "workspace",
+      "label": "Workspace registry",
+      "description": "Workspace discovery, registration, and active repo context management.",
+      "tools": [
+        "workspace_activate",
+        "workspace_resolve",
+        "workspace_register",
+        "workspace_find_similar",
+        "workspace_list"
+      ]
+    },
+    {
+      "id": "repo_read",
+      "label": "Repository read",
+      "description": "Repository files, trees, search, issues, PRs, and workflow read APIs.",
+      "tools": [
+        "repo_get_file",
+        "repo_list_tree",
+        "repo_tree_snapshot",
+        "repo_search_code",
+        "repo_search_issues",
+        "issue_get",
+        "pr_get",
+        "pr_get_files",
+        "workflow_runs_list",
+        "workflow_run_get",
+        "workflow_artifacts_list"
+      ]
+    },
+    {
+      "id": "repo_write",
+      "label": "Repository write",
+      "description": "Branch creation, file edits, PR creation and merge, comments, and workflow dispatch.",
+      "tools": [
+        "repo_create_branch",
+        "repo_update_file",
+        "pr_create",
+        "pr_merge",
+        "comment_create",
+        "workflow_dispatch"
+      ]
+    },
+    {
+      "id": "collaboration",
+      "label": "Collaboration and cleanup",
+      "description": "Branch cleanup discovery and execution under repo guardrails.",
+      "tools": [
+        "branch_cleanup_candidates",
+        "branch_cleanup_execute"
+      ]
+    },
+    {
+      "id": "queue",
+      "label": "Queue and review loop",
+      "description": "Persistent job tracking, audit history, reviewer actions, and queue-driven state transitions.",
+      "tools": [
+        "job_create",
+        "job_get",
+        "job_progress",
+        "jobs_list",
+        "audit_list",
+        "job_update_status",
+        "job_append_note",
+        "job_submit_review",
+        "jobs_list_pending_review",
+        "jobs_list_pending_rework"
+      ]
+    }
+  ],
+  "permissionPresets": [
+    {
+      "id": "repo_readonly_review",
+      "label": "Repo review and investigation",
+      "description": "Inspect repository state, open PRs, workflow runs, and queue state without mutating code.",
+      "capabilities": ["read", "workspace", "queue"],
+      "groupIds": ["overview", "workspace", "repo_read", "queue"]
+    },
+    {
+      "id": "implementation_with_pr",
+      "label": "Implementation with PR",
+      "description": "Read repo state, create branches, edit files, open PRs, and track queue progress.",
+      "capabilities": ["read", "write", "workspace", "queue"],
+      "groupIds": ["overview", "workspace", "repo_read", "repo_write", "queue"]
+    },
+    {
+      "id": "implementation_with_workflow",
+      "label": "Implementation with workflow dispatch",
+      "description": "Implementation plus allowlisted workflow dispatch and queue tracking.",
+      "capabilities": ["read", "write", "workflow", "workspace", "queue"],
+      "groupIds": ["overview", "workspace", "repo_read", "repo_write", "queue"]
+    },
+    {
+      "id": "review_followup",
+      "label": "Review follow-up",
+      "description": "Respond to review findings, update PR state, and track reviewer/worker handoff.",
+      "capabilities": ["read", "write", "review", "queue"],
+      "groupIds": ["overview", "repo_read", "repo_write", "queue"]
+    },
+    {
+      "id": "maintainer_cleanup",
+      "label": "Maintainer cleanup",
+      "description": "Inspect open PRs, active jobs, and remove safe stale agent branches.",
+      "capabilities": ["read", "write", "workspace", "queue"],
+      "groupIds": ["overview", "workspace", "repo_read", "collaboration", "queue"]
+    },
+    {
+      "id": "self_maintenance",
+      "label": "Self maintenance and deploy",
+      "description": "Inspect self-host state, sync secrets, and promote mirror/live environments.",
+      "capabilities": ["read", "workflow", "self_host"],
+      "groupIds": ["overview", "workspace", "repo_read", "repo_write", "queue"]
+    }
+  ]
+}

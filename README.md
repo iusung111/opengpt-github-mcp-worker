@@ -12,45 +12,17 @@ Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Dev
 
 ## Current Tool Surface
 
-Read tools:
+The server exposes grouped tool families rather than one flat surface:
 
-- `help`
-- `self_host_status`
-- `self_deploy`
-- `repo_work_context`
-- `branch_cleanup_candidates`
-- `workspace_resolve`
-- `workspace_find_similar`
-- `workspace_list`
-- `repo_get_file`
-- `repo_list_tree`
-- `issue_get`
-- `pr_get`
-- `pr_get_files`
-- `workflow_runs_list`
-- `workflow_run_get`
-- `workflow_artifacts_list`
-- `job_get`
-- `job_progress`
-- `jobs_list`
-- `audit_list`
-- `jobs_list_pending_review`
-- `jobs_list_pending_rework`
+- overview and self-host guidance
+- workspace registry and active repo context
+- repository read and search
+- repository write, PR, comment, and workflow dispatch
+- branch cleanup and collaboration helpers
+- queue, audit, and reviewer loop state
 
-Write/action tools:
-
-- `branch_cleanup_execute`
-- `workspace_register`
-- `repo_create_branch`
-- `repo_update_file`
-- `pr_create`
-- `pr_merge`
-- `comment_create`
-- `workflow_dispatch`
-- `job_create`
-- `job_update_status`
-- `job_append_note`
-- `job_submit_review`
+The generated full surface and permission presets live in [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
+Regenerate it with `npm run docs:tool-surface` after changing the catalog in [src/tool-catalog.json](/d:/VScode/opengpt-github-mcp-worker/src/tool-catalog.json).
 
 ## Local Validation
 
@@ -70,6 +42,7 @@ npm run test:integration
 npm run test:integration:runtime
 npm run test:all
 npm run ops:status
+npm run docs:tool-surface
 ```
 
 `test:integration` is a host-aware wrapper. On Windows it skips Durable Object runtime tests and prints the exact command to run on Linux/CI. `test:integration:runtime` always runs the full DO-backed suite.
@@ -192,6 +165,23 @@ Use one of these headers when calling `/queue/job` or `/queue/jobs` directly:
 `QUEUE_API_TOKEN` is preferred so queue maintenance auth is separated from GitHub webhook verification.
 If `QUEUE_API_TOKEN` is unset, the worker falls back to `WEBHOOK_SECRET` for backward compatibility.
 GitHub webhook deliveries still authenticate with `X-Hub-Signature-256`; they do not use `X-Queue-Token`.
+
+## Batch Permission Bundles
+
+Use `request_permission_bundle` when a web run needs one up-front approval covering multiple MCP actions.
+
+- pick a preset such as `implementation_with_workflow`, `review_followup`, or `self_maintenance`
+- add explicit capabilities when the preset is too broad or too narrow
+- include expected follow-up work such as workflow reruns or branch cleanup in the same bundle request
+
+The tool returns:
+
+- grouped scope summary
+- exact tool list covered by the bundle
+- approval request text
+- recommended follow-up guidance
+
+The bundle definitions come from [src/tool-catalog.json](/d:/VScode/opengpt-github-mcp-worker/src/tool-catalog.json), which is also the source for the generated [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
 
 ## Mirror-First Self Improvement
 

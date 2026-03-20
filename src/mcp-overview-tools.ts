@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { seal } from 'tweetsodium';
 import * as z from 'zod/v4';
 import { cloudflarePut } from './cloudflare';
+import { buildPermissionBundleMessage, listPermissionPresets, listToolGroups } from './tool-catalog';
 import { AppEnv } from './types';
 import {
 	activateRepoWorkspace,
@@ -156,12 +157,18 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 			].join('\n'),
 		},
 	};
+	const permissionPresets = listPermissionPresets().map((preset) => ({
+		id: preset.id,
+		label: preset.label,
+		capabilities: preset.capabilities,
+	}));
 	if (normalized.includes('main')) {
 		return {
 			summary: 'Use this when the user wants a real change prepared all the way to a merge-ready PR on main.',
 			recommended_workflow: 'main_ready',
 			recommended_template: templates.main_ready,
 			related_workflows: ['real_change', 'dry_run', 'review_followup'],
+			permission_presets: permissionPresets,
 		};
 	}
 	if (normalized.includes('dry') || normalized.includes('test')) {
@@ -170,6 +177,7 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 			recommended_workflow: 'dry_run',
 			recommended_template: templates.dry_run,
 			related_workflows: ['real_change', 'main_ready'],
+			permission_presets: permissionPresets,
 		};
 	}
 	if (normalized.includes('review')) {
@@ -178,6 +186,7 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 			recommended_workflow: 'review_followup',
 			recommended_template: templates.review_followup,
 			related_workflows: ['real_change', 'main_ready'],
+			permission_presets: permissionPresets,
 		};
 	}
 	return {
@@ -185,6 +194,7 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		recommended_workflow: 'real_change',
 		recommended_template: templates.real_change,
 		related_workflows: ['main_ready', 'dry_run', 'review_followup'],
+		permission_presets: permissionPresets,
 	};
 }
 
@@ -197,8 +207,30 @@ export function registerOverviewTools(
 	server.registerTool('help', { description: 'Explain what kinds of GitHub work this MCP server can do and return example request templates. Use this when the user asks what work is possible or how to phrase a request.', inputSchema: { query: z.string().optional() }, annotations: readAnnotations }, async ({ query }) => {
 		try { return toolText(ok(buildHelpPayload(query), readAnnotations)); } catch (error) { return toolText(fail(errorCodeFor(error, 'help_failed'), error, readAnnotations)); }
 	});
-	server.registerTool('request_permission_bundle', { description: 'Request a bundle of permissions for a repository to streamline the workflow. This tool is a signal to the user to approve a set of actions at once.', inputSchema: { repos: z.array(z.string()).describe('List of owner/repo'), capabilities: z.array(z.string()).describe('e.g. read, write, workflow, pr'), reason: z.string().describe('Why are these permissions needed?') }, annotations: readAnnotations }, async ({ repos, capabilities, reason }) => {
-		try { return toolText(ok({ status: 'acknowledged', message: 'Permissions bundle acknowledged. You may proceed with the requested actions.', repos, capabilities }, readAnnotations)); } catch (error) { return toolText(fail(errorCodeFor(error, 'request_permission_bundle_failed'), error, readAnnotations)); }
+	server.registerTool('request_permission_bundle', { description: 'Build a batch approval bundle for one or more repositories so the user can approve the smallest useful set of MCP actions in one step.', inputSchema: { repos: z.array(z.string()).min(1).describe('List of owner/repo'), preset: z.enum(listPermissionPresets().map((preset) => preset.id) as [string, ...string[]]).optional(), capabilities: z.array(z.enum(['read', 'write', 'workflow', 'review', 'workspace', 'queue', 'self_host'])).default([]), extra_tools: z.array(z.string()).default([]).describe('Optional extra tools to include explicitly'), reason: z.string().describe('Why are these permissions needed?') }, annotations: readAnnotations }, async ({ repos, preset, capabilities, extra_tools, reason }) => {
+		try {
+			return toolText(
+				ok(
+					{
+						status: 'ready_for_approval',
+						available_presets: listPermissionPresets(),
+						available_tool_groups: listToolGroups().map((group) => ({
+							id: group.id,
+							label: group.label,
+							description: group.description,
+						})),
+						bundle: buildPermissionBundleMessage({
+							repos,
+							reason,
+							preset,
+							capabilities,
+							extraTools: extra_tools,
+						}),
+					},
+					readAnnotations,
+				),
+			);
+		} catch (error) { return toolText(fail(errorCodeFor(error, 'request_permission_bundle_failed'), error, readAnnotations)); }
 	});
 	server.registerTool('repo_work_context', { description: 'Use the GitHub repository itself as the primary working context instead of a local folder. Returns open agent PRs, active queue jobs, and recent workflow runs so chat can continue work in stages.', inputSchema: { owner: z.string(), repo: z.string(), include_completed_jobs: z.boolean().default(false) }, annotations: readAnnotations }, async ({ owner, repo, include_completed_jobs }) => {
 		const repoKey = `${owner}/${repo}`;
