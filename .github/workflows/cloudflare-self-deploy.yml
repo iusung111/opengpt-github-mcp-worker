@@ -1,0 +1,125 @@
+name: cloudflare-self-deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: Deploy target for the self repo
+        required: false
+        default: mirror
+        type: choice
+        options:
+          - mirror
+          - live
+      reason:
+        description: Why this deploy was triggered
+        required: false
+        type: string
+      expected_commit_sha:
+        description: Optional safety check for the commit being promoted
+        required: false
+        type: string
+      verify_mirror_first:
+        description: Require mirror health before allowing a live promotion
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_TARGET: ${{ github.event_name == 'push' && 'mirror' || inputs.deploy_target || 'mirror' }}
+      VERIFY_MIRROR_FIRST: ${{ github.event_name == 'push' && 'false' || inputs.verify_mirror_first || 'true' }}
+      EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha || '' }}
+      SELF_LIVE_URL: https://opengpt-github-mcp-worker.iusung111.workers.dev
+      SELF_MIRROR_URL: https://opengpt-github-mcp-worker-mirror.iusung111.workers.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate
+        run: npm run check
+
+      - name: Sync GitHub App private key to target Worker
+        if: ${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM != '' }}
+        run: |
+          printf "%s" "${{ secrets.GITHUB_APP_PRIVATE_KEY_PEM }}" | npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${{ env.DEPLOY_TARGET == 'mirror' && '--env mirror' || '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Sync webhook secret to target Worker
+        if: ${{ secrets.WEBHOOK_SECRET != '' }}
+        run: |
+          printf "%s" "${{ secrets.WEBHOOK_SECRET }}" | npx wrangler secret put WEBHOOK_SECRET ${{ env.DEPLOY_TARGET == 'mirror' && '--env mirror' || '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify requested commit
+        if: ${{ env.EXPECTED_COMMIT_SHA != '' }}
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          if [ "$ACTUAL_SHA" != "$EXPECTED_COMMIT_SHA" ]; then
+            echo "Expected commit $EXPECTED_COMMIT_SHA but found $ACTUAL_SHA"
+            exit 1
+          fi
+
+      - name: Verify mirror health before live promotion
+        if: ${{ env.DEPLOY_TARGET == 'live' && env.VERIFY_MIRROR_FIRST == 'true' }}
+        run: |
+          echo "Checking mirror health: ${SELF_MIRROR_URL}/healthz"
+          curl --fail --show-error "${SELF_MIRROR_URL}/healthz"
+
+      - name: Deploy to Cloudflare Mirror
+        if: ${{ env.DEPLOY_TARGET == 'mirror' }}
+        run: |
+          DEPLOY_OUTPUT=$(npx wrangler deploy --env mirror)
+          echo "$DEPLOY_OUTPUT"
+          URL=$(echo "$DEPLOY_OUTPUT" | grep -oE "https://[^ ]+\.workers\.dev" | head -1)
+          echo "DEPLOY_URL=$URL" >> $GITHUB_ENV
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy to Cloudflare Live
+        if: ${{ env.DEPLOY_TARGET == 'live' }}
+        run: |
+          DEPLOY_OUTPUT=$(npx wrangler deploy)
+          echo "$DEPLOY_OUTPUT"
+          URL=$(echo "$DEPLOY_OUTPUT" | grep -oE "https://[^ ]+\.workers\.dev" | head -1)
+          echo "DEPLOY_URL=$URL" >> $GITHUB_ENV
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Post-Deploy Health Check
+        run: |
+          echo "Verifying health for: ${{ env.DEPLOY_URL }}/healthz"
+          for i in {1..6}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.DEPLOY_URL }}/healthz")
+            if [ "$STATUS" -eq 200 ]; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i: Health check failed with status $STATUS. Retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check timed out. Deployment might be broken."
+          exit 1
