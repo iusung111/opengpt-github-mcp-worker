@@ -44,6 +44,14 @@ import {
 import { findLatestWorkflowRunId, getWorkflowRunSnapshot } from './queue-github';
 import { listJobs as listQueueJobs, upsertJob as upsertQueueJob } from './queue-jobs';
 import { handleQueueAction } from './queue-requests';
+import {
+	ensureJobIndexes as ensureQueueJobIndexes,
+	findJob as findStoredJob,
+	getActiveWorkspaceRepoKey as getActiveWorkspaceKey,
+	getJob as getStoredJob,
+	getWorkspace as getStoredWorkspace,
+	persistJob as persistStoredJob,
+} from './queue-store';
 import { applyGithubEvent as applyGitHubWebhookEvent } from './queue-webhooks';
 import {
 	buildJobIndexEntries,
@@ -82,6 +90,24 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		};
 	}
 
+	private createQueueStoreContext() {
+		return {
+			getStorage: async <T>(key: string) => ((await this.ctx.storage.get<T>(key)) ?? null),
+			putStorage: async (key: string, value: unknown) => {
+				await this.ctx.storage.put(key, value);
+			},
+			deleteStorage: async (keys: string[] | string) => {
+				if (Array.isArray(keys)) {
+					await this.ctx.storage.delete(keys);
+					return;
+				}
+				await this.ctx.storage.delete(keys);
+			},
+			listJobs: async () => Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()),
+			reconcileJob: this.reconcileJob.bind(this),
+		};
+	}
+
 	private async enforceAuditRetention(): Promise<void> {
 		await enforceQueueAuditRetention(this.createQueueAuditContext());
 	}
@@ -95,47 +121,23 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async getJob(jobId: string): Promise<JobRecord | null> {
-		return ((await this.ctx.storage.get(jobStorageKey(jobId))) as JobRecord | undefined) ?? null;
+		return getStoredJob(this.createQueueStoreContext(), jobId);
 	}
 
 	private async ensureJobIndexes(): Promise<void> {
-		const ready = await this.ctx.storage.get<boolean>(jobIndexReadyKey());
-		if (ready) {
-			return;
-		}
-		const records = await this.ctx.storage.list<JobRecord>({ prefix: 'job:' });
-		for (const [, job] of records) {
-			for (const [key, value] of buildJobIndexEntries(job)) {
-				await this.ctx.storage.put(key, value);
-			}
-		}
-		await this.ctx.storage.put(jobIndexReadyKey(), true);
+		await ensureQueueJobIndexes(this.createQueueStoreContext());
 	}
 
 	private async persistJob(job: JobRecord, previous?: JobRecord | null): Promise<void> {
-		const previousEntries = new Map(previous ? buildJobIndexEntries(previous) : []);
-		const nextEntries = new Map(buildJobIndexEntries(job));
-		const keysToDelete: string[] = [];
-		for (const key of previousEntries.keys()) {
-			if (!nextEntries.has(key)) {
-				keysToDelete.push(key);
-			}
-		}
-		if (keysToDelete.length > 0) {
-			await this.ctx.storage.delete(keysToDelete);
-		}
-		await this.ctx.storage.put(jobStorageKey(job.job_id), job);
-		for (const [key, value] of nextEntries.entries()) {
-			await this.ctx.storage.put(key, value);
-		}
+		await persistStoredJob(this.createQueueStoreContext(), job, previous);
 	}
 
 	private async getWorkspace(repoKey: string): Promise<WorkspaceRecord | null> {
-		return ((await this.ctx.storage.get(workspaceStorageKey(repoKey))) as WorkspaceRecord | undefined) ?? null;
+		return getStoredWorkspace(this.createQueueStoreContext(), repoKey);
 	}
 
 	private async getActiveWorkspaceRepoKey(): Promise<string | null> {
-		return ((await this.ctx.storage.get(activeWorkspaceStorageKey())) as string | undefined) ?? null;
+		return getActiveWorkspaceKey(this.createQueueStoreContext());
 	}
 
 	private async listAuditRecords(eventType?: string, jobId?: string, limit = 20): Promise<AuditRecord[]> {
@@ -166,14 +168,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		matcher: (job: JobRecord) => boolean,
 		options: { reconcile?: boolean } = {},
 	): Promise<JobRecord | null> {
-		const records = await this.ctx.storage.list<JobRecord>({ prefix: 'job:' });
-		for (const [, value] of records) {
-			if (!matcher(value)) {
-				continue;
-			}
-			return options.reconcile === false ? value : this.reconcileJob(value);
-		}
-		return null;
+		return findStoredJob(this.createQueueStoreContext(), matcher, options);
 	}
 
 	private async markJobStale(job: JobRecord, reason: string, note: string): Promise<boolean> {
