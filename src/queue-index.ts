@@ -4,6 +4,10 @@ export interface JobIndexPointer {
 	job_id: string;
 }
 
+export function jobIndexReadyKey(): string {
+	return 'meta:indexes:jobs:v1';
+}
+
 function encodeSegment(value: string): string {
 	return encodeURIComponent(value);
 }

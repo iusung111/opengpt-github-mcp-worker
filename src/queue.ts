@@ -49,6 +49,7 @@ import {
 	buildJobIndexEntries,
 	JobIndexPointer,
 	jobBranchIndexKey,
+	jobIndexReadyKey,
 	jobRunIndexKey,
 	jobStatusIndexPrefix,
 } from './queue-index';
@@ -106,6 +107,20 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async getJob(jobId: string): Promise<JobRecord | null> {
 		return ((await this.ctx.storage.get(jobStorageKey(jobId))) as JobRecord | undefined) ?? null;
+	}
+
+	private async ensureJobIndexes(): Promise<void> {
+		const ready = await this.ctx.storage.get<boolean>(jobIndexReadyKey());
+		if (ready) {
+			return;
+		}
+		const records = await this.ctx.storage.list<JobRecord>({ prefix: 'job:' });
+		for (const [, job] of records) {
+			for (const [key, value] of buildJobIndexEntries(job)) {
+				await this.ctx.storage.put(key, value);
+			}
+		}
+		await this.ctx.storage.put(jobIndexReadyKey(), true);
 	}
 
 	private async persistJob(job: JobRecord, previous?: JobRecord | null): Promise<void> {
@@ -435,6 +450,9 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async listJobs(status?: JobStatus, nextActor?: NextActor): Promise<JobRecord[]> {
 		const jobs: JobRecord[] = [];
+		if (status || nextActor) {
+			await this.ensureJobIndexes();
+		}
 		const indexedRecords =
 			status || nextActor
 				? await this.ctx.storage.list<JobIndexPointer>({ prefix: jobStatusIndexPrefix(status, nextActor) })
@@ -481,6 +499,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (!workBranch) {
 			return null;
 		}
+		await this.ensureJobIndexes();
 		const indexedPointer = await this.ctx.storage.get<JobIndexPointer>(jobBranchIndexKey(repo, workBranch));
 		if (indexedPointer?.job_id) {
 			const indexedJob = await this.getJob(indexedPointer.job_id);
@@ -514,6 +533,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (!runId) {
 			return null;
 		}
+		await this.ensureJobIndexes();
 		const indexedPointer = await this.ctx.storage.get<JobIndexPointer>(jobRunIndexKey(repo, runId));
 		if (indexedPointer?.job_id) {
 			const indexedJob = await this.getJob(indexedPointer.job_id);
