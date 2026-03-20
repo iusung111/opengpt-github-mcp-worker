@@ -25,6 +25,27 @@ import {
 
 export { JobQueueDurableObject };
 
+function getQueueAuthToken(env: AppEnv): string | null {
+	const token = env.WEBHOOK_SECRET?.trim();
+	return token ? token : null;
+}
+
+function queueRequestAuthorized(request: Request, env: AppEnv): boolean {
+	const expected = getQueueAuthToken(env);
+	if (!expected) {
+		return false;
+	}
+	const headerToken = request.headers.get('x-queue-token')?.trim();
+	if (headerToken && headerToken === expected) {
+		return true;
+	}
+	const authorization = request.headers.get('authorization') ?? '';
+	if (authorization.startsWith('Bearer ')) {
+		return authorization.slice('Bearer '.length).trim() === expected;
+	}
+	return false;
+}
+
 async function handleWebhook(request: Request, env: AppEnv): Promise<Response> {
 	if (env.REQUIRE_WEBHOOK_SECRET === 'true' && !env.WEBHOOK_SECRET) {
 		return jsonResponse(fail('server_error', 'webhook secret configuration missing'), 500);
@@ -60,6 +81,9 @@ async function handleWebhook(request: Request, env: AppEnv): Promise<Response> {
 }
 
 async function handleQueueApi(request: Request, env: AppEnv): Promise<Response> {
+	if (!queueRequestAuthorized(request, env)) {
+		return jsonResponse(fail('unauthorized', 'invalid queue token'), 401);
+	}
 	const url = new URL(request.url);
 	if (request.method === 'POST' && url.pathname === '/queue/job') {
 		const job = (await request.json()) as Partial<JobRecord> & { job_id: string };
