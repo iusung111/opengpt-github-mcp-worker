@@ -74,6 +74,12 @@ npm run ops:status
 
 `test:integration` is a host-aware wrapper. On Windows it skips Durable Object runtime tests and prints the exact command to run on Linux/CI. `test:integration:runtime` always runs the full DO-backed suite.
 
+Validation policy:
+
+- Linux/CI is the source of truth for Durable Object runtime verification.
+- Cloudflare live and mirror health checks are the source of truth for deployed behavior.
+- Windows local runs are for fast unit checks and manual smoke work, not for authoritative DO runtime gating.
+
 ## Required Secrets
 
 Set these with `wrangler secret put` before deploy:
