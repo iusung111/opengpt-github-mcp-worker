@@ -176,4 +176,79 @@ describe('queue webhook reconciliation', () => {
 			},
 		});
 	});
+
+	it('prefers exact PR body job_id over ambiguous branch-prefix matches', async () => {
+		await SELF.fetch('https://example.com/queue/job', {
+			method: 'POST',
+			headers: queueJsonHeaders,
+			body: JSON.stringify({
+				job_id: 'job-prefix',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				status: 'failed',
+				next_actor: 'system',
+				work_branch: 'agent/job-prefix-101',
+				pr_number: 1,
+			}),
+		});
+
+		await SELF.fetch('https://example.com/queue/job', {
+			method: 'POST',
+			headers: queueJsonHeaders,
+			body: JSON.stringify({
+				job_id: 'job-prefix-retry1',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				status: 'working',
+				next_actor: 'system',
+			}),
+		});
+
+		const prBody = JSON.stringify({
+			action: 'opened',
+			repository: { full_name: 'iusung111/OpenGPT' },
+			pull_request: {
+				number: 11,
+				state: 'open',
+				body: '<!-- opengpt-job\njob_id: job-prefix-retry1\nrun_id: 1111\nworkflow: agent-run.yml\nbranch: agent/job-prefix-retry1-707\n-->',
+				head: { ref: 'agent/job-prefix-retry1-707' },
+			},
+		});
+		const prResponse = await SELF.fetch('https://example.com/webhooks/github', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'X-GitHub-Event': 'pull_request',
+				'X-Hub-Signature-256': await webhookSignature(prBody),
+			},
+			body: prBody,
+		});
+		expect(prResponse.status).toBe(200);
+		await expect(prResponse.json()).resolves.toMatchObject({
+			ok: true,
+			outcome: {
+				matched: true,
+				job_id: 'job-prefix-retry1',
+				pr_number: 11,
+				work_branch: 'agent/job-prefix-retry1-707',
+				status: 'review_pending',
+				next_actor: 'reviewer',
+			},
+		});
+
+		const getResponse = await SELF.fetch('https://example.com/queue/job/job-prefix-retry1', {
+			headers: queueAuthHeaders,
+		});
+		await expect(getResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				job: {
+					pr_number: 11,
+					work_branch: 'agent/job-prefix-retry1-707',
+					status: 'review_pending',
+					next_actor: 'reviewer',
+				},
+			},
+		});
+	});
 });

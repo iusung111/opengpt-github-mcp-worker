@@ -136,6 +136,19 @@ function parseJobIdFromPrBody(body?: string): string | null {
 	return metadataMatch?.[1] ?? null;
 }
 
+function branchMatchScore(workBranch: string, job: JobRecord): number {
+	if (!workBranch || job.work_branch === workBranch) {
+		return 4;
+	}
+	if (job.work_branch && workBranch.startsWith(`${job.work_branch}-`)) {
+		return 3;
+	}
+	if (branchMatchesJobHint(workBranch, job)) {
+		return 2;
+	}
+	return 0;
+}
+
 function normalizeLookup(value: unknown): string {
 	return String(value ?? '')
 		.trim()
@@ -651,19 +664,26 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		if (!workBranch) {
 			return null;
 		}
-		return this.findJob((job) => {
-				if (job.repo !== repo) {
-					return false;
-				}
-				if (!job.work_branch) {
-					return branchMatchesJobHint(workBranch, job);
-				}
-				return (
-					job.work_branch === workBranch ||
-					workBranch.startsWith(`${job.work_branch}-`) ||
-					branchMatchesJobHint(workBranch, job)
-				);
-			}, { reconcile: false });
+		const records = await this.ctx.storage.list<JobRecord>({ prefix: 'job:' });
+		let bestMatch: { job: JobRecord; score: number; matchedLength: number } | null = null;
+		for (const [, job] of records) {
+			if (job.repo !== repo) {
+				continue;
+			}
+			const score = branchMatchScore(workBranch, job);
+			if (score === 0) {
+				continue;
+			}
+			const matchedLength = Math.max(job.work_branch?.length ?? 0, job.job_id.length);
+			if (
+				!bestMatch ||
+				score > bestMatch.score ||
+				(score === bestMatch.score && matchedLength > bestMatch.matchedLength)
+			) {
+				bestMatch = { job, score, matchedLength };
+			}
+		}
+		return bestMatch?.job ?? null;
 	}
 
 	private async findByRepoAndRun(repo: string, runId?: number): Promise<JobRecord | null> {
@@ -671,6 +691,14 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			return null;
 		}
 		return this.findJob((job) => job.repo === repo && job.workflow_run_id === runId, { reconcile: false });
+	}
+
+	private async findByRepoAndJobId(repo: string, jobId?: string | null): Promise<JobRecord | null> {
+		if (!jobId) {
+			return null;
+		}
+		const job = await this.getJob(jobId);
+		return job?.repo === repo ? job : null;
 	}
 
 	private normalizeJob(input: Partial<JobRecord> & { job_id: string }): JobRecord {
@@ -787,8 +815,8 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			if (pr?.head?.ref) {
 				const hintedJobId = parseJobIdFromPrBody(pr.body);
 				const job =
-					(await this.findByRepoAndBranch(repoFullName, pr.head.ref)) ??
-					(hintedJobId ? await this.getJob(hintedJobId) : null);
+					(await this.findByRepoAndJobId(repoFullName, hintedJobId)) ??
+					(await this.findByRepoAndBranch(repoFullName, pr.head.ref));
 				if (job) {
 					job.last_webhook_event_at = nowIso();
 					if (pr.number && job.pr_number !== pr.number) {
