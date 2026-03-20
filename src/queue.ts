@@ -28,9 +28,14 @@ import {
 import { githubAuthConfigured } from './github';
 import { autoRedispatchJob as autoRedispatchQueueJob } from './queue-dispatch';
 import {
+	enforceAuditRetention as enforceQueueAuditRetention,
+	enforceDeliveryRetention as enforceQueueDeliveryRetention,
+	listAuditRecords as listQueueAuditRecords,
+	tryRegisterDelivery as tryRegisterQueueDelivery,
+	writeAudit as writeQueueAudit,
+} from './queue-audit';
+import {
 	activeWorkspaceStorageKey,
-	auditStorageKey,
-	deliveryStorageKey,
 	jobStorageKey,
 	normalizeLookup,
 	verifyWebhookSignature,
@@ -58,47 +63,35 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		super(ctx, env);
 	}
 
+	private createQueueAuditContext() {
+		return {
+			getAuditRetentionCount: () => getAuditRetentionCount(this.env),
+			getDeliveryRetentionCount: () => getDeliveryRetentionCount(this.env),
+			listAuditStorage: async () => this.ctx.storage.list<AuditRecord>({ prefix: 'audit:' }),
+			listDeliveryStorage: async () => this.ctx.storage.list<DeliveryRecord>({ prefix: 'delivery:' }),
+			putStorage: async (key: string, value: unknown) => {
+				await this.ctx.storage.put(key, value);
+			},
+			deleteStorage: async (keys: string[] | string) => {
+				if (Array.isArray(keys)) {
+					await this.ctx.storage.delete(keys);
+					return;
+				}
+				await this.ctx.storage.delete(keys);
+			},
+		};
+	}
+
 	private async enforceAuditRetention(): Promise<void> {
-		const limit = getAuditRetentionCount(this.env);
-		const records = await this.ctx.storage.list({ prefix: 'audit:' });
-		const overflow = records.size - limit;
-		if (overflow <= 0) {
-			return;
-		}
-		const keysToDelete: string[] = [];
-		let index = 0;
-		for (const key of records.keys()) {
-			if (index >= overflow) {
-				break;
-			}
-			keysToDelete.push(key);
-			index += 1;
-		}
-		if (keysToDelete.length > 0) {
-			await this.ctx.storage.delete(keysToDelete);
-		}
+		await enforceQueueAuditRetention(this.createQueueAuditContext());
 	}
 
 	private async enforceDeliveryRetention(): Promise<void> {
-		const limit = getDeliveryRetentionCount(this.env);
-		const records = await this.ctx.storage.list<DeliveryRecord>({ prefix: 'delivery:' });
-		const deliveries = Array.from(records.entries())
-			.map(([key, record]) => ({ key, created_at: record.created_at }))
-			.sort((left, right) => left.created_at.localeCompare(right.created_at));
-		const overflow = deliveries.length - limit;
-		if (overflow <= 0) {
-			return;
-		}
-		await this.ctx.storage.delete(deliveries.slice(0, overflow).map((item) => item.key));
+		await enforceQueueDeliveryRetention(this.createQueueAuditContext());
 	}
 
 	private async writeAudit(eventType: string, payload: Record<string, unknown>): Promise<void> {
-		await this.ctx.storage.put(auditStorageKey(`${Date.now()}-${crypto.randomUUID()}`), {
-			event_type: eventType,
-			payload,
-			created_at: nowIso(),
-		});
-		await this.enforceAuditRetention();
+		await writeQueueAudit(this.createQueueAuditContext(), eventType, payload);
 	}
 
 	private async getJob(jobId: string): Promise<JobRecord | null> {
@@ -146,21 +139,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async listAuditRecords(eventType?: string, jobId?: string, limit = 20): Promise<AuditRecord[]> {
-		const safeLimit = Math.max(1, Math.min(limit, 100));
-		const filtered: AuditRecord[] = [];
-		const records = await this.ctx.storage.list<AuditRecord>({ prefix: 'audit:' });
-		
-		for (const [, record] of records) {
-			if (eventType && record.event_type !== eventType) {
-				continue;
-			}
-			if (jobId && record.payload.job_id !== jobId) {
-				continue;
-			}
-			filtered.push(record);
-		}
-		
-		return filtered.slice(Math.max(0, filtered.length - safeLimit)).reverse();
+		return listQueueAuditRecords(this.createQueueAuditContext(), eventType, jobId, limit);
 	}
 
 	private buildJobProgressSnapshot(job: JobRecord, recentAudits: AuditRecord[]): JobProgressSnapshot {
@@ -225,17 +204,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async tryRegisterDelivery(deliveryId?: string): Promise<boolean> {
-		if (!deliveryId) {
-			return true;
-		}
-		const key = deliveryStorageKey(deliveryId);
-		const existing = await this.ctx.storage.get<DeliveryRecord>(key);
-		if (existing) {
-			return false;
-		}
-		await this.ctx.storage.put(key, { delivery_id: deliveryId, created_at: nowIso() });
-		await this.enforceDeliveryRetention();
-		return true;
+		return tryRegisterQueueDelivery(this.createQueueAuditContext(), deliveryId);
 	}
 
 	private async autoRedispatchJob(job: JobRecord, reason: string): Promise<boolean> {
