@@ -115,50 +115,50 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		real_change: {
 			label: 'Real change with PR',
 			prompt: [
-				'iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃?吏꾪뻾:',
+				'Make a real change in iusung111/OpenGPT and open a PR.',
 				'- job_id: change-001',
-				'- 紐⑺몴: <援ъ껜?곸씤 ?섏젙 ?댁슜>',
-				'- 蹂寃??뚯씪: <path>',
+				'- request: <exact user-facing or code-facing change>',
+				'- target_paths: <path>',
 				'- dry_run: false',
-				'- ?꾨즺 湲곗?: 媛?ν븳 踰붿쐞??寃利???PR ?앹꽦',
+				'- done_when: branch is pushed and a PR is created',
 			].join('\n'),
 		},
 		main_ready: {
 			label: 'Main-ready change',
 			prompt: [
-				'iusung111/OpenGPT?먯꽌 ?ㅼ쓬 蹂寃쎌쓣 吏꾪뻾?섍퀬 main 諛섏쁺 湲곗??쇰줈 留덈Т由ы빐以?',
+				'Prepare a real change in iusung111/OpenGPT so it is ready for merge to main.',
 				'- job_id: main-ready-001',
-				'- 紐⑺몴: <援ъ껜?곸씤 ?섏젙 ?댁슜>',
-				'- 蹂寃??뚯씪: <path>',
+				'- request: <exact user-facing or code-facing change>',
+				'- target_paths: <path>',
 				'- dry_run: false',
-				'- ?꾨즺 湲곗?: 寃利??꾨즺, branch push, PR ?앹꽦, 媛?ν븯硫?merge源뚯?',
+				'- done_when: validation is complete, branch is pushed, PR is created, and merge is attempted if allowed',
 			].join('\n'),
 		},
 		dry_run: {
 			label: 'Dry run',
 			prompt: [
-				'iusung111/OpenGPT?먯꽌 ?ㅼ쓬 ?섏젙??dry run ?쇰줈 ?뚯뒪??',
+				'Run a dry-run request for iusung111/OpenGPT without creating a final branch or PR.',
 				'- job_id: dry-run-001',
-				'- 紐⑺몴: <援ъ껜?곸씤 ?섏젙 ?댁슜>',
-				'- 蹂寃??뚯씪: <path>',
+				'- request: <exact user-facing or code-facing change>',
+				'- target_paths: <path>',
 				'- dry_run: true',
-				'- ?꾨즺 湲곗?: 泥댄겕/寃利?寃곌낵 ?붾㈃',
+				'- done_when: validation completes and the queue captures the result without merge intent',
 			].join('\n'),
 		},
 		review_followup: {
 			label: 'Review follow-up',
 			prompt: [
-				'PR review 吏?곸궗?댄빆??諛섏쁺?섎뒗 follow-up ?묒뾽:',
+				'Follow up on an existing PR review request.',
 				'- repo: iusung111/OpenGPT',
 				'- branch or PR: <existing branch or PR>',
-				'- 紐⑺몴: <review feedback summary>',
-				'- ?꾨즺 湲곗?: 吏?곸궗?댄빆 諛섏쁺 ?꾨즺',
+				'- request: <review feedback summary>',
+				'- done_when: review findings are addressed and the PR is updated',
 			].join('\n'),
 		},
 	};
 	if (normalized.includes('main')) {
 		return {
-			summary: 'main 諛섏쁺源뚯? ?꾪븳 蹂寃쎌씤吏 ?뺤씤?섍퀬, 寃利?PR/merge源뚯? ?붾㈃?낅땲??',
+			summary: 'Use this when the user wants a real change prepared all the way to a merge-ready PR on main.',
 			recommended_workflow: 'main_ready',
 			recommended_template: templates.main_ready,
 			related_workflows: ['real_change', 'dry_run', 'review_followup'],
@@ -166,7 +166,7 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 	}
 	if (normalized.includes('dry') || normalized.includes('test')) {
 		return {
-			summary: 'risk瑜?以꾩씠湲??꾪빐 dry run/媛꾩씠?ㅽ뒪 ?뺤떇??硫붿냼?쒕땲??',
+			summary: 'Use this when the user wants validation, investigation, or a no-commit rehearsal without a real merge path.',
 			recommended_workflow: 'dry_run',
 			recommended_template: templates.dry_run,
 			related_workflows: ['real_change', 'main_ready'],
@@ -174,14 +174,14 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 	}
 	if (normalized.includes('review')) {
 		return {
-			summary: 'PR review follow-up ?묒뾽?꾩씤 紐⑺몴?곸쑝濡??ㅼ쓬 ?섏젙?덈줈 ?뚯빞 ?⑸땲??',
+			summary: 'Use this when the user is responding to review feedback on an existing branch or pull request.',
 			recommended_workflow: 'review_followup',
 			recommended_template: templates.review_followup,
 			related_workflows: ['real_change', 'main_ready'],
 		};
 	}
 	return {
-		summary: '?먰븯???묒뾽 ?댁슜??repo, 紐⑺몴, 蹂寃??뚯씪, dry_run ?щ?, ?꾨즺 湲곗?怨??④퍡 留먰븯硫?媛???덉젙?곸쑝濡?吏꾪뻾?????덉뒿?덈떎.',
+		summary: 'Include the repo, the exact requested change, expected target paths, dry_run intent, and what counts as done.',
 		recommended_workflow: 'real_change',
 		recommended_template: templates.real_change,
 		related_workflows: ['main_ready', 'dry_run', 'review_followup'],
