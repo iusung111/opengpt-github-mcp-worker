@@ -92,6 +92,13 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Cloudflare API token
+        run: |
+          npx wrangler whoami
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Verify mirror auth secrets
         if: ${{ env.SYNC_SECRETS == 'true' }}
         run: |
@@ -116,8 +123,14 @@ jobs:
             local max_attempts=5
             local sleep_seconds=10
             while [ "$attempt" -le "$max_attempts" ]; do
-              if npx wrangler secret put "$secret_name" ${target_args} < "$secret_file"; then
+              if OUTPUT=$(npx wrangler secret put "$secret_name" ${target_args} < "$secret_file" 2>&1); then
+                printf "%s\n" "$OUTPUT"
                 return 0
+              fi
+              printf "%s\n" "$OUTPUT"
+              if printf "%s" "$OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
+                echo "Cloudflare authentication failed for ${secret_name}; stopping retries."
+                return 1
               fi
               if [ "$attempt" -eq "$max_attempts" ]; then
                 return 1
@@ -157,8 +170,14 @@ jobs:
             local max_attempts=5
             local sleep_seconds=10
             while [ "$attempt" -le "$max_attempts" ]; do
-              if npx wrangler secret put "$secret_name" ${target_args} < "$secret_file"; then
+              if OUTPUT=$(npx wrangler secret put "$secret_name" ${target_args} < "$secret_file" 2>&1); then
+                printf "%s\n" "$OUTPUT"
                 return 0
+              fi
+              printf "%s\n" "$OUTPUT"
+              if printf "%s" "$OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
+                echo "Cloudflare authentication failed for ${secret_name}; stopping retries."
+                return 1
               fi
               if [ "$attempt" -eq "$max_attempts" ]; then
                 return 1
@@ -209,9 +228,14 @@ jobs:
             local max_attempts=5
             local sleep_seconds=10
             while [ "$attempt" -le "$max_attempts" ]; do
-              if DEPLOY_OUTPUT=$(npx wrangler deploy --env mirror); then
+              if DEPLOY_OUTPUT=$(npx wrangler deploy --env mirror 2>&1); then
                 printf "%s\n" "$DEPLOY_OUTPUT"
                 return 0
+              fi
+              printf "%s\n" "$DEPLOY_OUTPUT"
+              if printf "%s" "$DEPLOY_OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
+                echo "Cloudflare authentication failed during mirror deploy; stopping retries."
+                return 1
               fi
               if [ "$attempt" -eq "$max_attempts" ]; then
                 return 1
@@ -237,9 +261,14 @@ jobs:
             local max_attempts=5
             local sleep_seconds=10
             while [ "$attempt" -le "$max_attempts" ]; do
-              if DEPLOY_OUTPUT=$(npx wrangler deploy); then
+              if DEPLOY_OUTPUT=$(npx wrangler deploy 2>&1); then
                 printf "%s\n" "$DEPLOY_OUTPUT"
                 return 0
+              fi
+              printf "%s\n" "$DEPLOY_OUTPUT"
+              if printf "%s" "$DEPLOY_OUTPUT" | grep -Eq 'Invalid access token|Authentication error|Max auth failures reached'; then
+                echo "Cloudflare authentication failed during live deploy; stopping retries."
+                return 1
               fi
               if [ "$attempt" -eq "$max_attempts" ]; then
                 return 1
