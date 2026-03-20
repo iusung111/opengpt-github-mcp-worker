@@ -104,7 +104,12 @@ jobs:
             TARGET_ARGS="--env mirror"
           fi
           if [ -n "${{ secrets.APP_PRIVATE_KEY_PEM }}" ]; then
-            printf "%s" "${{ secrets.APP_PRIVATE_KEY_PEM }}" | npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${TARGET_ARGS}
+            PEM_FILE="$(mktemp)"
+            trap 'rm -f "$PEM_FILE"' EXIT
+            cat <<'EOF' > "$PEM_FILE"
+${{ secrets.APP_PRIVATE_KEY_PEM }}
+EOF
+            npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM ${TARGET_ARGS} < "$PEM_FILE"
           else
             echo "Skipping GitHub App private key sync because the repository secret is not set."
           fi
@@ -119,7 +124,12 @@ jobs:
             TARGET_ARGS="--env mirror"
           fi
           if [ -n "${{ secrets.WEBHOOK_SECRET }}" ]; then
-            printf "%s" "${{ secrets.WEBHOOK_SECRET }}" | npx wrangler secret put WEBHOOK_SECRET ${TARGET_ARGS}
+            SECRET_FILE="$(mktemp)"
+            trap 'rm -f "$SECRET_FILE"' EXIT
+            cat <<'EOF' > "$SECRET_FILE"
+${{ secrets.WEBHOOK_SECRET }}
+EOF
+            npx wrangler secret put WEBHOOK_SECRET ${TARGET_ARGS} < "$SECRET_FILE"
           else
             echo "Skipping webhook secret sync because the repository secret is not set."
           fi
