@@ -27,6 +27,11 @@ on:
         required: false
         default: true
         type: boolean
+      sync_secrets:
+        description: Sync GitHub App and webhook secrets before deploy
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -59,6 +64,7 @@ jobs:
     env:
       DEPLOY_TARGET: ${{ github.event_name == 'push' && 'mirror' || inputs.deploy_target || 'mirror' }}
       VERIFY_MIRROR_FIRST: ${{ github.event_name == 'push' && 'false' || inputs.verify_mirror_first || 'true' }}
+      SYNC_SECRETS: ${{ github.event_name == 'push' && 'false' || inputs.sync_secrets || 'false' }}
       EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha || '' }}
       SELF_LIVE_URL: https://opengpt-github-mcp-worker.iusung111.workers.dev
       SELF_MIRROR_URL: https://opengpt-github-mcp-worker-mirror.iusung111.workers.dev
@@ -87,6 +93,7 @@ jobs:
           fi
 
       - name: Verify mirror auth secrets
+        if: ${{ env.SYNC_SECRETS == 'true' }}
         run: |
           if [ -z "${{ secrets.APP_PRIVATE_KEY_PEM }}" ]; then
             echo "Missing required GitHub Actions secret: APP_PRIVATE_KEY_PEM"
@@ -98,6 +105,7 @@ jobs:
           fi
 
       - name: Sync GitHub App private key to target Worker
+        if: ${{ env.SYNC_SECRETS == 'true' }}
         continue-on-error: true
         run: |
           retry_wrangler_secret_put() {
@@ -138,6 +146,7 @@ jobs:
           APP_PRIVATE_KEY_PEM: ${{ secrets.APP_PRIVATE_KEY_PEM }}
 
       - name: Sync webhook secret to target Worker
+        if: ${{ env.SYNC_SECRETS == 'true' }}
         continue-on-error: true
         run: |
           retry_wrangler_secret_put() {
