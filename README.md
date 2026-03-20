@@ -79,6 +79,7 @@ Validation policy:
 - Linux/CI is the source of truth for Durable Object runtime verification.
 - Cloudflare live and mirror health checks are the source of truth for deployed behavior.
 - Windows local runs are for fast unit checks and manual smoke work, not for authoritative DO runtime gating.
+- `push main` is expected to validate on Ubuntu first and then deploy to mirror automatically.
 
 ## Required Secrets
 
