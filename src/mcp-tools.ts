@@ -1,6 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { seal } from 'tweetsodium';
 import * as z from 'zod/v4';
 import { AppEnv, DispatchRequestRecord } from './types';
+import { cloudflarePut } from './cloudflare';
 import {
 	activateRepoWorkspace,
 	buildDispatchFingerprint,
@@ -88,6 +90,30 @@ function mirrorConfigured(env: AppEnv): boolean {
 	const liveUrl = getSelfLiveUrl(env);
 	const mirrorUrl = getSelfMirrorUrl(env);
 	return Boolean(liveUrl && mirrorUrl && liveUrl !== mirrorUrl);
+}
+
+function decodeBase64Bytes(value: string): Uint8Array {
+	const binary = atob(value.replace(/\n/g, ''));
+	return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function encodeBase64Bytes(value: Uint8Array): string {
+	let binary = '';
+	for (const byte of value) {
+		binary += String.fromCharCode(byte);
+	}
+	return btoa(binary);
+}
+
+function getWorkerScriptNameFromUrl(url: string | null): string | null {
+	if (!url) {
+		return null;
+	}
+	try {
+		return new URL(url).hostname.split('.')[0] ?? null;
+	} catch {
+		return null;
+	}
 }
 
 function normalizeHelpQuery(query: string | undefined): string {
@@ -747,6 +773,129 @@ export function buildMcpServer(env: AppEnv): McpServer {
 				);
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'self_deploy_failed'), error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
+		'self_bootstrap_repo_secrets',
+		{
+			description:
+				'Bootstrap GitHub Actions secrets for the self repo using the live worker secret values plus the provided Cloudflare credentials. This is intended for first-time self-improvement setup and recovery.',
+			inputSchema: {
+				cloudflare_api_token: z.string().min(1),
+				cloudflare_account_id: z.string().min(1),
+			},
+			annotations: writeAnnotations,
+		},
+		async ({ cloudflare_api_token, cloudflare_account_id }) => {
+			try {
+				const selfRepoKey = getSelfRepoKey(env);
+				const [owner, repo] = selfRepoKey.split('/');
+				if (!env.GITHUB_APP_PRIVATE_KEY_PEM) {
+					throw new Error('live worker GitHub App private key is missing');
+				}
+				if (!env.WEBHOOK_SECRET) {
+					throw new Error('live worker webhook secret is missing');
+				}
+				await activateRepoWorkspace(env, selfRepoKey);
+				const publicKeyResult = (await githubGet(
+					env,
+					`/repos/${owner}/${repo}/actions/secrets/public-key`,
+				)) as { key?: string; key_id?: string };
+				const publicKey = publicKeyResult.key;
+				const keyId = publicKeyResult.key_id;
+				if (!publicKey || !keyId) {
+					throw new Error('self repo actions public key not available');
+				}
+				const sealedKey = decodeBase64Bytes(publicKey);
+				const writeSecret = async (name: string, value: string) => {
+					const encryptedValue = encodeBase64Bytes(seal(new TextEncoder().encode(value), sealedKey));
+					await githubPut(env, `/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(name)}`, {
+						encrypted_value: encryptedValue,
+						key_id: keyId,
+					});
+				};
+				await writeSecret('CLOUDFLARE_API_TOKEN', cloudflare_api_token);
+				await writeSecret('CLOUDFLARE_ACCOUNT_ID', cloudflare_account_id);
+				await writeSecret('GITHUB_APP_PRIVATE_KEY_PEM', env.GITHUB_APP_PRIVATE_KEY_PEM);
+				await writeSecret('WEBHOOK_SECRET', env.WEBHOOK_SECRET);
+				return toolText(
+					ok(
+						{
+							repo: selfRepoKey,
+							secrets_written: [
+								'CLOUDFLARE_API_TOKEN',
+								'CLOUDFLARE_ACCOUNT_ID',
+								'GITHUB_APP_PRIVATE_KEY_PEM',
+								'WEBHOOK_SECRET',
+							],
+						},
+						writeAnnotations,
+					),
+				);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'self_bootstrap_repo_secrets_failed'), error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
+		'self_sync_mirror_secrets',
+		{
+			description:
+				'Copy the live worker GitHub App private key and webhook secret into the configured mirror worker using the provided Cloudflare credentials.',
+			inputSchema: {
+				cloudflare_api_token: z.string().min(1),
+				cloudflare_account_id: z.string().min(1),
+				mirror_script_name: z.string().optional(),
+			},
+			annotations: writeAnnotations,
+		},
+		async ({ cloudflare_api_token, cloudflare_account_id, mirror_script_name }) => {
+			try {
+				if (!env.GITHUB_APP_PRIVATE_KEY_PEM) {
+					throw new Error('live worker GitHub App private key is missing');
+				}
+				if (!env.WEBHOOK_SECRET) {
+					throw new Error('live worker webhook secret is missing');
+				}
+				const resolvedMirrorScriptName =
+					mirror_script_name?.trim() || getWorkerScriptNameFromUrl(getSelfMirrorUrl(env));
+				if (!resolvedMirrorScriptName) {
+					throw new Error('mirror worker script name could not be resolved');
+				}
+				const cloudflareEnv = {
+					...env,
+					CLOUDFLARE_API_TOKEN: cloudflare_api_token,
+					CLOUDFLARE_ACCOUNT_ID: cloudflare_account_id,
+				};
+				const accountId = cloudflare_account_id.trim();
+				const upsertSecret = async (name: string, value: string) =>
+					cloudflarePut<Record<string, unknown>>(
+						cloudflareEnv,
+						`/accounts/${accountId}/workers/scripts/${encodeURIComponent(resolvedMirrorScriptName)}/secrets`,
+						{
+							body: {
+								name,
+								text: value,
+								type: 'secret_text',
+							},
+						},
+					);
+				await upsertSecret('GITHUB_APP_PRIVATE_KEY_PEM', env.GITHUB_APP_PRIVATE_KEY_PEM);
+				await upsertSecret('WEBHOOK_SECRET', env.WEBHOOK_SECRET);
+				return toolText(
+					ok(
+						{
+							mirror_script_name: resolvedMirrorScriptName,
+							secrets_written: ['GITHUB_APP_PRIVATE_KEY_PEM', 'WEBHOOK_SECRET'],
+						},
+						writeAnnotations,
+					),
+				);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'self_sync_mirror_secrets_failed'), error, writeAnnotations));
 			}
 		},
 	);
