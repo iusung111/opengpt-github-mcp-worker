@@ -1,5 +1,28 @@
-{
-	"files.associations": {
-		"wrangler.json": "jsonc"
-	}
+﻿{
+  "files.associations": {
+    "wrangler.json": "jsonc"
+  },
+  "files.exclude": {
+    "**/.git": true,
+    "**/.wrangler": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/.agent-input": true,
+    "**/.agent-output": true,
+    "**/.dev.vars": true,
+    "test_output.txt": true,
+    "test_verbose.txt": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.wrangler": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/.agent-input": true,
+    "**/.agent-output": true
+  },
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.expand": false,
+  "explorer.compactFolders": true
 }
