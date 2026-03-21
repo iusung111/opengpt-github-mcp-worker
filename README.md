@@ -1,6 +1,17 @@
 ﻿# OpenGPT GitHub MCP Worker
 
-Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Developer mode.
+Remote GitHub MCP server for ChatGPT Developer mode, deployed on Cloudflare Workers.
+
+- MCP endpoint: remote `/mcp` server
+- Runtime: Cloudflare Workers + Durable Objects
+- Scope: GitHub repo read/write, workflow dispatch, PR flow, queue state, self-host operations
+
+Key docs:
+
+- [Tool surface](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md)
+- [Release history](/d:/VScode/opengpt-github-mcp-worker/docs/releases/CHANGELOG.md)
+- [ChatGPT project instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md)
+- [Short instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md)
 
 ## Quick Start
 
@@ -10,14 +21,10 @@ Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Dev
 4. Run `npm run check` for local validation.
 5. Deploy with `npm run deploy` or rely on `push main -> cloudflare-ci -> cloudflare-self-deploy`.
 
-For the generated tool catalog, see [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
-For release history, see [CHANGELOG.md](/d:/VScode/opengpt-github-mcp-worker/docs/releases/CHANGELOG.md).
-For ChatGPT operating prompts, see [CHATGPT_PROJECT_INSTRUCTIONS.md](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md) and [CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md).
-
 ## Cloudflare MCP Positioning
 
-This repository is a remote GitHub MCP server deployed on Cloudflare Workers and exposed at /mcp.
-It is different from Cloudflare's official workers-mcp project, which provides local CLI and proxy tooling for connecting an MCP client to methods on a Worker.
+This repository is a remote GitHub MCP server deployed on Cloudflare Workers and exposed at `/mcp`.
+It is different from Cloudflare's official `workers-mcp` project, which provides local CLI and proxy tooling for connecting an MCP client to methods on a Worker.
 
 ## What This Repo Does
 
@@ -293,4 +300,7 @@ For ad hoc prompting inside ChatGPT:
 ## Important Note
 
 If a private key or webhook secret was pasted into chat or shared insecurely during setup, rotate both before production use.
+
+
+
 
