@@ -37,10 +37,10 @@
 		/* Skip type checking all .d.ts files. */
 		"skipLibCheck": true,
 		"types": [
-			"./types/worker-configuration.d.ts",
+			"./worker/types/worker-configuration.d.ts",
 			"node"
 		]
 	},
-	"exclude": ["test"],
-	"include": ["types/worker-configuration.d.ts", "src/**/*.ts"]
+	"exclude": ["worker/test"],
+	"include": ["worker/types/worker-configuration.d.ts", "worker/src/**/*.ts"]
 }

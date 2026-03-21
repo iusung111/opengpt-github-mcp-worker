@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const catalogPath = path.join(root, 'src', 'tool-catalog.json');
+const catalogPath = path.join(root, 'worker', 'src', 'tool-catalog.json');
 const outputDir = path.join(root, 'docs');
 const outputPath = path.join(outputDir, 'TOOL_SURFACE.md');
 
@@ -11,7 +11,7 @@ const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 const lines = [
 	'# Tool Surface',
 	'',
-	'Generated from `src/tool-catalog.json`.',
+	'Generated from `worker/src/tool-catalog.json`.',
 	'',
 	'## Groups',
 	'',

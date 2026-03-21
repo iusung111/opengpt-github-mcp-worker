@@ -9,13 +9,13 @@
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest --sequence.concurrent=false",
-		"test:unit": "vitest run test/auth.spec.ts test/github.spec.ts test/mcp-tree.spec.ts test/queue-audit.spec.ts test/queue-dispatch.spec.ts test/queue-events.spec.ts test/queue-index.spec.ts test/queue-projections.spec.ts test/queue-reconcile.spec.ts test/queue-state.spec.ts test/queue-store.spec.ts test/queue-workflow.spec.ts test/queue-workspaces.spec.ts test/tool-catalog.spec.ts test/utils.spec.ts --sequence.concurrent=false",
-		"test:integration": "node scripts/run-integration-tests.mjs",
-		"test:integration:runtime": "vitest run test/runtime-http.spec.ts test/runtime-mcp.spec.ts test/queue-webhook.spec.ts --sequence.concurrent=false",
+		"test:unit": "vitest run worker/test/auth.spec.ts worker/test/github.spec.ts worker/test/mcp-tree.spec.ts worker/test/queue-audit.spec.ts worker/test/queue-dispatch.spec.ts worker/test/queue-events.spec.ts worker/test/queue-index.spec.ts worker/test/queue-projections.spec.ts worker/test/queue-reconcile.spec.ts worker/test/queue-state.spec.ts worker/test/queue-store.spec.ts worker/test/queue-workflow.spec.ts worker/test/queue-workspaces.spec.ts worker/test/tool-catalog.spec.ts worker/test/utils.spec.ts --sequence.concurrent=false",
+		"test:integration": "node worker/scripts/run-integration-tests.mjs",
+		"test:integration:runtime": "vitest run worker/test/runtime-http.spec.ts worker/test/runtime-mcp.spec.ts worker/test/queue-webhook.spec.ts --sequence.concurrent=false",
 		"test:all": "npm run test:unit && npm run test:integration",
 		"cf-typegen": "wrangler types",
-		"ops:status": "node scripts/check-self-hosts.mjs",
-		"docs:tool-surface": "node scripts/generate-tool-surface-doc.mjs"
+		"ops:status": "node worker/scripts/check-self-hosts.mjs",
+		"docs:tool-surface": "node worker/scripts/generate-tool-surface-doc.mjs"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",

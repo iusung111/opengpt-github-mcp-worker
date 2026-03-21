@@ -13,6 +13,20 @@ Key docs:
 - [ChatGPT project instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md)
 - [Short instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md)
 
+## Root Layout
+
+- `.github/`
+- `docs/`
+- `worker/`
+- `README.md`
+- `package.json`
+- `package-lock.json`
+- `tsconfig.json`
+- `vitest.config.mts`
+- `wrangler.jsonc`
+
+`.github/`, `package.json`, `wrangler.jsonc`, `tsconfig.json`, and `vitest.config.mts` stay at the root because GitHub Actions, npm, Wrangler, TypeScript, and Vitest resolve them from there.
+
 ## Quick Start
 
 1. Install dependencies with `npm install`.
@@ -46,7 +60,7 @@ The server exposes grouped tool families rather than one flat surface:
 - queue, audit, and reviewer loop state
 
 The generated full surface and permission presets live in [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
-Regenerate it with `npm run docs:tool-surface` after changing the catalog in [src/tool-catalog.json](/d:/VScode/opengpt-github-mcp-worker/src/tool-catalog.json).
+Regenerate it with `npm run docs:tool-surface` after changing the catalog in [worker/src/tool-catalog.json](/d:/VScode/opengpt-github-mcp-worker/worker/src/tool-catalog.json).
 
 ## Local Validation
 
@@ -79,9 +93,9 @@ Validation policy:
 - `push main` runs `cloudflare-ci` first, and only a successful CI run triggers `cloudflare-self-deploy` to mirror.
 - Manual `cloudflare-self-deploy` dispatch remains the path for explicit mirror or live promotion.
 - Runtime integration coverage is split by surface:
-  - `test/runtime-http.spec.ts` covers HTTP routes, queue endpoints, and webhook handling.
-  - `test/runtime-mcp.spec.ts` covers MCP tools and queue actions exposed through `/mcp`.
-  - `test/queue-webhook.spec.ts` keeps focused webhook matching and reconciliation coverage.
+  - `worker/test/runtime-http.spec.ts` covers HTTP routes, queue endpoints, and webhook handling.
+  - `worker/test/runtime-mcp.spec.ts` covers MCP tools and queue actions exposed through `/mcp`.
+  - `worker/test/queue-webhook.spec.ts` keeps focused webhook matching and reconciliation coverage.
 
 ## Required Secrets
 
@@ -207,7 +221,7 @@ The tool returns:
 
 For review work, use the `review_followup` preset. It includes the reviewer context path so GPT can gather the original request, PR diff, workflow results, and queue state before submitting a verdict.
 
-The bundle definitions come from [src/tool-catalog.json](/d:/VScode/opengpt-github-mcp-worker/src/tool-catalog.json), which is also the source for the generated [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
+The bundle definitions come from [worker/src/tool-catalog.json](/d:/VScode/opengpt-github-mcp-worker/worker/src/tool-catalog.json), which is also the source for the generated [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
 
 ## Mirror-First Self Improvement
 

@@ -1,6 +1,6 @@
 # Tool Surface
 
-Generated from `src/tool-catalog.json`.
+Generated from `worker/src/tool-catalog.json`.
 
 ## Groups
 

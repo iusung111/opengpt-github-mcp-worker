@@ -1,7 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "opengpt-github-mcp-worker",
-	"main": "src/index.ts",
+	"main": "worker/src/index.ts",
 	"compatibility_date": "2026-03-10",
 	"observability": {
 		"enabled": true

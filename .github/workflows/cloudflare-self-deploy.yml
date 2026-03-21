@@ -107,9 +107,9 @@ jobs:
           fi
           if [ -n "${APP_PRIVATE_KEY_PEM}" ]; then
             if [ -n "${TARGET_ENV}" ]; then
-              node scripts/cloudflare-secret-put.mjs --secret-name GITHUB_APP_PRIVATE_KEY_PEM --secret-value "${APP_PRIVATE_KEY_PEM}" --target-arg "$TARGET_ARG" --target-arg "$TARGET_ENV"
+              node worker/scripts/cloudflare-secret-put.mjs --secret-name GITHUB_APP_PRIVATE_KEY_PEM --secret-value "${APP_PRIVATE_KEY_PEM}" --target-arg "$TARGET_ARG" --target-arg "$TARGET_ENV"
             else
-              node scripts/cloudflare-secret-put.mjs --secret-name GITHUB_APP_PRIVATE_KEY_PEM --secret-value "${APP_PRIVATE_KEY_PEM}"
+              node worker/scripts/cloudflare-secret-put.mjs --secret-name GITHUB_APP_PRIVATE_KEY_PEM --secret-value "${APP_PRIVATE_KEY_PEM}"
             fi
           else
             echo "Skipping GitHub App private key sync because the repository secret is not set."
@@ -132,9 +132,9 @@ jobs:
           fi
           if [ -n "${WORKER_WEBHOOK_SECRET}" ]; then
             if [ -n "${TARGET_ENV}" ]; then
-              node scripts/cloudflare-secret-put.mjs --secret-name WEBHOOK_SECRET --secret-value "${WORKER_WEBHOOK_SECRET}" --target-arg "$TARGET_ARG" --target-arg "$TARGET_ENV"
+              node worker/scripts/cloudflare-secret-put.mjs --secret-name WEBHOOK_SECRET --secret-value "${WORKER_WEBHOOK_SECRET}" --target-arg "$TARGET_ARG" --target-arg "$TARGET_ENV"
             else
-              node scripts/cloudflare-secret-put.mjs --secret-name WEBHOOK_SECRET --secret-value "${WORKER_WEBHOOK_SECRET}"
+              node worker/scripts/cloudflare-secret-put.mjs --secret-name WEBHOOK_SECRET --secret-value "${WORKER_WEBHOOK_SECRET}"
             fi
           else
             echo "Skipping webhook secret sync because the repository secret is not set."
@@ -162,7 +162,7 @@ jobs:
       - name: Deploy to Cloudflare Mirror
         if: ${{ env.DEPLOY_TARGET == 'mirror' }}
         run: |
-          node scripts/cloudflare-deploy.mjs --deploy-target mirror --deploy-url "${SELF_MIRROR_URL}"
+          node worker/scripts/cloudflare-deploy.mjs --deploy-target mirror --deploy-url "${SELF_MIRROR_URL}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -170,7 +170,7 @@ jobs:
       - name: Deploy to Cloudflare Live
         if: ${{ env.DEPLOY_TARGET == 'live' }}
         run: |
-          node scripts/cloudflare-deploy.mjs --deploy-target live --deploy-url "${SELF_LIVE_URL}"
+          node worker/scripts/cloudflare-deploy.mjs --deploy-target live --deploy-url "${SELF_LIVE_URL}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

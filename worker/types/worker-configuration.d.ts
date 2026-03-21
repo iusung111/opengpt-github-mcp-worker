@@ -3,7 +3,7 @@
 // Runtime types generated with workerd@1.20260317.1 2026-03-10 nodejs_compat
 declare namespace Cloudflare {
 	interface GlobalProps {
-		mainModule: typeof import("./src/index");
+		mainModule: typeof import("../src/index");
 		durableNamespaces: "JobQueueDurableObject";
 	}
 	interface MirrorEnv {
@@ -28,7 +28,7 @@ declare namespace Cloudflare {
 		REQUIRE_WEBHOOK_SECRET: "true";
 		GITHUB_APP_ID: "3105333";
 		GITHUB_APP_INSTALLATION_ID: "116782548";
-		JOB_QUEUE: DurableObjectNamespace<import("./src/index").JobQueueDurableObject>;
+		JOB_QUEUE: DurableObjectNamespace<import("../src/index").JobQueueDurableObject>;
 	}
 	interface Env {
 		GITHUB_API_URL: "https://api.github.com";
@@ -52,7 +52,7 @@ declare namespace Cloudflare {
 		REQUIRE_WEBHOOK_SECRET: "true";
 		GITHUB_APP_ID: "3105333";
 		GITHUB_APP_INSTALLATION_ID: "116782548";
-		JOB_QUEUE: DurableObjectNamespace<import("./src/index").JobQueueDurableObject>;
+		JOB_QUEUE: DurableObjectNamespace<import("../src/index").JobQueueDurableObject>;
 	}
 }
 interface Env extends Cloudflare.Env {}
