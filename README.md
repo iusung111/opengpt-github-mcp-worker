@@ -11,7 +11,8 @@ Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Dev
 5. Deploy with `npm run deploy` or rely on `push main -> cloudflare-ci -> cloudflare-self-deploy`.
 
 For the generated tool catalog, see [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
-For release history, see [CHANGELOG.md](/d:/VScode/opengpt-github-mcp-worker/CHANGELOG.md).
+For release history, see [CHANGELOG.md](/d:/VScode/opengpt-github-mcp-worker/docs/releases/CHANGELOG.md).
+For ChatGPT operating prompts, see [CHATGPT_PROJECT_INSTRUCTIONS.md](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md) and [CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md).
 
 ## Cloudflare MCP Positioning
 
@@ -278,8 +279,8 @@ Operational safety additions:
 
 For request templates and project-instruction text, use:
 
-- [CHATGPT_PROJECT_INSTRUCTIONS.md](/d:/VScode/opengpt-github-mcp-worker/CHATGPT_PROJECT_INSTRUCTIONS.md)
-- [CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md](/d:/VScode/opengpt-github-mcp-worker/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md)
+- [CHATGPT_PROJECT_INSTRUCTIONS.md](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md)
+- [CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md)
 
 For ad hoc prompting inside ChatGPT:
 
