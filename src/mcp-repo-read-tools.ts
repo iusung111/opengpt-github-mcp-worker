@@ -22,6 +22,14 @@ function normalizeTreePath(path: string | undefined): string {
 	return path.replace(/^\/+|\/+$/g, '');
 }
 
+export function matchesTreePathScope(entryPath: string, requestedPath: string | undefined): boolean {
+	const normalizedRequestedPath = normalizeTreePath(requestedPath);
+	if (!normalizedRequestedPath) {
+		return true;
+	}
+	return entryPath === normalizedRequestedPath || entryPath.startsWith(`${normalizedRequestedPath}/`);
+}
+
 function summarizeTreeEntries(
 	entries: Array<Record<string, unknown>>,
 	basePath: string,
@@ -133,13 +141,16 @@ export function registerRepoReadTools(
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
+				if (path) {
+					ensureSafePath(path);
+				}
 				const treeResult = (await githubGet(
 					env,
 					`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref || getDefaultBaseBranch(env))}`,
 					{ params: { recursive } },
 				)) as { tree?: Array<Record<string, unknown>> };
 				const filteredTree = path
-					? (treeResult.tree ?? []).filter((entry) => String(entry.path ?? '').startsWith(path))
+					? (treeResult.tree ?? []).filter((entry) => matchesTreePathScope(String(entry.path ?? ''), path))
 					: treeResult.tree ?? [];
 				return toolText(ok({ ...treeResult, tree: filteredTree }, readAnnotations));
 			} catch (error) {

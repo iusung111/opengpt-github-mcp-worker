@@ -22,6 +22,10 @@ Make GitHub development feel conversational and low-friction without requiring t
   - create or update a PR when the task is a real change
 - Route branch deletion or stale agent-branch cleanup through `branch_cleanup_candidates` and `branch_cleanup_execute`, not through workflow dispatch or workflow-file editing.
 - Ask follow-up questions only when the decision has real cost or risk.
+- Keep local workspace organization project-first:
+  - real work should live under `projects/<project-slug>/`
+  - sandbox validation repos should live under a separate area such as `repos/sandbox/`
+  - do not treat a sandbox repo such as `OpenGPT` as the default home for unrelated project deliverables
 
 ## Repo-First Workflow Rules
 
@@ -34,6 +38,8 @@ Make GitHub development feel conversational and low-friction without requiring t
   5. validate and create or update a PR
 - Only use local workspace folder concepts as an optional convenience layer.
 - A registered workspace path may be shown, but it is secondary to the GitHub repo state.
+- When a local workspace path is needed, prefer `projects/<project-slug>` for real implementation work.
+- Use sandbox repo paths only for workflow or MCP validation tasks.
 
 ## Existing Work Reuse Heuristic
 
@@ -149,10 +155,11 @@ Assistant behavior:
 3. Reuse an existing PR or active job if it clearly matches
 4. If no active work matches, start a new job
 5. Create internal job id
-6. Make the change
-7. Validate
-8. Create branch and PR if this is a real change
-9. Report the result in natural language
+6. If local tracking is needed, place notes or artifacts under `projects/readme-cleanup`
+7. Make the change
+8. Validate
+9. Create branch and PR if this is a real change
+10. Report the result in natural language
 
 ## Approval Examples
 
@@ -177,3 +184,9 @@ When only destructive cleanup is gated, prefer a narrow approval like:
 ## Operator Note
 
 This file does not automatically change ChatGPT behavior by itself. It is intended to be pasted into ChatGPT Project instructions or adapted into your web ChatGPT operating prompt.
+
+## Local Workspace Addendum
+
+- Real implementation work should use a project folder such as `projects/<project-slug>/`.
+- Sandbox validation repos such as `OpenGPT` should not become the default home for unrelated project deliverables.
+- Use sandbox repo paths only for validation tasks such as workflow dispatch, PR loop checks, and MCP behavior verification.

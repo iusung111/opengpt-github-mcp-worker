@@ -53,7 +53,7 @@ function createContext(storedJobs: JobRecord[] = []) {
 describe('queue-store helpers', () => {
 	it('loads stored job and workspace values by derived keys', async () => {
 		const { context, store } = createContext([makeJob()]);
-		store.set(workspaceStorageKey('iusung111/OpenGPT'), { repo_key: 'iusung111/OpenGPT', workspace_path: 'd:/VScode/OpenGPT' });
+		store.set(workspaceStorageKey('iusung111/OpenGPT'), { repo_key: 'iusung111/OpenGPT', workspace_path: 'd:/VScode/repos/sandbox/OpenGPT' });
 		store.set(activeWorkspaceStorageKey(), 'iusung111/OpenGPT');
 
 		await expect(getJob(context, 'job-1')).resolves.toMatchObject({ job_id: 'job-1' });

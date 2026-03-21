@@ -137,7 +137,9 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		real_change: {
 			label: 'Real change with PR',
 			prompt: [
-				'Make a real change in iusung111/OpenGPT and open a PR.',
+				'Make a real change in the target repo and keep local planning or artifacts under projects/<project-slug>.',
+				'- repo: <owner/repo>',
+				'- local_project_path: projects/<project-slug>',
 				'- job_id: change-001',
 				'- request: <exact user-facing or code-facing change>',
 				'- target_paths: <path>',
@@ -148,7 +150,9 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		main_ready: {
 			label: 'Main-ready change',
 			prompt: [
-				'Prepare a real change in iusung111/OpenGPT so it is ready for merge to main.',
+				'Prepare a real change in the target repo so it is ready for merge to main, with local project context stored under projects/<project-slug>.',
+				'- repo: <owner/repo>',
+				'- local_project_path: projects/<project-slug>',
 				'- job_id: main-ready-001',
 				'- request: <exact user-facing or code-facing change>',
 				'- target_paths: <path>',
@@ -159,7 +163,9 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 		dry_run: {
 			label: 'Dry run',
 			prompt: [
-				'Run a dry-run request for iusung111/OpenGPT without creating a final branch or PR.',
+				'Run a dry-run request for the target repo without creating a final branch or PR.',
+				'- repo: <owner/repo>',
+				'- local_project_path: projects/<project-slug>',
 				'- job_id: dry-run-001',
 				'- request: <exact user-facing or code-facing change>',
 				'- target_paths: <path>',
@@ -171,7 +177,8 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 			label: 'Review follow-up',
 			prompt: [
 				'Follow up on an existing PR review request.',
-				'- repo: iusung111/OpenGPT',
+				'- repo: <owner/repo>',
+				'- local_project_path: projects/<project-slug>',
 				'- branch or PR: <existing branch or PR>',
 				'- request: <review feedback summary>',
 				'- done_when: review findings are addressed and the PR is updated',
@@ -301,7 +308,7 @@ export function registerOverviewTools(
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'repo_work_context_failed'), error, readAnnotations)); }
 	});
 	server.registerTool('workspace_activate', { description: 'Mark one registered repository workspace as the current active repo context so recent workspace ordering stays unified around the repo you are actively working in.', inputSchema: { repo_key: z.string() }, annotations: writeAnnotations }, async ({ repo_key }) => { try { return toolText(await queueJson(env, { action: 'workspace_activate', repo_key })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_activate_failed'), error, writeAnnotations)); } });
-	server.registerTool('workspace_resolve', { description: 'Resolve the preferred GitHub workspace folder for a repo. Returns a registered folder if one exists, otherwise a default dedicated GitHub folder plus similar registered matches to review before creating a new folder.', inputSchema: { repo_key: z.string(), preferred_root: z.string().default('/home/uieseong/workspace/github') }, annotations: readAnnotations }, async ({ repo_key, preferred_root }) => {
+	server.registerTool('workspace_resolve', { description: 'Resolve the preferred GitHub workspace folder for a repo. Returns a registered folder if one exists, otherwise a default project-first workspace path plus similar registered matches to review before creating a new folder.', inputSchema: { repo_key: z.string(), preferred_root: z.string().default('/home/uieseong/workspace/projects') }, annotations: readAnnotations }, async ({ repo_key, preferred_root }) => {
 		try {
 			const existing = await queueJson(env, { action: 'workspace_get', repo_key });
 			const similar = await queueJson(env, { action: 'workspace_find_similar', repo_key });

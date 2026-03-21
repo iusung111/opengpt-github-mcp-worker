@@ -203,7 +203,7 @@ describe('runtime mcp surface', () => {
 			name: 'workspace_register',
 			arguments: {
 				repo_key: 'iusung111/OpenGPT',
-				workspace_path: '/home/uieseong/workspace/github/OpenGPT',
+				workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				aliases: ['opengpt'],
 			},
 		});
@@ -214,7 +214,7 @@ describe('runtime mcp surface', () => {
 			data: {
 				workspace: {
 					repo_key: 'iusung111/OpenGPT',
-					workspace_path: '/home/uieseong/workspace/github/OpenGPT',
+					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 			},
 		});
@@ -231,10 +231,10 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				repo_key: 'iusung111/OpenGPT',
-				default_workspace_path: '/home/uieseong/workspace/github/OpenGPT',
+				default_workspace_path: '/home/uieseong/workspace/projects/OpenGPT',
 				existing_workspace: {
 					repo_key: 'iusung111/OpenGPT',
-					workspace_path: '/home/uieseong/workspace/github/OpenGPT',
+					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 				requires_confirmation: true,
 			},
@@ -326,7 +326,7 @@ describe('runtime mcp surface', () => {
 			name: 'workspace_register',
 			arguments: {
 				repo_key: 'iusung111/OpenGPT',
-				workspace_path: '/home/uieseong/workspace/OpenGPT',
+				workspace_path: '/home/uieseong/workspace/repos/sandbox/OpenGPT',
 			},
 		});
 		await client.callTool({
