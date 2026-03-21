@@ -20,7 +20,13 @@ export async function createMcpClient(): Promise<Client> {
 	const transport = new StreamableHTTPClientTransport(new URL('https://example.com/mcp'), {
 		fetch: async (input, init) => {
 			const url = input instanceof Request ? input.url : String(input);
-			return SELF.fetch(url, init);
+			const headers = new Headers(init?.headers);
+			headers.set('cf-access-authenticated-user-email', 'developer@example.com');
+			headers.set('cf-access-jwt-assertion', 'test-access-jwt');
+			return SELF.fetch(url, {
+				...init,
+				headers,
+			});
 		},
 	});
 	const client = new Client({ name: 'worker-test-client', version: '1.0.0' });
@@ -39,4 +45,9 @@ export const queueJsonHeaders = {
 
 export const queueAuthHeaders = {
 	'x-queue-token': 'test-webhook-secret',
+};
+
+export const mcpAccessHeaders = {
+	'cf-access-authenticated-user-email': 'developer@example.com',
+	'cf-access-jwt-assertion': 'test-access-jwt',
 };

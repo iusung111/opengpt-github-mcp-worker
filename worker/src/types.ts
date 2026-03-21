@@ -32,6 +32,9 @@ export type AppEnv = Env & {
 	SELF_CURRENT_URL?: string;
 	SELF_DEFAULT_DEPLOY_TARGET?: string;
 	SELF_REQUIRE_MIRROR_FOR_LIVE?: string;
+	MCP_REQUIRE_ACCESS_AUTH?: string;
+	MCP_ALLOWED_EMAILS?: string;
+	MCP_ALLOWED_EMAIL_DOMAINS?: string;
 };
 
 export interface ReviewFinding {

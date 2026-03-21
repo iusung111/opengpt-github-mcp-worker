@@ -5,6 +5,7 @@ Remote GitHub MCP server for ChatGPT Developer mode, deployed on Cloudflare Work
 - MCP endpoint: remote `/mcp` server
 - Runtime: Cloudflare Workers + Durable Objects
 - Scope: GitHub repo read/write, workflow dispatch, PR flow, queue state, self-host operations
+- Access model: Cloudflare Access in front of `/mcp`
 
 Key docs:
 
@@ -34,6 +35,17 @@ Key docs:
 3. Fill local `.dev.vars` from `.dev.vars.example` when developing locally.
 4. Run `npm run check` for local validation.
 5. Deploy with `npm run deploy` or rely on `push main -> cloudflare-ci -> cloudflare-self-deploy`.
+
+## MCP Access Protection
+
+Remote MCP access is expected to go through Cloudflare Access before requests reach the Worker.
+
+- production `/mcp` should be protected by a Cloudflare Access application
+- the Worker now expects Cloudflare Access identity headers when `MCP_REQUIRE_ACCESS_AUTH=true`
+- local development can explicitly bypass Access by setting `MCP_REQUIRE_ACCESS_AUTH=false` in `.dev.vars`
+- optional allowlists can be set with `MCP_ALLOWED_EMAILS` and `MCP_ALLOWED_EMAIL_DOMAINS`
+
+Deploying the Worker alone is not sufficient for production MCP exposure. The Access policy is part of the production configuration.
 
 ## Cloudflare MCP Positioning
 
@@ -132,6 +144,9 @@ These come from `wrangler.jsonc` vars and can be adjusted there:
 - `SELF_CURRENT_URL`
 - `SELF_DEFAULT_DEPLOY_TARGET`
 - `SELF_REQUIRE_MIRROR_FOR_LIVE`
+- `MCP_REQUIRE_ACCESS_AUTH`
+- `MCP_ALLOWED_EMAILS`
+- `MCP_ALLOWED_EMAIL_DOMAINS`
 - `WORKING_STALE_AFTER_MS`
 - `REVIEW_STALE_AFTER_MS`
 - `DISPATCH_DEDUPE_WINDOW_MS`
@@ -142,6 +157,14 @@ These come from `wrangler.jsonc` vars and can be adjusted there:
 - `GITHUB_APP_INSTALLATION_ID`
 
 For local development, copy `.dev.vars.example` to `.dev.vars` and fill in real values.
+
+Recommended production MCP setup:
+
+1. Deploy the Worker.
+2. Put Cloudflare Access in front of the Worker hostname or `/mcp` path.
+3. Configure the identity provider and Access policy for the intended users.
+4. Leave `MCP_REQUIRE_ACCESS_AUTH=true` in deployed environments.
+5. Optionally set `MCP_ALLOWED_EMAILS` or `MCP_ALLOWED_EMAIL_DOMAINS` for in-worker allowlist enforcement.
 
 Self-host tracking defaults:
 

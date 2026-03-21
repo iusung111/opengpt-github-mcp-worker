@@ -15,6 +15,18 @@ describe('runtime http surface', () => {
 			ok: true,
 			service: 'opengpt-github-mcp-worker',
 			runtime: 'cloudflare-workers',
+			mcp_access_auth_required: true,
+			mcp_access_mode: 'any_authenticated_user',
+		});
+	});
+
+	it('rejects unauthenticated MCP requests when Access protection is required', async () => {
+		const response = await SELF.fetch('https://example.com/mcp');
+		expect(response.status).toBe(401);
+		await expect(response.json()).resolves.toMatchObject({
+			ok: false,
+			code: 'unauthorized',
+			error: 'missing Cloudflare Access identity headers',
 		});
 	});
 

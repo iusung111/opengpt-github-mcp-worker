@@ -9,6 +9,10 @@ import {
 	getBranchPrefix,
 	getDeliveryRetentionCount,
 	getDispatchDedupeWindowMs,
+	getMcpAccessMode,
+	getMcpAllowedEmailDomains,
+	getMcpAllowedEmails,
+	getMcpRequireAccessAuth,
 	getReviewStaleAfterMs,
 	getWorkingStaleAfterMs,
 	queueFetch,
@@ -18,7 +22,7 @@ import {
 	repoAllowed,
 	jsonResponse,
 } from './utils';
-import { queueRequestAuthorized } from './auth';
+import { authorizeMcpRequest, queueRequestAuthorized } from './auth';
 import { verifyWebhookSignature } from './queue-helpers';
 
 export async function handleWebhook(request: Request, env: AppEnv): Promise<Response> {
@@ -96,6 +100,10 @@ export function handleHealth(env: AppEnv): Response {
 		dispatch_dedupe_window_ms: getDispatchDedupeWindowMs(env),
 		audit_retention_count: getAuditRetentionCount(env),
 		delivery_retention_count: getDeliveryRetentionCount(env),
+		mcp_access_auth_required: getMcpRequireAccessAuth(env),
+		mcp_access_mode: getMcpAccessMode(env),
+		mcp_allowed_emails_count: getMcpAllowedEmails(env).length,
+		mcp_allowed_email_domains_count: getMcpAllowedEmailDomains(env).length,
 	});
 }
 
@@ -118,4 +126,17 @@ export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> 
 		route: '/mcp',
 		enableJsonResponse: true,
 	});
+}
+
+export function handleMcpRequest(
+	request: Request,
+	env: AppEnv,
+	ctx: ExecutionContext,
+): Response | Promise<Response> {
+	const auth = authorizeMcpRequest(request, env);
+	if (!auth.ok) {
+		return jsonResponse(fail(auth.code ?? 'unauthorized', auth.error ?? 'unauthorized'), auth.status ?? 401);
+	}
+	const handler = getMcpHandler(env);
+	return handler(request, env, ctx);
 }

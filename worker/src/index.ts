@@ -2,7 +2,7 @@ import { githubAuthConfigured, githubGet } from './github';
 import { JobQueueDurableObject } from './queue';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import { fail, jsonResponse } from './utils';
-import { getMcpHandler, handleGitHubAppInstallation, handleHealth, handleQueueApi, handleWebhook } from './http';
+import { handleGitHubAppInstallation, handleHealth, handleMcpRequest, handleQueueApi, handleWebhook } from './http';
 
 export { JobQueueDurableObject };
 
@@ -28,8 +28,7 @@ export default {
 		}
 
 		if (url.pathname === '/mcp') {
-			const handler = getMcpHandler(appEnv);
-			return handler(request, appEnv, ctx);
+			return handleMcpRequest(request, appEnv, ctx);
 		}
 
 		return jsonResponse(fail('not_found', 'not found'), 404);

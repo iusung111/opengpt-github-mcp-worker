@@ -73,8 +73,34 @@ export function parseCsv(value: string | undefined): string[] {
 	return (value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+export function parseCsvLower(value: string | undefined): string[] {
+	return parseCsv(value).map((item) => item.toLowerCase());
+}
+
 export function getAllowedRepos(env: AppEnv): string[] {
 	return parseCsv(env.GITHUB_ALLOWED_REPOS);
+}
+
+export function getMcpRequireAccessAuth(env: AppEnv): boolean {
+	return env.MCP_REQUIRE_ACCESS_AUTH?.trim().toLowerCase() !== 'false';
+}
+
+export function getMcpAllowedEmails(env: AppEnv): string[] {
+	return parseCsvLower(env.MCP_ALLOWED_EMAILS);
+}
+
+export function getMcpAllowedEmailDomains(env: AppEnv): string[] {
+	return parseCsvLower(env.MCP_ALLOWED_EMAIL_DOMAINS).map((item) => item.replace(/^@+/, ''));
+}
+
+export function getMcpAccessMode(env: AppEnv): 'disabled' | 'any_authenticated_user' | 'email_or_domain_allowlist' {
+	if (!getMcpRequireAccessAuth(env)) {
+		return 'disabled';
+	}
+	if (getMcpAllowedEmails(env).length > 0 || getMcpAllowedEmailDomains(env).length > 0) {
+		return 'email_or_domain_allowlist';
+	}
+	return 'any_authenticated_user';
 }
 
 export function repoAllowed(env: AppEnv, repo: string): boolean {
