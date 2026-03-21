@@ -1,4 +1,4 @@
-# OpenGPT GitHub MCP Worker
+﻿# OpenGPT GitHub MCP Worker
 
 Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Developer mode.
 
@@ -12,6 +12,11 @@ Cloudflare Workers + Durable Objects based GitHub MCP server for web ChatGPT Dev
 
 For the generated tool catalog, see [docs/TOOL_SURFACE.md](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md).
 For release history, see [CHANGELOG.md](/d:/VScode/opengpt-github-mcp-worker/CHANGELOG.md).
+
+## Cloudflare MCP Positioning
+
+This repository is a remote GitHub MCP server deployed on Cloudflare Workers and exposed at /mcp.
+It is different from Cloudflare's official workers-mcp project, which provides local CLI and proxy tooling for connecting an MCP client to methods on a Worker.
 
 ## What This Repo Does
 
@@ -287,3 +292,4 @@ For ad hoc prompting inside ChatGPT:
 ## Important Note
 
 If a private key or webhook secret was pasted into chat or shared insecurely during setup, rotate both before production use.
+
