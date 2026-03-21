@@ -19,6 +19,23 @@ function parseArgs(argv) {
 	return options;
 }
 
+function getMcpVarOverrides() {
+	const overrides = [];
+	for (const key of ['MCP_ALLOWED_EMAILS', 'MCP_ALLOWED_EMAIL_DOMAINS']) {
+		const value = process.env[key];
+		if (value !== undefined) {
+			overrides.push('--var', `${key}:${value}`);
+		}
+	}
+	return overrides;
+}
+
+function getExpectedMcpAccessMode() {
+	const hasAllowedEmails = (process.env.MCP_ALLOWED_EMAILS ?? '').trim().length > 0;
+	const hasAllowedDomains = (process.env.MCP_ALLOWED_EMAIL_DOMAINS ?? '').trim().length > 0;
+	return hasAllowedEmails || hasAllowedDomains ? 'email_or_domain_allowlist' : 'any_authenticated_user';
+}
+
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -48,6 +65,7 @@ function runCommand(command, args) {
 async function deployWithRetry(options) {
 	const args = ['wrangler', 'deploy'];
 	if (options.deployTarget === 'mirror') args.push('--env', 'mirror');
+	args.push(...getMcpVarOverrides());
 
 	let delaySeconds = options.initialDelaySeconds;
 	for (let attempt = 1; attempt <= options.maxAttempts; attempt += 1) {
@@ -71,13 +89,14 @@ async function deployWithRetry(options) {
 
 async function healthCheck(deployUrl) {
 	if (!deployUrl) throw new Error('missing --deploy-url');
+	const expectedMcpAccessMode = getExpectedMcpAccessMode();
 
 	for (let attempt = 1; attempt <= 6; attempt += 1) {
 		const result = await runCommand('curl', ['--silent', '--show-error', '--fail', `${deployUrl}/healthz`]);
 		if (result.code === 0) {
 			const payload = JSON.parse(result.output);
-			if (payload.ok && payload.auth_configured) {
-				console.log('Health check passed with auth_configured=true');
+			if (payload.ok && payload.auth_configured && payload.mcp_access_mode === expectedMcpAccessMode) {
+				console.log(`Health check passed with auth_configured=true and mcp_access_mode=${expectedMcpAccessMode}`);
 				return;
 			}
 			console.log(JSON.stringify(payload));
@@ -88,7 +107,7 @@ async function healthCheck(deployUrl) {
 		}
 	}
 
-	throw new Error('Health check timed out or auth_configured=false. Deployment might be broken.');
+	throw new Error(`Health check timed out or did not reach expected MCP access mode (${expectedMcpAccessMode}).`);
 }
 
 async function main() {

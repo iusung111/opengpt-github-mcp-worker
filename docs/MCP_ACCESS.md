@@ -11,6 +11,7 @@
 5. Optionally narrow access further with:
    - `MCP_ALLOWED_EMAILS`
    - `MCP_ALLOWED_EMAIL_DOMAINS`
+6. Store the allowlist in GitHub Actions secrets or repository variables so `cloudflare-self-deploy` can inject it during deploy.
 
 ## Local Development
 
@@ -22,3 +23,4 @@ For local development, set `MCP_REQUIRE_ACCESS_AUTH=false` in `.dev.vars` if Clo
 - when Access headers are present and no allowlist is configured, any Access-authenticated identity is allowed
 - when allowlists are configured, the identity email must match one of the configured emails or domains
 - `/healthz`, `/webhooks/github`, and `/queue/*` are not governed by the MCP Access check
+- `cloudflare-self-deploy` prefers `MCP_ALLOWED_EMAILS` and `MCP_ALLOWED_EMAIL_DOMAINS` from GitHub Actions secrets, then repository variables, before falling back to the empty defaults in `wrangler.jsonc`

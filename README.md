@@ -44,6 +44,7 @@ Remote MCP access is expected to go through Cloudflare Access before requests re
 - the Worker now expects Cloudflare Access identity headers when `MCP_REQUIRE_ACCESS_AUTH=true`
 - local development can explicitly bypass Access by setting `MCP_REQUIRE_ACCESS_AUTH=false` in `.dev.vars`
 - optional allowlists can be set with `MCP_ALLOWED_EMAILS` and `MCP_ALLOWED_EMAIL_DOMAINS`
+- self deploy can inject `MCP_ALLOWED_EMAILS` and `MCP_ALLOWED_EMAIL_DOMAINS` from GitHub Actions secrets or repository variables at deploy time
 
 Deploying the Worker alone is not sufficient for production MCP exposure. The Access policy is part of the production configuration.
 
@@ -166,6 +167,12 @@ Recommended production MCP setup:
 4. Leave `MCP_REQUIRE_ACCESS_AUTH=true` in deployed environments.
 5. Optionally set `MCP_ALLOWED_EMAILS` or `MCP_ALLOWED_EMAIL_DOMAINS` for in-worker allowlist enforcement.
 
+Recommended deploy-time source of truth:
+
+- set `MCP_ALLOWED_EMAILS` and `MCP_ALLOWED_EMAIL_DOMAINS` as GitHub Actions secrets when the values should stay private
+- or use GitHub repository variables when the values are low sensitivity and easier operator visibility matters
+- `cloudflare-self-deploy` prefers secrets, then repository variables, then falls back to the empty values in `wrangler.jsonc`
+
 Self-host tracking defaults:
 
 - `SELF_LIVE_URL`: public Cloudflare live endpoint used for maintenance health checks
@@ -213,6 +220,8 @@ For GitHub Actions based self deploys, also add these repository secrets so the 
 - `WEBHOOK_SECRET`
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
+- `MCP_ALLOWED_EMAILS` optional, but recommended when only specific identities should reach `/mcp`
+- `MCP_ALLOWED_EMAIL_DOMAINS` optional, but recommended when a whole Access-managed domain should reach `/mcp`
 
 ## Queue API Access
 

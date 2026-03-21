@@ -47,6 +47,8 @@ jobs:
       VERIFY_MIRROR_FIRST: ${{ github.event_name == 'workflow_run' && 'false' || inputs.verify_mirror_first || 'true' }}
       SYNC_SECRETS: ${{ github.event_name == 'workflow_run' && 'false' || inputs.sync_secrets || 'false' }}
       EXPECTED_COMMIT_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.expected_commit_sha || '' }}
+      MCP_ALLOWED_EMAILS: ${{ secrets.MCP_ALLOWED_EMAILS || vars.MCP_ALLOWED_EMAILS || '' }}
+      MCP_ALLOWED_EMAIL_DOMAINS: ${{ secrets.MCP_ALLOWED_EMAIL_DOMAINS || vars.MCP_ALLOWED_EMAIL_DOMAINS || '' }}
       SELF_LIVE_URL: https://opengpt-github-mcp-worker.iusung111.workers.dev
       SELF_MIRROR_URL: https://opengpt-github-mcp-worker-mirror.iusung111.workers.dev
     steps:
@@ -73,6 +75,14 @@ jobs:
           if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
             echo "Missing required GitHub Actions secret: CLOUDFLARE_ACCOUNT_ID"
             exit 1
+          fi
+
+      - name: Report MCP allowlist mode
+        run: |
+          if [ -n "${MCP_ALLOWED_EMAILS}" ] || [ -n "${MCP_ALLOWED_EMAIL_DOMAINS}" ]; then
+            echo "Deploying with MCP in-worker allowlist mode."
+          else
+            echo "Deploying with Access-only MCP mode."
           fi
 
       - name: Verify Cloudflare API token
@@ -166,6 +176,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MCP_ALLOWED_EMAILS: ${{ env.MCP_ALLOWED_EMAILS }}
+          MCP_ALLOWED_EMAIL_DOMAINS: ${{ env.MCP_ALLOWED_EMAIL_DOMAINS }}
 
       - name: Deploy to Cloudflare Live
         if: ${{ env.DEPLOY_TARGET == 'live' }}
@@ -174,3 +186,5 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MCP_ALLOWED_EMAILS: ${{ env.MCP_ALLOWED_EMAILS }}
+          MCP_ALLOWED_EMAIL_DOMAINS: ${{ env.MCP_ALLOWED_EMAIL_DOMAINS }}
