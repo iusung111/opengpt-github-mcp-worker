@@ -18,6 +18,9 @@ export type AppEnv = Env & {
 	GITHUB_API_URL?: string;
 	GITHUB_APP_ID?: string;
 	GITHUB_APP_INSTALLATION_ID?: string;
+	MIRROR_GITHUB_APP_ID?: string;
+	MIRROR_GITHUB_APP_INSTALLATION_ID?: string;
+	MIRROR_GITHUB_APP_PRIVATE_KEY_PEM?: string;
 	WORKING_STALE_AFTER_MS?: string;
 	REVIEW_STALE_AFTER_MS?: string;
 	DISPATCH_DEDUPE_WINDOW_MS?: string;
@@ -31,6 +34,8 @@ export type AppEnv = Env & {
 	SELF_LIVE_URL?: string;
 	SELF_MIRROR_URL?: string;
 	SELF_CURRENT_URL?: string;
+	SELF_DEPLOY_ENV?: string;
+	SELF_RELEASE_COMMIT_SHA?: string;
 	SELF_DEFAULT_DEPLOY_TARGET?: string;
 	SELF_REQUIRE_MIRROR_FOR_LIVE?: string;
 	MCP_REQUIRE_ACCESS_AUTH?: string;

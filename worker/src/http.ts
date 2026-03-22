@@ -1,5 +1,11 @@
 import { createMcpHandler } from 'agents/mcp';
-import { githubAuthConfigured, githubGet } from './github';
+import {
+	getGitHubCredentialSource,
+	githubAuthConfigured,
+	githubCredentialSplitConfigured,
+	githubGet,
+	usingMirrorGitHubCredentials,
+} from './github';
 import { buildMcpServer } from './mcp-tools';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import {
@@ -20,6 +26,11 @@ import {
 	getMcpAllowedEmails,
 	getMcpRequireAccessAuth,
 	getReviewStaleAfterMs,
+	getSelfCurrentUrl,
+	getSelfDeployEnv,
+	getSelfLiveUrl,
+	getSelfMirrorUrl,
+	getSelfReleaseCommitSha,
 	getWorkingStaleAfterMs,
 	queueFetch,
 	queueJson,
@@ -92,12 +103,34 @@ export async function handleQueueApi(request: Request, env: AppEnv): Promise<Res
 }
 
 export function handleHealth(env: AppEnv): Response {
+	const deployEnvironment = getSelfDeployEnv(env);
+	const githubCredentialSource = getGitHubCredentialSource(env);
+	const githubCredentialSplitReady = githubCredentialSplitConfigured(env);
+	const usingMirrorCredentials = usingMirrorGitHubCredentials(env);
+	const warnings: string[] = [];
+	if (deployEnvironment === 'mirror' && !githubCredentialSplitReady) {
+		warnings.push('mirror is using fallback GitHub App credentials; mirror/live GitHub permission split is not configured');
+	}
+	if (deployEnvironment === 'mirror' && githubCredentialSource !== 'mirror') {
+		warnings.push(`mirror is not using mirror-specific GitHub credentials; current source is ${githubCredentialSource}`);
+	}
 	return jsonResponse({
 		ok: true,
 		service: 'opengpt-github-mcp-worker',
 		runtime: 'cloudflare-workers',
+		deploy_environment: deployEnvironment,
+		release_commit_sha: getSelfReleaseCommitSha(env),
+		self_urls: {
+			current: getSelfCurrentUrl(env),
+			live: getSelfLiveUrl(env),
+			mirror: getSelfMirrorUrl(env),
+		},
 		durable_object_binding: true,
 		auth_configured: githubAuthConfigured(env),
+		github_credential_source: githubCredentialSource,
+		github_credential_split_configured: githubCredentialSplitReady,
+		using_mirror_github_credentials: usingMirrorCredentials,
+		warnings,
 		allowed_repos: getAllowedRepos(env),
 		allowed_workflows: getAllowedWorkflows(env),
 		allowed_workflows_file_by_repo: getFileAllowedWorkflowsByRepo(),

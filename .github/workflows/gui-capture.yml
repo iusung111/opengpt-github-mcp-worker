@@ -35,9 +35,22 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
 
+      - name: Start local GUI fallback server
+        run: |
+          python3 -m http.server 4173 --directory public >/tmp/gui-capture-http.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:4173/gui/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/gui-capture-http.log
+          exit 1
+
       - name: Run GUI capture
         env:
           INSTRUCTIONS_B64: ${{ inputs.instructions_b64 }}
+          LOCAL_GUI_URL: http://127.0.0.1:4173/gui/
         run: |
           node <<'NODE'
           const fs = require('fs');
@@ -49,13 +62,37 @@ jobs:
           fs.mkdirSync(artifactDir, { recursive: true });
 
           const instructions = JSON.parse(Buffer.from(process.env.INSTRUCTIONS_B64, 'base64').toString('utf8'));
+          const localGuiUrl = process.env.LOCAL_GUI_URL;
           const dataFilePath = path.join(os.tmpdir(), instructions.file_name);
           fs.writeFileSync(dataFilePath, instructions.file_text, 'utf8');
 
           (async () => {
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage({ viewport: { width: 1440, height: 1800 } });
-            await page.goto(instructions.app_url, { waitUntil: 'networkidle' });
+            let resolvedAppUrl = localGuiUrl;
+            let appSource = 'checkout';
+            let deployedAppError = null;
+
+            async function openApp(url, source) {
+              const response = await page.goto(url, { waitUntil: 'networkidle' });
+              if (response && response.status() >= 400) {
+                throw new Error(`navigation failed with status ${response.status()} for ${url}`);
+              }
+              resolvedAppUrl = url;
+              appSource = source;
+            }
+
+            if (instructions.app_url) {
+              try {
+                await openApp(instructions.app_url, 'deployed');
+              } catch (error) {
+                deployedAppError = error instanceof Error ? error.message : String(error);
+                await openApp(localGuiUrl, 'checkout_fallback');
+              }
+            } else {
+              await openApp(localGuiUrl, 'checkout');
+            }
+
             await page.setInputFiles('#file-input', dataFilePath);
 
             if (instructions.analysis?.target_column) {
@@ -95,7 +132,10 @@ jobs:
               JSON.stringify({
                 ok: true,
                 instructions: {
-                  app_url: instructions.app_url,
+                  requested_app_url: instructions.app_url ?? null,
+                  resolved_app_url: resolvedAppUrl,
+                  app_source: appSource,
+                  deployed_app_error: deployedAppError,
                   file_name: instructions.file_name,
                   analysis: instructions.analysis ?? null,
                 },

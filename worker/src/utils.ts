@@ -291,12 +291,41 @@ export function getSelfCurrentUrl(env: AppEnv): string | null {
 	return value ? value.replace(/\/$/, '') : null;
 }
 
+export function getSelfDeployEnv(env: AppEnv): 'mirror' | 'live' | 'unknown' {
+	const explicit = env.SELF_DEPLOY_ENV?.trim().toLowerCase();
+	if (explicit === 'mirror' || explicit === 'live') {
+		return explicit;
+	}
+	const currentUrl = getSelfCurrentUrl(env);
+	const liveUrl = getSelfLiveUrl(env);
+	const mirrorUrl = getSelfMirrorUrl(env);
+	if (currentUrl && liveUrl && currentUrl === liveUrl) {
+		return 'live';
+	}
+	if (currentUrl && mirrorUrl && currentUrl === mirrorUrl) {
+		return 'mirror';
+	}
+	return 'unknown';
+}
+
+export function getSelfReleaseCommitSha(env: AppEnv): string | null {
+	const value = env.SELF_RELEASE_COMMIT_SHA?.trim();
+	return value ? value : null;
+}
+
 export function getSelfDefaultDeployTarget(env: AppEnv): 'mirror' | 'live' {
 	return env.SELF_DEFAULT_DEPLOY_TARGET?.trim() === 'live' ? 'live' : 'mirror';
 }
 
 export function selfRequiresMirrorForLive(env: AppEnv): boolean {
 	return env.SELF_REQUIRE_MIRROR_FOR_LIVE?.trim() !== 'false';
+}
+
+export function ensureLiveSelfHostControl(env: AppEnv, action: string): void {
+	const deployEnv = getSelfDeployEnv(env);
+	if (deployEnv !== 'live') {
+		throw new Error(`${action} requires the live self-host worker; current deploy environment is ${deployEnv}`);
+	}
 }
 
 export function ensureRepoAllowed(env: AppEnv, repo: string): void {

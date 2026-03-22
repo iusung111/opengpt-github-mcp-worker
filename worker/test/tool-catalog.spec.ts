@@ -9,6 +9,7 @@ describe('tool catalog permission bundles', () => {
 		expect(bundle.capabilities).toEqual(['queue', 'read', 'workflow', 'workspace', 'write']);
 		expect(bundle.groups.some((group) => group.id === 'repo_write')).toBe(true);
 		expect(bundle.tools).toContain('workflow_dispatch');
+		expect(bundle.tools).toContain('gui_capture_run');
 		expect(bundle.tools).toContain('repo_create_branch');
 	});
 

@@ -3,6 +3,10 @@
 	"name": "opengpt-github-mcp-worker",
 	"main": "worker/src/index.ts",
 	"compatibility_date": "2026-03-10",
+	"assets": {
+		"directory": "./public",
+		"not_found_handling": "none"
+	},
 	"observability": {
 		"enabled": true
 	},
@@ -11,7 +15,7 @@
 		"GITHUB_API_URL": "https://api.github.com",
 		"GITHUB_ALLOWED_REPOS": "iusung111/OpenGPT,iusung111/opengpt-github-mcp-worker",
 		"GITHUB_ALLOWED_WORKFLOWS": "agent-run.yml,pr-merge.yml,cloudflare-live-deploy.yml,cloudflare-self-deploy.yml",
-		"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\"]}",
+		"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"]}",
 		"AGENT_BRANCH_PREFIX": "agent/",
 		"DEFAULT_BASE_BRANCH": "main",
 		"SELF_REPO_KEY": "iusung111/opengpt-github-mcp-worker",
@@ -75,7 +79,7 @@
 				"GITHUB_API_URL": "https://api.github.com",
 				"GITHUB_ALLOWED_REPOS": "iusung111/OpenGPT,iusung111/opengpt-github-mcp-worker",
 				"GITHUB_ALLOWED_WORKFLOWS": "agent-run.yml,pr-merge.yml,cloudflare-live-deploy.yml,cloudflare-self-deploy.yml",
-				"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\"]}",
+				"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"]}",
 				"AGENT_BRANCH_PREFIX": "agent/",
 				"DEFAULT_BASE_BRANCH": "main",
 				"SELF_REPO_KEY": "iusung111/opengpt-github-mcp-worker",

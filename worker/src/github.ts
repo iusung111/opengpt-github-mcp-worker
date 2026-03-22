@@ -13,6 +13,10 @@ type AppEnv = Env & {
 	GITHUB_API_URL?: string;
 	GITHUB_APP_ID?: string;
 	GITHUB_APP_INSTALLATION_ID?: string;
+	SELF_DEPLOY_ENV?: string;
+	MIRROR_GITHUB_APP_ID?: string;
+	MIRROR_GITHUB_APP_INSTALLATION_ID?: string;
+	MIRROR_GITHUB_APP_PRIVATE_KEY_PEM?: string;
 };
 
 interface GitHubRequestOptions {
@@ -21,10 +25,17 @@ interface GitHubRequestOptions {
 	headers?: Record<string, string>;
 }
 
-let cachedInstallationToken: InstallationToken | null = null;
+interface ResolvedGitHubCredentials {
+	appId: string;
+	installationId: string;
+	privateKeyPem: string;
+	source: 'default' | 'mirror';
+}
+
+const cachedInstallationTokens = new Map<string, InstallationToken>();
 
 export function resetGitHubAuthCache(): void {
-	cachedInstallationToken = null;
+	cachedInstallationTokens.clear();
 }
 
 async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
@@ -54,7 +65,33 @@ function tokenExpiringSoon(expiresAt: string): boolean {
 }
 
 export function githubAuthConfigured(env: AppEnv): boolean {
-	return Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_INSTALLATION_ID && env.GITHUB_APP_PRIVATE_KEY_PEM);
+	return resolveGitHubCredentials(env) !== null;
+}
+
+export function resolveGitHubCredentials(env: AppEnv): ResolvedGitHubCredentials | null {
+	const deployEnv = env.SELF_DEPLOY_ENV?.trim().toLowerCase();
+	const mirrorCredentialsConfigured = Boolean(
+		env.MIRROR_GITHUB_APP_ID &&
+			env.MIRROR_GITHUB_APP_INSTALLATION_ID &&
+			env.MIRROR_GITHUB_APP_PRIVATE_KEY_PEM,
+	);
+	if (deployEnv === 'mirror' && mirrorCredentialsConfigured) {
+		return {
+			appId: String(env.MIRROR_GITHUB_APP_ID),
+			installationId: String(env.MIRROR_GITHUB_APP_INSTALLATION_ID),
+			privateKeyPem: String(env.MIRROR_GITHUB_APP_PRIVATE_KEY_PEM),
+			source: 'mirror',
+		};
+	}
+	if (env.GITHUB_APP_ID && env.GITHUB_APP_INSTALLATION_ID && env.GITHUB_APP_PRIVATE_KEY_PEM) {
+		return {
+			appId: env.GITHUB_APP_ID,
+			installationId: env.GITHUB_APP_INSTALLATION_ID,
+			privateKeyPem: env.GITHUB_APP_PRIVATE_KEY_PEM,
+			source: 'default',
+		};
+	}
+	return null;
 }
 
 export async function buildGitHubAppJwt(appId: string, privateKeyPem: string): Promise<string> {
@@ -74,9 +111,13 @@ export async function buildGitHubAppJwt(appId: string, privateKeyPem: string): P
 	return `${signingInput}.${signature.toString('base64url')}`;
 }
 
-export async function createInstallationToken(env: AppEnv, jwt: string): Promise<InstallationToken> {
+export async function createInstallationToken(
+	env: AppEnv,
+	credentials: ResolvedGitHubCredentials,
+	jwt: string,
+): Promise<InstallationToken> {
 	const response = await fetchWithTimeout(
-		`${env.GITHUB_API_URL ?? 'https://api.github.com'}/app/installations/${env.GITHUB_APP_INSTALLATION_ID}/access_tokens`,
+		`${env.GITHUB_API_URL ?? 'https://api.github.com'}/app/installations/${credentials.installationId}/access_tokens`,
 		{
 			method: 'POST',
 			headers: {
@@ -95,20 +136,63 @@ export async function createInstallationToken(env: AppEnv, jwt: string): Promise
 }
 
 export async function getInstallationToken(env: AppEnv): Promise<InstallationToken> {
-	if (!githubAuthConfigured(env)) {
+	const credentials = resolveGitHubCredentials(env);
+	if (!credentials) {
 		throw new Error('GitHub App credentials are not fully configured');
 	}
+	const cacheKey = `${credentials.source}:${credentials.appId}:${credentials.installationId}`;
+	const cachedInstallationToken = cachedInstallationTokens.get(cacheKey) ?? null;
 	if (cachedInstallationToken && !tokenExpiringSoon(cachedInstallationToken.expires_at)) {
 		return cachedInstallationToken;
 	}
-	const appId = env.GITHUB_APP_ID;
-	const privateKeyPem = env.GITHUB_APP_PRIVATE_KEY_PEM;
-	if (!appId || !privateKeyPem) {
-		throw new Error('GitHub App credentials are not fully configured');
+	const jwt = await buildGitHubAppJwt(credentials.appId, credentials.privateKeyPem);
+	const freshToken = await createInstallationToken(env, credentials, jwt);
+	cachedInstallationTokens.set(cacheKey, freshToken);
+	return freshToken;
+}
+
+function clearInstallationTokenCache(env: AppEnv): void {
+	const credentials = resolveGitHubCredentials(env);
+	if (!credentials) {
+		return;
 	}
-	const jwt = await buildGitHubAppJwt(appId, privateKeyPem);
-	cachedInstallationToken = await createInstallationToken(env, jwt);
-	return cachedInstallationToken;
+	const cacheKey = `${credentials.source}:${credentials.appId}:${credentials.installationId}`;
+	cachedInstallationTokens.delete(cacheKey);
+}
+
+export function getGitHubCredentialSource(env: AppEnv): 'default' | 'mirror' | 'unconfigured' {
+	const credentials = resolveGitHubCredentials(env);
+	return credentials?.source ?? 'unconfigured';
+}
+
+export function mirrorGitHubCredentialsConfigured(env: AppEnv): boolean {
+	return Boolean(
+		env.MIRROR_GITHUB_APP_ID &&
+			env.MIRROR_GITHUB_APP_INSTALLATION_ID &&
+			env.MIRROR_GITHUB_APP_PRIVATE_KEY_PEM,
+	);
+}
+
+export function githubCredentialSplitConfigured(env: AppEnv): boolean {
+	return githubAuthConfigured(env) && mirrorGitHubCredentialsConfigured(env);
+}
+
+export function usingMirrorGitHubCredentials(env: AppEnv): boolean {
+	return getGitHubCredentialSource(env) === 'mirror';
+}
+
+export async function getResolvedGitHubAuthInfo(env: AppEnv): Promise<{
+	configured: boolean;
+	credential_source: 'default' | 'mirror' | 'unconfigured';
+	credential_split_configured: boolean;
+	using_mirror_credentials: boolean;
+}> {
+	return {
+		configured: githubAuthConfigured(env),
+		credential_source: getGitHubCredentialSource(env),
+		credential_split_configured: githubCredentialSplitConfigured(env),
+		using_mirror_credentials: usingMirrorGitHubCredentials(env),
+	};
 }
 
 export async function githubRequest(
@@ -117,6 +201,23 @@ export async function githubRequest(
 	path: string,
 	options: GitHubRequestOptions = {}
 ): Promise<unknown> {
+	const response = await githubRequestRaw(env, method, path, options);
+	if (response.status === 204) {
+		return { ok: true };
+	}
+	const contentType = response.headers.get('content-type') ?? '';
+	if (!contentType.includes('application/json')) {
+		return response.text();
+	}
+	return response.json();
+}
+
+export async function githubRequestRaw(
+	env: AppEnv,
+	method: string,
+	path: string,
+	options: GitHubRequestOptions = {}
+): Promise<Response> {
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		const installationToken = await getInstallationToken(env);
 		const url = new URL(path, env.GITHUB_API_URL ?? 'https://api.github.com');
@@ -139,17 +240,10 @@ export async function githubRequest(
 			body: options.body === undefined ? undefined : JSON.stringify(options.body),
 		});
 		if (response.ok) {
-			if (response.status === 204) {
-				return { ok: true };
-			}
-			const contentType = response.headers.get('content-type') ?? '';
-			if (!contentType.includes('application/json')) {
-				return response.text();
-			}
-			return response.json();
+			return response;
 		}
 		if ((response.status === 401 || response.status === 403) && attempt === 0) {
-			cachedInstallationToken = null;
+			clearInstallationTokenCache(env);
 			continue;
 		}
 		const message = await response.text();
