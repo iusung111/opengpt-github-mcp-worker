@@ -1,0 +1,127 @@
+name: gui-capture
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_kind:
+        description: Request type marker
+        required: false
+        default: gui_capture
+        type: string
+      instructions_b64:
+        description: Base64 encoded JSON instructions for the remote GUI capture run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Run GUI capture
+        env:
+          INSTRUCTIONS_B64: ${{ inputs.instructions_b64 }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+          const { chromium } = require('playwright');
+
+          const artifactDir = path.join(process.cwd(), 'gui-capture-artifact');
+          fs.mkdirSync(artifactDir, { recursive: true });
+
+          const instructions = JSON.parse(Buffer.from(process.env.INSTRUCTIONS_B64, 'base64').toString('utf8'));
+          const dataFilePath = path.join(os.tmpdir(), instructions.file_name);
+          fs.writeFileSync(dataFilePath, instructions.file_text, 'utf8');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage({ viewport: { width: 1440, height: 1800 } });
+            await page.goto(instructions.app_url, { waitUntil: 'networkidle' });
+            await page.setInputFiles('#file-input', dataFilePath);
+
+            if (instructions.analysis?.target_column) {
+              await page.selectOption('#target-column', instructions.analysis.target_column);
+            }
+            if (instructions.analysis?.aggregate) {
+              await page.selectOption('#aggregate-mode', instructions.analysis.aggregate);
+            }
+            if (instructions.analysis?.sort) {
+              await page.selectOption('#sort-mode', instructions.analysis.sort);
+            }
+            if (instructions.analysis?.missing) {
+              await page.selectOption('#missing-mode', instructions.analysis.missing);
+            }
+            if (instructions.analysis?.chart_type) {
+              await page.selectOption('#chart-type', instructions.analysis.chart_type);
+            }
+            if (typeof instructions.analysis?.filter_text === 'string') {
+              await page.fill('#filter-text', instructions.analysis.filter_text);
+            }
+
+            await page.waitForFunction(() => {
+              const el = document.getElementById('capture-ready-pill');
+              return el && /capture ready/i.test(el.textContent || '');
+            }, { timeout: 30000 });
+
+            const summaryText = await page.locator('#analysis-summary').textContent();
+            const summary = summaryText ? JSON.parse(summaryText) : null;
+
+            await page.locator('#gui-static-app').screenshot({
+              path: path.join(artifactDir, 'capture.jpg'),
+              type: 'jpeg',
+              quality: 70,
+            });
+            fs.writeFileSync(
+              path.join(artifactDir, 'summary.json'),
+              JSON.stringify({
+                ok: true,
+                instructions: {
+                  app_url: instructions.app_url,
+                  file_name: instructions.file_name,
+                  analysis: instructions.analysis ?? null,
+                },
+                summary,
+              }, null, 2),
+              'utf8',
+            );
+
+            await browser.close();
+          })().catch((error) => {
+            fs.writeFileSync(
+              path.join(artifactDir, 'summary.json'),
+              JSON.stringify({
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              }, null, 2),
+              'utf8',
+            );
+            throw error;
+          });
+          NODE
+
+      - name: Upload GUI capture artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-capture-${{ github.run_id }}
+          path: gui-capture-artifact/
+          if-no-files-found: error
