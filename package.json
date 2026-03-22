@@ -11,9 +11,9 @@
 		"test": "vitest --sequence.concurrent=false",
 		"test:unit": "vitest run worker/test/auth.spec.ts worker/test/github.spec.ts worker/test/mcp-tree.spec.ts worker/test/queue-audit.spec.ts worker/test/queue-dispatch.spec.ts worker/test/queue-events.spec.ts worker/test/queue-index.spec.ts worker/test/queue-projections.spec.ts worker/test/queue-reconcile.spec.ts worker/test/queue-state.spec.ts worker/test/queue-store.spec.ts worker/test/queue-workflow.spec.ts worker/test/queue-workspaces.spec.ts worker/test/tool-catalog.spec.ts worker/test/utils.spec.ts --sequence.concurrent=false",
 		"test:integration": "node worker/scripts/run-integration-tests.mjs",
-		"test:integration:runtime": "vitest run worker/test/runtime-http.spec.ts worker/test/runtime-mcp.spec.ts worker/test/queue-webhook.spec.ts --sequence.concurrent=false",
+		"test:integration:runtime": "node worker/scripts/run-integration-tests.mjs",
 		"test:all": "npm run test:unit && npm run test:integration",
-		"cf-typegen": "wrangler types worker/types/worker-configuration.d.ts",
+		"cf-typegen": "node worker/scripts/run-cf-typegen.mjs",
 		"ops:status": "node worker/scripts/check-self-hosts.mjs",
 		"docs:tool-surface": "node worker/scripts/generate-tool-surface-doc.mjs"
 	},

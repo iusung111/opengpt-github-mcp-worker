@@ -2,14 +2,17 @@
 
 Remote GitHub MCP server for ChatGPT Developer mode, deployed on Cloudflare Workers.
 
-- MCP endpoint: remote `/mcp`
+- Direct MCP endpoint: `/mcp`
+- ChatGPT connector endpoint: `/chatgpt/mcp`
 - Runtime: Cloudflare Workers + Durable Objects
-- Scope: GitHub repo read/write, workflow dispatch, PR flow, queue state, self-host operations
-- Access model: Cloudflare Access in front of `/mcp`, plus in-worker email allowlist
+- Scope: GitHub repo read/write including workflow files, workflow dispatch, PR flow, queue state, self-host operations
+- Access model: Cloudflare Access for direct `/mcp`, OIDC bearer auth for `/chatgpt/mcp`
 
 ## Docs
 
 - [MCP access and deployment](/d:/VScode/opengpt-github-mcp-worker/docs/MCP_ACCESS.md)
+- [ChatGPT connector auth](/d:/VScode/opengpt-github-mcp-worker/docs/CHATGPT_MCP.md)
+- [ChatGPT connector incident report 2026-03-22](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_CONNECTOR_INCIDENT_2026-03-22.md)
 - [Tool surface](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md)
 - [Release history](/d:/VScode/opengpt-github-mcp-worker/docs/releases/CHANGELOG.md)
 - [ChatGPT project instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md)
@@ -35,10 +38,12 @@ The root keeps only runtime entrypoints and top-level config that GitHub Actions
 - successful CI auto-deploys `mirror`
 - `live` is promoted manually through `cloudflare-self-deploy`
 - `/mcp` is expected to sit behind Cloudflare Access
+- `/chatgpt/mcp` is expected to sit behind OAuth/OIDC-aware ChatGPT custom connector auth
 - deployed Workers require `MCP_REQUIRE_ACCESS_AUTH=true`
 - deployed Workers also enforce `MCP_ALLOWED_EMAILS` and/or `MCP_ALLOWED_EMAIL_DOMAINS` when configured
+- deployed Workers can separately enforce `CHATGPT_MCP_ALLOWED_EMAILS` on `/chatgpt/mcp`
 
-Deploying the Worker alone is not sufficient for production MCP exposure. Cloudflare Access policy is part of the runtime security boundary.
+Deploying the Worker alone is not sufficient for production MCP exposure. Cloudflare Access policy protects `/mcp`, and an external OAuth/OIDC provider protects `/chatgpt/mcp`.
 
 ## Quick Start
 
@@ -74,9 +79,9 @@ npm run docs:tool-surface
 
 Notes:
 
-- `test:integration` is host-aware. On Windows it skips Durable Object runtime tests and prints the Linux/CI command.
-- `test:integration:runtime` always runs the full Durable Object backed runtime suite.
-- Linux/CI is the source of truth for Durable Object runtime verification.
+- `cf-typegen`, `test:integration`, and `test:integration:runtime` pin `workerd` temporary paths to repo-local `.wrangler/state/local-workerd/` so runtime tooling does not depend on the host temp directory.
+- On Windows, runtime tests use ephemeral Durable Object storage instead of SQLite-backed local persistence to avoid `workerd` path-related `SQLITE_CANTOPEN` failures.
+- Linux/CI remains the source of truth for Durable Object runtime verification.
 - live and mirror `/healthz` checks are the source of truth for deployed behavior.
 
 ## Required Secrets
@@ -98,8 +103,14 @@ GitHub Actions secrets for self-deploy:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `MCP_ALLOWED_EMAILS` optional
 - `MCP_ALLOWED_EMAIL_DOMAINS` optional
+- `CHATGPT_MCP_AUTH_MODE` optional
+- `CHATGPT_MCP_ISSUER` optional
+- `CHATGPT_MCP_AUDIENCE` optional
+- `CHATGPT_MCP_JWKS_URL` optional
+- `CHATGPT_MCP_JWKS_JSON` optional
+- `CHATGPT_MCP_ALLOWED_EMAILS` optional
 
-`cloudflare-self-deploy` prefers `MCP_ALLOWED_EMAILS` and `MCP_ALLOWED_EMAIL_DOMAINS` from GitHub Actions secrets, then repository variables, then the defaults in `wrangler.jsonc`.
+`cloudflare-self-deploy` prefers the MCP and ChatGPT MCP auth vars from GitHub Actions secrets, then repository variables, then the defaults in `wrangler.jsonc`.
 
 ## Non-Secret Config
 
@@ -109,9 +120,15 @@ Most important vars:
 
 - `GITHUB_ALLOWED_REPOS`
 - `GITHUB_ALLOWED_WORKFLOWS`
+- `GITHUB_ALLOWED_WORKFLOWS_BY_REPO`
 - `MCP_REQUIRE_ACCESS_AUTH`
 - `MCP_ALLOWED_EMAILS`
 - `MCP_ALLOWED_EMAIL_DOMAINS`
+- `CHATGPT_MCP_AUTH_MODE`
+- `CHATGPT_MCP_ISSUER`
+- `CHATGPT_MCP_AUDIENCE`
+- `CHATGPT_MCP_JWKS_URL`
+- `CHATGPT_MCP_ALLOWED_EMAILS`
 - `SELF_LIVE_URL`
 - `SELF_MIRROR_URL`
 - `SELF_CURRENT_URL`
@@ -122,7 +139,8 @@ For local development, copy `.dev.vars.example` to `.dev.vars` and fill real val
 
 ## Runtime Endpoints
 
-- MCP: `https://<worker-url>/mcp`
+- Direct MCP: `https://<worker-url>/mcp`
+- ChatGPT MCP: `https://<worker-url>/chatgpt/mcp`
 - Webhook: `https://<worker-url>/webhooks/github`
 - Health: `https://<worker-url>/healthz`
 - Queue API: `/queue/*`
@@ -141,7 +159,7 @@ The server exposes grouped tool families rather than one flat surface:
 - overview and self-host guidance
 - workspace registry and active repo context
 - repository read and search
-- repository write, PR, comment, and workflow dispatch
+- repository write including workflow-file edits, PR, comment, and workflow dispatch
 - branch cleanup and collaboration helpers
 - queue, audit, and reviewer loop state
 
@@ -160,7 +178,8 @@ Phase 1 assumptions:
 - allowlisted repos only
 - direct writes only on `agent/*`
 - no force-push
-- workflow dispatch limited to the allowlisted workflow set
+- workflow dispatch limited to the allowlisted workflow set, and the target workflow file must define `on.workflow_dispatch`
+- repo-specific workflow allowlists can override the global workflow allowlist
 
 Minimum GitHub App permissions:
 
@@ -189,8 +208,9 @@ Basic smoke checks after deploy:
 
 1. `GET /healthz`
 2. `GET /github/app-installation`
-3. Connect an MCP client and `listTools`
-4. Create a queue job and verify webhook-driven state transitions
+3. Connect a direct MCP client to `/mcp` and `listTools`
+4. Connect a ChatGPT custom connector to `/chatgpt/mcp`
+5. Create a queue job and verify webhook-driven state transitions
 
 ## Security Note
 

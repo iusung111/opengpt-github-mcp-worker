@@ -1,9 +1,13 @@
 import { SELF } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildDispatchFingerprint } from '../src/utils';
-import { createMcpClient, queueJsonHeaders } from './runtime-helpers';
+import { createChatgptMcpClient, createDirectMcpBearerClient, createMcpClient, queueJsonHeaders } from './runtime-helpers';
 
 describe('runtime mcp surface', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
 	it('treats blocked reviews as terminal and respects review rework limit', async () => {
 		const blockedClient = await createMcpClient();
 		await blockedClient.callTool({
@@ -237,6 +241,200 @@ describe('runtime mcp surface', () => {
 					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 				requires_confirmation: true,
+			},
+		});
+		await client.close();
+	});
+
+	it('serves the same read/write MCP surface over /chatgpt/mcp with bearer auth', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/trees/main?recursive=false') {
+				return new Response(
+					JSON.stringify({
+						sha: 'tree-sha',
+						truncated: false,
+						tree: [
+							{ path: 'README.md', type: 'blob', sha: 'blob-readme' },
+							{ path: 'project', type: 'tree', sha: 'tree-project' },
+						],
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/README.md') {
+				return new Response(
+					JSON.stringify({
+						path: 'README.md',
+						name: 'README.md',
+						type: 'file',
+						content: btoa('# OpenGPT\n'),
+						encoding: 'base64',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createChatgptMcpClient();
+		const jobsListResult = await client.callTool({
+			name: 'jobs_list',
+			arguments: {},
+		});
+		const jobsListText = 'text' in jobsListResult.content[0] ? jobsListResult.content[0].text : '';
+		expect(JSON.parse(jobsListText)).toMatchObject({
+			ok: true,
+			data: {
+				jobs: expect.any(Array),
+			},
+		});
+
+		const treeResult = await client.callTool({
+			name: 'repo_list_tree',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				path: '',
+				recursive: false,
+			},
+		});
+		const treeText = 'text' in treeResult.content[0] ? treeResult.content[0].text : '';
+		const treeJson = JSON.parse(treeText);
+		expect(treeJson.ok).toBe(true);
+		expect(Array.isArray(treeJson.data.tree)).toBe(true);
+
+		const fileResult = await client.callTool({
+			name: 'repo_get_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				path: 'README.md',
+			},
+		});
+		const fileText = 'text' in fileResult.content[0] ? fileResult.content[0].text : '';
+		expect(JSON.parse(fileText)).toMatchObject({
+			ok: true,
+			data: {
+				path: 'README.md',
+			},
+		});
+		await client.close();
+	});
+
+	it('reads and updates workflow files over /chatgpt/mcp', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/test.yml') {
+				if ((init?.method ?? 'GET').toUpperCase() === 'PUT') {
+					const payload = JSON.parse(String(init?.body ?? '{}'));
+					return new Response(
+						JSON.stringify({
+							content: {
+								path: '.github/workflows/test.yml',
+								sha: 'workflow-blob-updated',
+							},
+							commit: {
+								sha: 'commit-workflow-update',
+								message: payload.message,
+							},
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } },
+					);
+				}
+				return new Response(
+					JSON.stringify({
+						path: '.github/workflows/test.yml',
+						name: 'test.yml',
+						type: 'file',
+						content: btoa('name: test\non: workflow_dispatch\n'),
+						encoding: 'base64',
+						sha: 'workflow-blob-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createChatgptMcpClient();
+		const workflowFileResult = await client.callTool({
+			name: 'repo_get_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				path: '.github/workflows/test.yml',
+			},
+		});
+		const workflowFileText =
+			'text' in workflowFileResult.content[0] ? workflowFileResult.content[0].text : '';
+		expect(JSON.parse(workflowFileText)).toMatchObject({
+			ok: true,
+			data: {
+				path: '.github/workflows/test.yml',
+				decoded_text: 'name: test\non: workflow_dispatch\n',
+			},
+		});
+
+		const workflowUpdateResult = await client.callTool({
+			name: 'repo_update_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				branch: 'agent/workflow-edit-test',
+				path: '.github/workflows/test.yml',
+				message: 'Update workflow from MCP',
+				content_b64: btoa('name: test\non: workflow_dispatch\njobs: {}\n'),
+				expected_blob_sha: 'workflow-blob-sha',
+			},
+		});
+		const workflowUpdateText =
+			'text' in workflowUpdateResult.content[0] ? workflowUpdateResult.content[0].text : '';
+		expect(JSON.parse(workflowUpdateText)).toMatchObject({
+			ok: true,
+			data: {
+				content: {
+					path: '.github/workflows/test.yml',
+				},
+				commit: {
+					message: 'Update workflow from MCP',
+				},
+			},
+		});
+		await client.close();
+	});
+
+	it('serves the direct /mcp surface for bearer-authenticated ChatGPT callers', async () => {
+		const client = await createDirectMcpBearerClient();
+		const jobsListResult = await client.callTool({
+			name: 'jobs_list',
+			arguments: {},
+		});
+		const jobsListText = 'text' in jobsListResult.content[0] ? jobsListResult.content[0].text : '';
+		expect(JSON.parse(jobsListText)).toMatchObject({
+			ok: true,
+			data: {
+				jobs: expect.any(Array),
 			},
 		});
 		await client.close();
@@ -514,7 +712,107 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	});
 
+	it('returns specific failure code when workflow file has no workflow_dispatch trigger', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/actions/workflows/pr-merge.yml') {
+				return new Response(
+					JSON.stringify({
+						id: 1,
+						name: 'pr-merge',
+						path: '.github/workflows/pr-merge.yml',
+						state: 'active',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/pr-merge.yml?ref=main') {
+				return new Response(
+					JSON.stringify({
+						path: '.github/workflows/pr-merge.yml',
+						name: 'pr-merge.yml',
+						type: 'file',
+						content: btoa('name: pr-merge\non:\n  pull_request:\n    types: [opened]\n'),
+						encoding: 'base64',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createMcpClient();
+		const result = await client.callTool({
+			name: 'workflow_dispatch',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				workflow_id: 'pr-merge.yml',
+				ref: 'main',
+				inputs: {
+					pull_number: '29',
+					merge_method: 'squash',
+					delete_branch: true,
+				},
+			},
+		});
+		const text = 'text' in result.content[0] ? result.content[0].text : '';
+		expect(JSON.parse(text)).toMatchObject({
+			ok: false,
+			code: 'workflow_missing_dispatch_trigger',
+		});
+		await client.close();
+	});
+
 	it('deduplicates repeated workflow dispatch requests for the same working job', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/actions/workflows/agent-run.yml') {
+				return new Response(
+					JSON.stringify({
+						id: 2,
+						name: 'agent-run',
+						path: '.github/workflows/agent-run.yml',
+						state: 'active',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/agent-run.yml?ref=main') {
+				return new Response(
+					JSON.stringify({
+						path: '.github/workflows/agent-run.yml',
+						name: 'agent-run.yml',
+						type: 'file',
+						content: btoa('name: agent-run\non:\n  workflow_dispatch:\n'),
+						encoding: 'base64',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
 		const client = await createMcpClient();
 		const inputs = {
 			job_id: 'job-dispatch-dedupe',

@@ -5,14 +5,17 @@ import { ToolAnnotations } from './mcp-overview-tools';
 import {
 	activateRepoWorkspace,
 	buildDispatchFingerprint,
+	decodeBase64Text,
 	diagnosticLog,
 	ensureBranchAllowed,
 	ensureRepoAllowed,
 	ensureWorkflowAllowed,
+	encodeGitHubPath,
 	errorCodeFor,
 	fail,
 	getDefaultBaseBranch,
 	getDispatchDedupeWindowMs,
+	githubGet,
 	githubPost,
 	isOlderThan,
 	nowIso,
@@ -49,8 +52,44 @@ export function registerWorkflowDispatchTools(
 				if (ref !== getDefaultBaseBranch(env)) {
 					ensureBranchAllowed(env, ref);
 				}
-				ensureWorkflowAllowed(env, workflow_id);
+				ensureWorkflowAllowed(env, repoKey, workflow_id);
 				validateWorkflowInputs(inputs);
+				let workflowPath = `.github/workflows/${workflow_id}`;
+				try {
+					const workflowMeta = (await githubGet(
+						env,
+						`/repos/${owner}/${repo}/actions/workflows/${workflow_id}`,
+					)) as { path?: string };
+					if (typeof workflowMeta.path === 'string' && workflowMeta.path.trim()) {
+						workflowPath = workflowMeta.path;
+					}
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					if (message.includes('github request failed: 404')) {
+						throw new Error(`workflow not found: ${workflow_id}`);
+					}
+					throw error;
+				}
+				try {
+					const workflowFile = (await githubGet(
+						env,
+						`/repos/${owner}/${repo}/contents/${encodeGitHubPath(workflowPath)}`,
+						{ params: { ref } },
+					)) as { content?: string };
+					const workflowText = decodeBase64Text(workflowFile.content);
+					if (!workflowText || !/(^|\n)\s*workflow_dispatch\s*:/m.test(workflowText)) {
+						throw new Error(`workflow does not support workflow_dispatch: ${workflow_id}`);
+					}
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					if (message.includes('workflow does not support workflow_dispatch')) {
+						throw error;
+					}
+					if (message.includes('github request failed: 404')) {
+						throw new Error(`workflow not found on ref ${ref}: ${workflow_id}`);
+					}
+					throw error;
+				}
 				const jobId = typeof inputs.job_id === 'string' ? inputs.job_id : undefined;
 				let existingJob:
 					| {

@@ -97,7 +97,8 @@ export function registerRepoReadTools(
 	server.registerTool(
 		'repo_get_file',
 		{
-			description: 'Read a file from an allowlisted GitHub repository.',
+			description:
+				'Read a file from an allowlisted GitHub repository, including workflow files under .github/workflows/.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),

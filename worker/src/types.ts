@@ -10,6 +10,7 @@ export type AppEnv = Env & {
 	GITHUB_APP_PRIVATE_KEY_PEM?: string;
 	GITHUB_ALLOWED_REPOS?: string;
 	GITHUB_ALLOWED_WORKFLOWS?: string;
+	GITHUB_ALLOWED_WORKFLOWS_BY_REPO?: string;
 	AGENT_BRANCH_PREFIX?: string;
 	DEFAULT_BASE_BRANCH?: string;
 	DEFAULT_AUTO_IMPROVE_MAX_CYCLES?: string;
@@ -35,6 +36,12 @@ export type AppEnv = Env & {
 	MCP_REQUIRE_ACCESS_AUTH?: string;
 	MCP_ALLOWED_EMAILS?: string;
 	MCP_ALLOWED_EMAIL_DOMAINS?: string;
+	CHATGPT_MCP_AUTH_MODE?: string;
+	CHATGPT_MCP_ISSUER?: string;
+	CHATGPT_MCP_AUDIENCE?: string;
+	CHATGPT_MCP_JWKS_URL?: string;
+	CHATGPT_MCP_JWKS_JSON?: string;
+	CHATGPT_MCP_ALLOWED_EMAILS?: string;
 };
 
 export interface ReviewFinding {

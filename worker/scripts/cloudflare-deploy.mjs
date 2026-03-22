@@ -21,7 +21,16 @@ function parseArgs(argv) {
 
 function getMcpVarOverrides() {
 	const overrides = [];
-	for (const key of ['MCP_ALLOWED_EMAILS', 'MCP_ALLOWED_EMAIL_DOMAINS']) {
+	for (const key of [
+		'MCP_ALLOWED_EMAILS',
+		'MCP_ALLOWED_EMAIL_DOMAINS',
+		'CHATGPT_MCP_AUTH_MODE',
+		'CHATGPT_MCP_ISSUER',
+		'CHATGPT_MCP_AUDIENCE',
+		'CHATGPT_MCP_JWKS_URL',
+		'CHATGPT_MCP_JWKS_JSON',
+		'CHATGPT_MCP_ALLOWED_EMAILS',
+	]) {
 		const value = process.env[key];
 		if (value !== undefined) {
 			overrides.push('--var', `${key}:${value}`);
@@ -34,6 +43,15 @@ function getExpectedMcpAccessMode() {
 	const hasAllowedEmails = (process.env.MCP_ALLOWED_EMAILS ?? '').trim().length > 0;
 	const hasAllowedDomains = (process.env.MCP_ALLOWED_EMAIL_DOMAINS ?? '').trim().length > 0;
 	return hasAllowedEmails || hasAllowedDomains ? 'email_or_domain_allowlist' : 'any_authenticated_user';
+}
+
+function getExpectedChatgptMcpMode() {
+	if ((process.env.CHATGPT_MCP_AUTH_MODE ?? '').trim().toLowerCase() !== 'oidc') {
+		return 'disabled';
+	}
+	return (process.env.CHATGPT_MCP_ALLOWED_EMAILS ?? '').trim().length > 0
+		? 'oidc_email_allowlist'
+		: 'oidc_deny_all';
 }
 
 function sleep(ms) {
@@ -90,13 +108,21 @@ async function deployWithRetry(options) {
 async function healthCheck(deployUrl) {
 	if (!deployUrl) throw new Error('missing --deploy-url');
 	const expectedMcpAccessMode = getExpectedMcpAccessMode();
+	const expectedChatgptMcpMode = getExpectedChatgptMcpMode();
 
 	for (let attempt = 1; attempt <= 6; attempt += 1) {
 		const result = await runCommand('curl', ['--silent', '--show-error', '--fail', `${deployUrl}/healthz`]);
 		if (result.code === 0) {
 			const payload = JSON.parse(result.output);
-			if (payload.ok && payload.auth_configured && payload.mcp_access_mode === expectedMcpAccessMode) {
-				console.log(`Health check passed with auth_configured=true and mcp_access_mode=${expectedMcpAccessMode}`);
+			if (
+				payload.ok &&
+				payload.auth_configured &&
+				payload.mcp_access_mode === expectedMcpAccessMode &&
+				payload.chatgpt_mcp_auth_mode === expectedChatgptMcpMode
+			) {
+				console.log(
+					`Health check passed with auth_configured=true, mcp_access_mode=${expectedMcpAccessMode}, chatgpt_mcp_auth_mode=${expectedChatgptMcpMode}`,
+				);
 				return;
 			}
 			console.log(JSON.stringify(payload));
@@ -107,7 +133,9 @@ async function healthCheck(deployUrl) {
 		}
 	}
 
-	throw new Error(`Health check timed out or did not reach expected MCP access mode (${expectedMcpAccessMode}).`);
+	throw new Error(
+		`Health check timed out or did not reach expected MCP modes (${expectedMcpAccessMode}, ${expectedChatgptMcpMode}).`,
+	);
 }
 
 async function main() {

@@ -29,7 +29,7 @@
     {
       "id": "repo_read",
       "label": "Repository read",
-      "description": "Repository files, trees, search, issues, PRs, and workflow read APIs.",
+      "description": "Repository files, workflow files, trees, search, issues, PRs, and workflow run read APIs.",
       "tools": [
         "repo_get_file",
         "repo_list_tree",
@@ -47,7 +47,7 @@
     {
       "id": "repo_write",
       "label": "Repository write",
-      "description": "Branch creation, file edits, PR creation and merge, comments, and workflow dispatch.",
+      "description": "Branch creation, file edits including .github/workflows, PR creation and merge, comments, and workflow dispatch.",
       "tools": [
         "repo_create_branch",
         "repo_update_file",
@@ -103,7 +103,7 @@
     {
       "id": "implementation_with_workflow",
       "label": "Implementation with workflow dispatch",
-      "description": "Implementation plus allowlisted workflow dispatch and queue tracking.",
+      "description": "Implementation, workflow-file edits, allowlisted workflow dispatch, and queue tracking.",
       "capabilities": ["read", "write", "workflow", "workspace", "queue"],
       "groupIds": ["overview", "workspace", "repo_read", "repo_write", "queue"]
     },

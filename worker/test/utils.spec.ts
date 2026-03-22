@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeBase64Text, normalizeWorkflowInputs } from '../src/utils';
+import { decodeBase64Text, getAllowedWorkflowsForRepo, normalizeWorkflowInputs } from '../src/utils';
 
 describe('normalizeWorkflowInputs', () => {
 	it('encodes instructions_json into instructions_b64', () => {
@@ -51,5 +51,21 @@ describe('normalizeWorkflowInputs', () => {
 			merge_method: 'squash',
 			delete_branch: true,
 		});
+	});
+
+	it('uses repo-specific workflow allowlists when configured', () => {
+		const env = {
+			GITHUB_ALLOWED_WORKFLOWS: 'agent-run.yml,pr-merge.yml',
+			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: JSON.stringify({
+				'iusung111/OpenGPT': ['agent-run.yml', 'pr-merge.yml'],
+				'iusung111/opengpt-github-mcp-worker': ['cloudflare-self-deploy.yml'],
+			}),
+		};
+
+		expect(getAllowedWorkflowsForRepo(env, 'iusung111/OpenGPT')).toEqual(['agent-run.yml', 'pr-merge.yml']);
+		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker')).toEqual([
+			'cloudflare-self-deploy.yml',
+		]);
+		expect(getAllowedWorkflowsForRepo(env, 'iusung111/other')).toEqual(['agent-run.yml', 'pr-merge.yml']);
 	});
 });

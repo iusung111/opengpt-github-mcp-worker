@@ -1,16 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { buildLocalWorkerdEnv } from './local-workerd-paths.mjs';
 
-const vitestArgs = [
-	'vitest',
-	'run',
-	'worker/test/runtime-http.spec.ts',
-	'worker/test/runtime-mcp.spec.ts',
-	'worker/test/queue-webhook.spec.ts',
-	'--sequence.concurrent=false',
-];
-
-const result = spawnSync('npx', vitestArgs, {
+const result = spawnSync('npx', ['wrangler', 'types', 'worker/types/worker-configuration.d.ts'], {
 	env: buildLocalWorkerdEnv(),
 	stdio: 'inherit',
 	shell: true,

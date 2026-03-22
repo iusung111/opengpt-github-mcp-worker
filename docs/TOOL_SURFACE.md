@@ -28,7 +28,7 @@ Workspace discovery, registration, and active repo context management.
 
 ### Repository read
 
-Repository files, trees, search, issues, PRs, and workflow read APIs.
+Repository files, workflow files, trees, search, issues, PRs, and workflow run read APIs.
 
 - `repo_get_file`
 - `repo_list_tree`
@@ -44,7 +44,7 @@ Repository files, trees, search, issues, PRs, and workflow read APIs.
 
 ### Repository write
 
-Branch creation, file edits, PR creation and merge, comments, and workflow dispatch.
+Branch creation, file edits including `.github/workflows`, PR creation and merge, comments, and workflow dispatch.
 
 - `repo_create_branch`
 - `repo_update_file`
@@ -95,7 +95,7 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 ### Implementation with workflow dispatch
 
 - preset id: `implementation_with_workflow`
-- description: Implementation plus allowlisted workflow dispatch and queue tracking.
+- description: Implementation, workflow-file edits, allowlisted workflow dispatch, and queue tracking.
 - capabilities: `read`, `write`, `workflow`, `workspace`, `queue`
 - group ids: `overview`, `workspace`, `repo_read`, `repo_write`, `queue`
 
@@ -119,4 +119,3 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - description: Inspect self-host state, sync secrets, and promote mirror/live environments.
 - capabilities: `read`, `workflow`, `self_host`
 - group ids: `overview`, `workspace`, `repo_read`, `repo_write`, `queue`
-

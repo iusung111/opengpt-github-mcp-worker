@@ -1,6 +1,7 @@
 import { env, SELF } from 'cloudflare:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { signChatgptOidcToken } from './jwt-helpers';
 
 export async function webhookSignature(body: string): Promise<string> {
 	const key = await crypto.subtle.importKey(
@@ -30,6 +31,42 @@ export async function createMcpClient(): Promise<Client> {
 		},
 	});
 	const client = new Client({ name: 'worker-test-client', version: '1.0.0' });
+	await client.connect(transport);
+	return client;
+}
+
+export async function createChatgptMcpClient(email = 'developer@example.com'): Promise<Client> {
+	const token = await signChatgptOidcToken({ email });
+	const transport = new StreamableHTTPClientTransport(new URL('https://example.com/chatgpt/mcp'), {
+		fetch: async (input, init) => {
+			const url = input instanceof Request ? input.url : String(input);
+			const headers = new Headers(init?.headers);
+			headers.set('authorization', `Bearer ${token}`);
+			return SELF.fetch(url, {
+				...init,
+				headers,
+			});
+		},
+	});
+	const client = new Client({ name: 'worker-chatgpt-test-client', version: '1.0.0' });
+	await client.connect(transport);
+	return client;
+}
+
+export async function createDirectMcpBearerClient(email = 'developer@example.com'): Promise<Client> {
+	const token = await signChatgptOidcToken({ email });
+	const transport = new StreamableHTTPClientTransport(new URL('https://example.com/mcp'), {
+		fetch: async (input, init) => {
+			const url = input instanceof Request ? input.url : String(input);
+			const headers = new Headers(init?.headers);
+			headers.set('authorization', `Bearer ${token}`);
+			return SELF.fetch(url, {
+				...init,
+				headers,
+			});
+		},
+	});
+	const client = new Client({ name: 'worker-direct-bearer-test-client', version: '1.0.0' });
 	await client.connect(transport);
 	return client;
 }

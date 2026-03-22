@@ -44,6 +44,8 @@ export function errorCodeFor(error: unknown, fallback: string): string {
 	if (message.includes('Pull Request is not mergeable')) return 'pr_not_mergeable';
 	if (message.includes('repository not allowlisted')) return 'repo_not_allowlisted';
 	if (message.includes('workflow not allowlisted')) return 'workflow_not_allowlisted';
+	if (message.includes('workflow not found')) return 'workflow_not_found';
+	if (message.includes('workflow does not support workflow_dispatch')) return 'workflow_missing_dispatch_trigger';
 	if (message.includes('unsafe path')) return 'unsafe_path';
 	if (message.includes('direct write to') && message.includes('forbidden')) return 'default_branch_forbidden';
 	return fallback;
@@ -103,6 +105,39 @@ export function getMcpAccessMode(env: AppEnv): 'disabled' | 'any_authenticated_u
 	return 'any_authenticated_user';
 }
 
+export function getChatgptMcpAuthMode(env: AppEnv): 'disabled' | 'oidc_deny_all' | 'oidc_email_allowlist' {
+	if (env.CHATGPT_MCP_AUTH_MODE?.trim().toLowerCase() !== 'oidc') {
+		return 'disabled';
+	}
+	if (getChatgptMcpAllowedEmails(env).length === 0) {
+		return 'oidc_deny_all';
+	}
+	return 'oidc_email_allowlist';
+}
+
+export function getChatgptMcpIssuer(env: AppEnv): string | null {
+	const value = env.CHATGPT_MCP_ISSUER?.trim();
+	return value ? value : null;
+}
+
+export function getChatgptMcpAudiences(env: AppEnv): string[] {
+	return parseCsv(env.CHATGPT_MCP_AUDIENCE);
+}
+
+export function getChatgptMcpJwksUrl(env: AppEnv): string | null {
+	const value = env.CHATGPT_MCP_JWKS_URL?.trim();
+	return value ? value : null;
+}
+
+export function getChatgptMcpJwksJson(env: AppEnv): string | null {
+	const value = env.CHATGPT_MCP_JWKS_JSON?.trim();
+	return value ? value : null;
+}
+
+export function getChatgptMcpAllowedEmails(env: AppEnv): string[] {
+	return parseCsvLower(env.CHATGPT_MCP_ALLOWED_EMAILS);
+}
+
 export function repoAllowed(env: AppEnv, repo: string): boolean {
 	const allowed = getAllowedRepos(env);
 	return allowed.length === 0 || allowed.includes(repo);
@@ -110,6 +145,36 @@ export function repoAllowed(env: AppEnv, repo: string): boolean {
 
 export function getAllowedWorkflows(env: AppEnv): string[] {
 	return parseCsv(env.GITHUB_ALLOWED_WORKFLOWS);
+}
+
+export function getAllowedWorkflowsByRepo(env: AppEnv): Record<string, string[]> {
+	const raw = env.GITHUB_ALLOWED_WORKFLOWS_BY_REPO?.trim();
+	if (!raw) {
+		return {};
+	}
+	try {
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		const normalized: Record<string, string[]> = {};
+		for (const [repoKey, workflows] of Object.entries(parsed)) {
+			if (!Array.isArray(workflows)) {
+				continue;
+			}
+			normalized[repoKey] = workflows
+				.map((item) => (typeof item === 'string' ? item.trim() : ''))
+				.filter(Boolean);
+		}
+		return normalized;
+	} catch {
+		return {};
+	}
+}
+
+export function getAllowedWorkflowsForRepo(env: AppEnv, repo: string): string[] {
+	const byRepo = getAllowedWorkflowsByRepo(env);
+	if (repo in byRepo) {
+		return byRepo[repo] ?? [];
+	}
+	return getAllowedWorkflows(env);
 }
 
 export function getBranchPrefix(env: AppEnv): string {
@@ -177,8 +242,8 @@ export function ensureNotDefaultBranch(env: AppEnv, branch: string): void {
 	}
 }
 
-export function ensureWorkflowAllowed(env: AppEnv, workflowId: string): void {
-	const allowed = getAllowedWorkflows(env);
+export function ensureWorkflowAllowed(env: AppEnv, repo: string, workflowId: string): void {
+	const allowed = getAllowedWorkflowsForRepo(env, repo);
 	if (allowed.length > 0 && !allowed.includes(workflowId)) {
 		throw new Error(`workflow not allowlisted: ${workflowId}`);
 	}

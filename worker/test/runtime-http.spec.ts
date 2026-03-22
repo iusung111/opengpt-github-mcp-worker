@@ -17,6 +17,9 @@ describe('runtime http surface', () => {
 			runtime: 'cloudflare-workers',
 			mcp_access_auth_required: true,
 			mcp_access_mode: 'any_authenticated_user',
+			direct_mcp_auth_mode: 'any_authenticated_user',
+			chatgpt_mcp_auth_mode: 'oidc_email_allowlist',
+			chatgpt_allowed_emails_count: 1,
 		});
 	});
 
@@ -27,6 +30,16 @@ describe('runtime http surface', () => {
 			ok: false,
 			code: 'unauthorized',
 			error: 'missing Cloudflare Access identity headers',
+		});
+	});
+
+	it('rejects unauthenticated ChatGPT MCP requests when bearer auth is required', async () => {
+		const response = await SELF.fetch('https://example.com/chatgpt/mcp');
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({
+			ok: true,
+			route: '/chatgpt/mcp',
+			auth_type: 'oauth',
 		});
 	});
 

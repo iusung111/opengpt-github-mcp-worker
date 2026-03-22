@@ -3,8 +3,12 @@ import { githubAuthConfigured, githubGet } from './github';
 import { buildMcpServer } from './mcp-tools';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import {
+	getChatgptMcpAllowedEmails,
+	getChatgptMcpAudiences,
+	getChatgptMcpAuthMode,
 	getAllowedRepos,
 	getAllowedWorkflows,
+	getAllowedWorkflowsByRepo,
 	getAuditRetentionCount,
 	getBranchPrefix,
 	getDeliveryRetentionCount,
@@ -21,8 +25,9 @@ import {
 	ok,
 	repoAllowed,
 	jsonResponse,
+	diagnosticLog,
 } from './utils';
-import { authorizeMcpRequest, queueRequestAuthorized } from './auth';
+import { authorizeChatgptMcpRequest, authorizeDirectMcpRequest, queueRequestAuthorized } from './auth';
 import { verifyWebhookSignature } from './queue-helpers';
 
 export async function handleWebhook(request: Request, env: AppEnv): Promise<Response> {
@@ -93,6 +98,7 @@ export function handleHealth(env: AppEnv): Response {
 		auth_configured: githubAuthConfigured(env),
 		allowed_repos: getAllowedRepos(env),
 		allowed_workflows: getAllowedWorkflows(env),
+		allowed_workflows_by_repo: getAllowedWorkflowsByRepo(env),
 		branch_prefix: getBranchPrefix(env),
 		require_webhook_secret: String(env.REQUIRE_WEBHOOK_SECRET) === 'true',
 		working_stale_after_ms: getWorkingStaleAfterMs(env),
@@ -104,6 +110,25 @@ export function handleHealth(env: AppEnv): Response {
 		mcp_access_mode: getMcpAccessMode(env),
 		mcp_allowed_emails_count: getMcpAllowedEmails(env).length,
 		mcp_allowed_email_domains_count: getMcpAllowedEmailDomains(env).length,
+		direct_mcp_auth_required: getMcpRequireAccessAuth(env),
+		direct_mcp_auth_mode: getMcpAccessMode(env),
+		chatgpt_mcp_auth_mode: getChatgptMcpAuthMode(env),
+		chatgpt_allowed_emails_count: getChatgptMcpAllowedEmails(env).length,
+	});
+}
+
+export function handleOAuthProtectedResourceMetadata(request: Request, env: AppEnv): Response {
+	const url = new URL(request.url);
+	const origin = `${url.protocol}//${url.host}`;
+	const issuer = env.CHATGPT_MCP_ISSUER?.trim() || null;
+	const audiences = getChatgptMcpAudiences(env);
+	return jsonResponse({
+		resource: `${origin}/chatgpt/mcp`,
+		authorization_servers: issuer ? [issuer.replace(/\/$/, '')] : [],
+		scopes_supported: ['openid', 'profile', 'email', 'offline_access'],
+		bearer_methods_supported: ['header'],
+		resource_documentation: `${origin}/docs/CHATGPT_MCP.md`,
+		audiences,
 	});
 }
 
@@ -128,15 +153,145 @@ export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> 
 	});
 }
 
-export function handleMcpRequest(
+export function getChatgptMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
+	return createMcpHandler(buildMcpServer(env) as never, {
+		route: '/chatgpt/mcp',
+		enableJsonResponse: true,
+	});
+}
+
+export function chatgptMcpBootstrapResponse(request: Request, env: AppEnv): Response {
+	const headers = new Headers({
+		'access-control-allow-origin': '*',
+		'access-control-allow-headers': 'Content-Type, Accept, Authorization, mcp-session-id, MCP-Protocol-Version',
+		'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+		'access-control-max-age': '86400',
+	});
+	if (request.method === 'OPTIONS') {
+		return new Response(null, { status: 204, headers });
+	}
+	if (request.method === 'HEAD') {
+		return new Response(null, { status: 200, headers });
+	}
+	headers.set('content-type', 'application/json; charset=utf-8');
+	return new Response(
+		JSON.stringify({
+			ok: true,
+			service: 'opengpt-github-mcp-worker',
+			route: '/chatgpt/mcp',
+			auth_type: 'oauth',
+			oauth: {
+				issuer: env.CHATGPT_MCP_ISSUER ?? null,
+				authorization_url: env.CHATGPT_MCP_ISSUER ? new URL('/authorize', env.CHATGPT_MCP_ISSUER).toString() : null,
+				token_url: env.CHATGPT_MCP_ISSUER ? new URL('/oauth/token', env.CHATGPT_MCP_ISSUER).toString() : null,
+			},
+		}),
+		{ status: 200, headers },
+	);
+}
+
+function ensureChatgptMcpAcceptHeader(request: Request): Request {
+	const accept = request.headers.get('accept') ?? '';
+	const hasJson = accept.includes('application/json');
+	const hasEventStream = accept.includes('text/event-stream');
+	if (hasJson && hasEventStream) {
+		return request;
+	}
+	const headers = new Headers(request.headers);
+	headers.set('accept', 'application/json, text/event-stream');
+	return new Request(request, { headers });
+}
+
+async function getChatgptRpcMethod(request: Request): Promise<string | null> {
+	if (request.method !== 'POST') {
+		return null;
+	}
+	const contentType = request.headers.get('content-type') ?? '';
+	if (!contentType.includes('application/json')) {
+		return null;
+	}
+	try {
+		const payload = (await request.clone().json()) as { method?: string };
+		return typeof payload.method === 'string' ? payload.method : null;
+	} catch {
+		return null;
+	}
+}
+
+export async function handleMcpRequest(
 	request: Request,
 	env: AppEnv,
 	ctx: ExecutionContext,
-): Response | Promise<Response> {
-	const auth = authorizeMcpRequest(request, env);
+): Promise<Response> {
+	const auth = await authorizeDirectMcpRequest(request, env);
 	if (!auth.ok) {
 		return jsonResponse(fail(auth.code ?? 'unauthorized', auth.error ?? 'unauthorized'), auth.status ?? 401);
 	}
 	const handler = getMcpHandler(env);
 	return handler(request, env, ctx);
+}
+
+export async function handleChatgptMcpRequest(
+	request: Request,
+	env: AppEnv,
+	ctx: ExecutionContext,
+): Promise<Response> {
+	const hasBearerToken = Boolean(request.headers.get('authorization')?.trim().startsWith('Bearer '));
+	const accept = request.headers.get('accept') ?? '';
+	const rpcMethod = await getChatgptRpcMethod(request);
+
+	// ChatGPT validates the MCP URL before it can complete OAuth setup.
+	// Serve a simple bootstrap response for unauthenticated probes instead of
+	// forcing SSE negotiation or bearer auth at URL-entry time.
+	if ((request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') && !hasBearerToken) {
+		diagnosticLog('chatgpt_mcp_bootstrap', {
+			method: request.method,
+			accept,
+			has_bearer_token: false,
+		});
+		return chatgptMcpBootstrapResponse(request, env);
+	}
+
+	// ChatGPT completes MCP session bootstrap before tool execution.
+	// Only actual tool invocation requires bearer auth; initialize/list phases
+	// should stay reachable after OAuth succeeds so ChatGPT can complete setup.
+	if (!hasBearerToken && rpcMethod !== 'tools/call') {
+		diagnosticLog('chatgpt_mcp_public_rpc', {
+			method: request.method,
+			accept,
+			rpc_method: rpcMethod,
+			has_bearer_token: false,
+		});
+		const handler = getChatgptMcpHandler(env);
+		return handler(ensureChatgptMcpAcceptHeader(request), env, ctx);
+	}
+
+	const auth = await authorizeChatgptMcpRequest(request, env);
+	if (!auth.ok) {
+		diagnosticLog('chatgpt_mcp_auth_failed', {
+			method: request.method,
+			accept,
+			rpc_method: rpcMethod,
+			has_bearer_token: hasBearerToken,
+			status: auth.status ?? 401,
+			code: auth.code ?? 'unauthorized',
+			error: auth.error ?? 'unauthorized',
+		});
+		const response = jsonResponse(fail(auth.code ?? 'unauthorized', auth.error ?? 'unauthorized'), auth.status ?? 401);
+		if ((auth.status ?? 401) === 401) {
+			const url = new URL(request.url);
+			const resourceMetadataUrl = `${url.protocol}//${url.host}/.well-known/oauth-protected-resource/chatgpt/mcp`;
+			response.headers.set('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
+		}
+		return response;
+	}
+	diagnosticLog('chatgpt_mcp_auth_ok', {
+		method: request.method,
+		accept,
+		rpc_method: rpcMethod,
+		has_bearer_token: hasBearerToken,
+		email: auth.email ?? null,
+	});
+	const handler = getChatgptMcpHandler(env);
+	return handler(ensureChatgptMcpAcceptHeader(request), env, ctx);
 }

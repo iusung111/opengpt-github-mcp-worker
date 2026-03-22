@@ -1,6 +1,8 @@
-# MCP Access Deployment
+# Direct MCP Access Deployment
 
-`/mcp` is intended to be exposed through Cloudflare Access in deployed environments.
+`/mcp` is the direct MCP endpoint for Cloudflare Access protected clients.
+
+If you are configuring a ChatGPT custom connector, use [`CHATGPT_MCP.md`](/d:/VScode/opengpt-github-mcp-worker/docs/CHATGPT_MCP.md) instead. ChatGPT should not be pointed at the Access-only `/mcp` route.
 
 ## Recommended Production Setup
 

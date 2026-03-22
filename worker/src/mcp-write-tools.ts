@@ -64,7 +64,8 @@ export function registerWriteTools(
 	server.registerTool(
 		'repo_update_file',
 		{
-			description: 'Update a file on an agent branch in an allowlisted repository.',
+			description:
+				'Update a file on an agent branch in an allowlisted repository, including workflow files under .github/workflows/.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),

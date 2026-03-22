@@ -2,7 +2,16 @@ import { githubAuthConfigured, githubGet } from './github';
 import { JobQueueDurableObject } from './queue';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import { fail, jsonResponse } from './utils';
-import { handleGitHubAppInstallation, handleHealth, handleMcpRequest, handleQueueApi, handleWebhook } from './http';
+import {
+	chatgptMcpBootstrapResponse,
+	handleChatgptMcpRequest,
+	handleGitHubAppInstallation,
+	handleHealth,
+	handleMcpRequest,
+	handleOAuthProtectedResourceMetadata,
+	handleQueueApi,
+	handleWebhook,
+} from './http';
 
 export { JobQueueDurableObject };
 
@@ -19,6 +28,14 @@ export default {
 			return handleGitHubAppInstallation(appEnv);
 		}
 
+		if (
+			request.method === 'GET' &&
+			(url.pathname === '/.well-known/oauth-protected-resource' ||
+				url.pathname === '/.well-known/oauth-protected-resource/chatgpt/mcp')
+		) {
+			return handleOAuthProtectedResourceMetadata(request, appEnv);
+		}
+
 		if (url.pathname === '/webhooks/github') {
 			return handleWebhook(request, appEnv);
 		}
@@ -29,6 +46,14 @@ export default {
 
 		if (url.pathname === '/mcp') {
 			return handleMcpRequest(request, appEnv, ctx);
+		}
+
+		if (url.pathname === '/chatgpt/mcp') {
+			const hasBearerToken = Boolean(request.headers.get('authorization')?.trim().startsWith('Bearer '));
+			if ((request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') && !hasBearerToken) {
+				return chatgptMcpBootstrapResponse(request, appEnv);
+			}
+			return handleChatgptMcpRequest(request, appEnv, ctx);
 		}
 
 		return jsonResponse(fail('not_found', 'not found'), 404);
