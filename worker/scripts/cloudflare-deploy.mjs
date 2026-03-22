@@ -22,6 +22,11 @@ function parseArgs(argv) {
 function getMcpVarOverrides() {
 	const overrides = [];
 	for (const key of [
+		'SELF_CURRENT_URL',
+		'SELF_DEPLOY_ENV',
+		'SELF_RELEASE_COMMIT_SHA',
+		'MIRROR_GITHUB_APP_ID',
+		'MIRROR_GITHUB_APP_INSTALLATION_ID',
 		'MCP_ALLOWED_EMAILS',
 		'MCP_ALLOWED_EMAIL_DOMAINS',
 		'CHATGPT_MCP_AUTH_MODE',
@@ -39,13 +44,37 @@ function getMcpVarOverrides() {
 	return overrides;
 }
 
+function getSelfVarOverrides(options) {
+	const overrides = [];
+	const normalizedDeployUrl = (options.deployUrl ?? '').trim().replace(/\/$/, '');
+	const deployEnvironment = options.deployTarget === 'mirror' ? 'mirror' : 'live';
+	const releaseCommitSha = (process.env.EXPECTED_COMMIT_SHA ?? process.env.GITHUB_SHA ?? '').trim();
+	if (normalizedDeployUrl) {
+		overrides.push('--var', `SELF_CURRENT_URL:${normalizedDeployUrl}`);
+	}
+	overrides.push('--var', `SELF_DEPLOY_ENV:${deployEnvironment}`);
+	if (releaseCommitSha) {
+		overrides.push('--var', `SELF_RELEASE_COMMIT_SHA:${releaseCommitSha}`);
+	}
+	return overrides;
+}
+
 function getExpectedMcpAccessMode() {
+	if ((process.env.MCP_REQUIRE_ACCESS_AUTH ?? '').trim().toLowerCase() === 'false') {
+		return 'disabled';
+	}
+	if (process.env.MCP_REQUIRE_ACCESS_AUTH === undefined) {
+		return null;
+	}
 	const hasAllowedEmails = (process.env.MCP_ALLOWED_EMAILS ?? '').trim().length > 0;
 	const hasAllowedDomains = (process.env.MCP_ALLOWED_EMAIL_DOMAINS ?? '').trim().length > 0;
 	return hasAllowedEmails || hasAllowedDomains ? 'email_or_domain_allowlist' : 'any_authenticated_user';
 }
 
 function getExpectedChatgptMcpMode() {
+	if (process.env.CHATGPT_MCP_AUTH_MODE === undefined) {
+		return null;
+	}
 	if ((process.env.CHATGPT_MCP_AUTH_MODE ?? '').trim().toLowerCase() !== 'oidc') {
 		return 'disabled';
 	}
@@ -83,6 +112,7 @@ function runCommand(command, args) {
 async function deployWithRetry(options) {
 	const args = ['wrangler', 'deploy'];
 	if (options.deployTarget === 'mirror') args.push('--env', 'mirror');
+	args.push(...getSelfVarOverrides(options));
 	args.push(...getMcpVarOverrides());
 
 	let delaySeconds = options.initialDelaySeconds;
@@ -109,6 +139,8 @@ async function healthCheck(deployUrl) {
 	if (!deployUrl) throw new Error('missing --deploy-url');
 	const expectedMcpAccessMode = getExpectedMcpAccessMode();
 	const expectedChatgptMcpMode = getExpectedChatgptMcpMode();
+	const expectedDeployEnvironment = (process.env.SELF_DEPLOY_ENV ?? '').trim().toLowerCase() || null;
+	const expectedReleaseCommitSha = (process.env.EXPECTED_COMMIT_SHA ?? process.env.GITHUB_SHA ?? '').trim() || null;
 
 	for (let attempt = 1; attempt <= 6; attempt += 1) {
 		const result = await runCommand('curl', ['--silent', '--show-error', '--fail', `${deployUrl}/healthz`]);
@@ -117,11 +149,13 @@ async function healthCheck(deployUrl) {
 			if (
 				payload.ok &&
 				payload.auth_configured &&
-				payload.mcp_access_mode === expectedMcpAccessMode &&
-				payload.chatgpt_mcp_auth_mode === expectedChatgptMcpMode
+				(expectedMcpAccessMode === null || payload.mcp_access_mode === expectedMcpAccessMode) &&
+				(expectedChatgptMcpMode === null || payload.chatgpt_mcp_auth_mode === expectedChatgptMcpMode) &&
+				(!expectedDeployEnvironment || payload.deploy_environment === expectedDeployEnvironment) &&
+				(!expectedReleaseCommitSha || payload.release_commit_sha === expectedReleaseCommitSha)
 			) {
 				console.log(
-					`Health check passed with auth_configured=true, mcp_access_mode=${expectedMcpAccessMode}, chatgpt_mcp_auth_mode=${expectedChatgptMcpMode}`,
+					`Health check passed with auth_configured=true, mcp_access_mode=${expectedMcpAccessMode}, chatgpt_mcp_auth_mode=${expectedChatgptMcpMode}, deploy_environment=${payload.deploy_environment}, release_commit_sha=${payload.release_commit_sha ?? 'null'}`,
 				);
 				return;
 			}
@@ -134,7 +168,7 @@ async function healthCheck(deployUrl) {
 	}
 
 	throw new Error(
-		`Health check timed out or did not reach expected MCP modes (${expectedMcpAccessMode}, ${expectedChatgptMcpMode}).`,
+		`Health check timed out or did not reach expected MCP modes (${expectedMcpAccessMode ?? 'skip'}, ${expectedChatgptMcpMode ?? 'skip'}) and deploy identity (${expectedDeployEnvironment ?? 'n/a'}, ${expectedReleaseCommitSha ?? 'n/a'}).`,
 	);
 }
 

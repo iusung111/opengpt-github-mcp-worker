@@ -49,6 +49,8 @@ jobs:
       EXPECTED_COMMIT_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.expected_commit_sha || '' }}
       MCP_ALLOWED_EMAILS: ${{ secrets.MCP_ALLOWED_EMAILS || vars.MCP_ALLOWED_EMAILS || '' }}
       MCP_ALLOWED_EMAIL_DOMAINS: ${{ secrets.MCP_ALLOWED_EMAIL_DOMAINS || vars.MCP_ALLOWED_EMAIL_DOMAINS || '' }}
+      MIRROR_GITHUB_APP_ID: ${{ secrets.MIRROR_GITHUB_APP_ID || vars.MIRROR_GITHUB_APP_ID || '' }}
+      MIRROR_GITHUB_APP_INSTALLATION_ID: ${{ secrets.MIRROR_GITHUB_APP_INSTALLATION_ID || vars.MIRROR_GITHUB_APP_INSTALLATION_ID || '' }}
       SELF_LIVE_URL: https://opengpt-github-mcp-worker.iusung111.workers.dev
       SELF_MIRROR_URL: https://opengpt-github-mcp-worker-mirror.iusung111.workers.dev
     steps:
@@ -85,6 +87,14 @@ jobs:
             echo "Deploying with Access-only MCP mode."
           fi
 
+      - name: Report GitHub credential split mode
+        run: |
+          if [ -n "${MIRROR_GITHUB_APP_ID}" ] && [ -n "${MIRROR_GITHUB_APP_INSTALLATION_ID}" ]; then
+            echo "Mirror-specific GitHub App ids are configured."
+          else
+            echo "Mirror deploy will fall back to default GitHub App ids."
+          fi
+
       - name: Verify Cloudflare API token
         run: |
           npx wrangler whoami
@@ -103,6 +113,20 @@ jobs:
             echo "Missing required GitHub Actions secret: WEBHOOK_SECRET"
             exit 1
           fi
+
+      - name: Sync mirror GitHub App private key to mirror Worker
+        if: ${{ env.SYNC_SECRETS == 'true' && env.DEPLOY_TARGET == 'mirror' }}
+        continue-on-error: true
+        run: |
+          if [ -n "${MIRROR_APP_PRIVATE_KEY_PEM}" ]; then
+            node worker/scripts/cloudflare-secret-put.mjs --secret-name MIRROR_GITHUB_APP_PRIVATE_KEY_PEM --secret-value "${MIRROR_APP_PRIVATE_KEY_PEM}" --target-arg "--env" --target-arg "mirror"
+          else
+            echo "Skipping mirror-specific GitHub App private key sync because the repository secret is not set."
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MIRROR_APP_PRIVATE_KEY_PEM: ${{ secrets.MIRROR_GITHUB_APP_PRIVATE_KEY_PEM }}
 
       - name: Sync GitHub App private key to target Worker
         if: ${{ env.SYNC_SECRETS == 'true' }}
@@ -166,8 +190,10 @@ jobs:
       - name: Verify mirror health before live promotion
         if: ${{ env.DEPLOY_TARGET == 'live' && env.VERIFY_MIRROR_FIRST == 'true' }}
         run: |
-          echo "Checking mirror health: ${SELF_MIRROR_URL}/healthz"
-          curl --fail --show-error "${SELF_MIRROR_URL}/healthz"
+          echo "Checking mirror health identity: ${SELF_MIRROR_URL}/healthz"
+          HEALTH_JSON=$(curl --fail --show-error --silent "${SELF_MIRROR_URL}/healthz")
+          echo "${HEALTH_JSON}"
+          node -e "const payload = JSON.parse(process.argv[1]); const expectedCommit = process.argv[2]; if (!payload.ok) throw new Error('mirror health reported ok=false'); if (payload.deploy_environment !== 'mirror') throw new Error('mirror health deploy_environment mismatch'); if (expectedCommit && payload.release_commit_sha !== expectedCommit) throw new Error(\`mirror release_commit_sha mismatch: expected ${expectedCommit}, got ${payload.release_commit_sha ?? 'null'}\`);" "${HEALTH_JSON}" "${EXPECTED_COMMIT_SHA}"
 
       - name: Deploy to Cloudflare Mirror
         if: ${{ env.DEPLOY_TARGET == 'mirror' }}
@@ -176,6 +202,10 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SELF_DEPLOY_ENV: mirror
+          EXPECTED_COMMIT_SHA: ${{ env.EXPECTED_COMMIT_SHA }}
+          MIRROR_GITHUB_APP_ID: ${{ env.MIRROR_GITHUB_APP_ID }}
+          MIRROR_GITHUB_APP_INSTALLATION_ID: ${{ env.MIRROR_GITHUB_APP_INSTALLATION_ID }}
           MCP_ALLOWED_EMAILS: ${{ env.MCP_ALLOWED_EMAILS }}
           MCP_ALLOWED_EMAIL_DOMAINS: ${{ env.MCP_ALLOWED_EMAIL_DOMAINS }}
 
@@ -186,5 +216,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SELF_DEPLOY_ENV: live
+          EXPECTED_COMMIT_SHA: ${{ env.EXPECTED_COMMIT_SHA }}
           MCP_ALLOWED_EMAILS: ${{ env.MCP_ALLOWED_EMAILS }}
           MCP_ALLOWED_EMAIL_DOMAINS: ${{ env.MCP_ALLOWED_EMAIL_DOMAINS }}
