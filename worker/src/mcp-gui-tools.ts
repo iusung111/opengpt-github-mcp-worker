@@ -99,7 +99,7 @@ export function registerGuiTools(server: McpServer, env: AppEnv, writeAnnotation
 		'gui_capture_run',
 		{
 			description:
-				'Run the deployed /gui/ app in a remote GitHub Actions browser session, upload inline dataset text, and return the analysis summary plus optional image bytes.',
+				'Run the /gui/ app in a remote GitHub Actions browser session, preferring the deployed app URL and falling back to the checked-out static GUI when needed, then return the analysis summary plus optional image bytes.',
 			inputSchema: {
 				file_name: z.string(),
 				file_text: z.string(),
