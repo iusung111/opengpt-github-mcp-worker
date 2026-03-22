@@ -38,13 +38,14 @@ Repository files, workflow files, trees, search, issues, PRs, and workflow run r
 - `issue_get`
 - `pr_get`
 - `pr_get_files`
+- `workflow_allowlist_inspect`
 - `workflow_runs_list`
 - `workflow_run_get`
 - `workflow_artifacts_list`
 
 ### Repository write
 
-Branch creation, file edits including `.github/workflows`, PR creation and merge, comments, and workflow dispatch.
+Branch creation, file edits including .github/workflows, PR creation and merge, comments, and workflow dispatch.
 
 - `repo_create_branch`
 - `repo_update_file`
@@ -119,3 +120,4 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - description: Inspect self-host state, sync secrets, and promote mirror/live environments.
 - capabilities: `read`, `workflow`, `self_host`
 - group ids: `overview`, `workspace`, `repo_read`, `repo_write`, `queue`
+

@@ -39,6 +39,7 @@
         "issue_get",
         "pr_get",
         "pr_get_files",
+        "workflow_allowlist_inspect",
         "workflow_runs_list",
         "workflow_run_get",
         "workflow_artifacts_list"

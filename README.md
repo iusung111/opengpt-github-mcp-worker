@@ -137,6 +137,37 @@ Most important vars:
 
 For local development, copy `.dev.vars.example` to `.dev.vars` and fill real values there.
 
+## Workflow Allowlist Management
+
+Primary repo-managed workflow allowlist entries live in [`worker/config/workflow-allowlist.json`](/d:/VScode/opengpt-github-mcp-worker/worker/config/workflow-allowlist.json).
+
+Example:
+
+```json
+{
+  "iusung111/OpenGPT": ["build-todo-exe.yml"]
+}
+```
+
+Use this file when you want to allow a workflow for a specific repository through a normal repository change instead of editing runtime env config.
+
+Precedence rules:
+
+- `worker/config/workflow-allowlist.json` is loaded first.
+- `GITHUB_ALLOWED_WORKFLOWS_BY_REPO` is merged on top for the same repo and can add more workflow ids.
+- If any repo-specific entries exist after merging, that merged repo-specific list is the effective allowlist for that repo.
+- If no repo-specific entry exists for the repo, `GITHUB_ALLOWED_WORKFLOWS` is used as the fallback allowlist.
+
+Inspection paths:
+
+- MCP: call `workflow_allowlist_inspect(owner, repo)` to see file-based entries, env-based entries, the effective allowlist, and the precedence explanation.
+- HTTP: `GET /healthz` includes `allowed_workflows_file_by_repo`, `allowed_workflows_env_by_repo`, and merged `allowed_workflows_by_repo`.
+
+Malformed config behavior:
+
+- Invalid `GITHUB_ALLOWED_WORKFLOWS_BY_REPO` JSON now returns an actionable error instead of being silently ignored.
+- Invalid allowlist structure must be a JSON object mapping `owner/repo` to arrays of workflow ids.
+
 ## Runtime Endpoints
 
 - Direct MCP: `https://<worker-url>/mcp`
@@ -179,7 +210,7 @@ Phase 1 assumptions:
 - direct writes only on `agent/*`
 - no force-push
 - workflow dispatch limited to the allowlisted workflow set, and the target workflow file must define `on.workflow_dispatch`
-- repo-specific workflow allowlists can override the global workflow allowlist
+- repo-specific workflow allowlists are merged from repo-managed config plus env overrides, then used ahead of the global env fallback
 
 Minimum GitHub App permissions:
 

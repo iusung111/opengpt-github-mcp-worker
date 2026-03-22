@@ -122,6 +122,7 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'review_prepare_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'request_permission_bundle')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'workflow_allowlist_inspect')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'workspace_resolve')).toBe(true);
@@ -241,6 +242,30 @@ describe('runtime mcp surface', () => {
 					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 				requires_confirmation: true,
+			},
+		});
+		await client.close();
+	});
+
+	it('inspects the effective workflow allowlist for a repository', async () => {
+		const client = await createMcpClient();
+		const result = await client.callTool({
+			name: 'workflow_allowlist_inspect',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+			},
+		});
+		const text = 'text' in result.content[0] ? result.content[0].text : '';
+		expect(JSON.parse(text)).toMatchObject({
+			ok: true,
+			data: {
+				repo_key: 'iusung111/OpenGPT',
+				file_based_entries: ['build-todo-exe.yml'],
+				effective_allowlist: expect.arrayContaining(['build-todo-exe.yml']),
+				precedence: {
+					rules: expect.any(Array),
+				},
 			},
 		});
 		await client.close();
