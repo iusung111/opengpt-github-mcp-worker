@@ -12,6 +12,13 @@ Workflow file access goes through the normal repository file tools:
 - use `repo_get_file` to read files such as `.github/workflows/ci.yml`
 - use `repo_update_file` on an agent branch to edit workflow YAML
 - use `workflow_dispatch` only to run an allowlisted workflow, not to edit its file
+- use `workflow_allowlist_inspect` when `workflow_dispatch` fails with `workflow_not_allowlisted`
+
+Workflow allowlist precedence for dispatch:
+
+- `worker/config/workflow-allowlist.json` is the repo-managed source of truth for committed per-repo allowlist entries
+- `GITHUB_ALLOWED_WORKFLOWS_BY_REPO` is merged on top for the same repo
+- `GITHUB_ALLOWED_WORKFLOWS` is only the fallback when no repo-specific entry exists
 
 These two paths are not interchangeable.
 

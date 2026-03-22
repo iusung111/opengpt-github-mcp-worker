@@ -1,5 +1,6 @@
 import { AppEnv, QueueEnvelope, ToolResultEnvelope } from './types';
 import { githubGet as ghGet, githubPost as ghPost, githubPut as ghPut, githubDelete as ghDelete } from './github';
+import workflowAllowlistConfig from './workflow-allowlist-config';
 
 export const githubGet = ghGet;
 export const githubPost = ghPost;
@@ -147,34 +148,109 @@ export function getAllowedWorkflows(env: AppEnv): string[] {
 	return parseCsv(env.GITHUB_ALLOWED_WORKFLOWS);
 }
 
-export function getAllowedWorkflowsByRepo(env: AppEnv): Record<string, string[]> {
+function normalizeWorkflowList(workflows: unknown, context: string): string[] {
+	if (!Array.isArray(workflows)) {
+		throw new Error(`${context} must be an array of workflow ids`);
+	}
+	return workflows
+		.map((item, index) => {
+			if (typeof item !== 'string') {
+				throw new Error(`${context}[${index}] must be a string`);
+			}
+			return item.trim();
+		})
+		.filter(Boolean);
+}
+
+function parseWorkflowAllowlistRecord(
+	value: unknown,
+	sourceLabel: string,
+): Record<string, string[]> {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		throw new Error(`${sourceLabel} must be a JSON object mapping owner/repo to workflow id arrays`);
+	}
+	const normalized: Record<string, string[]> = {};
+	for (const [repoKey, workflows] of Object.entries(value)) {
+		if (!repoKey.trim()) {
+			throw new Error(`${sourceLabel} contains an empty repository key`);
+		}
+		normalized[repoKey] = normalizeWorkflowList(workflows, `${sourceLabel}.${repoKey}`);
+	}
+	return normalized;
+}
+
+function dedupeWorkflows(workflows: string[]): string[] {
+	return Array.from(new Set(workflows));
+}
+
+export function getFileAllowedWorkflowsByRepo(): Record<string, string[]> {
+	return parseWorkflowAllowlistRecord(
+		workflowAllowlistConfig,
+		'worker/config/workflow-allowlist.json',
+	);
+}
+
+export function getEnvAllowedWorkflowsByRepo(env: AppEnv): Record<string, string[]> {
 	const raw = env.GITHUB_ALLOWED_WORKFLOWS_BY_REPO?.trim();
 	if (!raw) {
 		return {};
 	}
+	let parsed: unknown;
 	try {
-		const parsed = JSON.parse(raw) as Record<string, unknown>;
-		const normalized: Record<string, string[]> = {};
-		for (const [repoKey, workflows] of Object.entries(parsed)) {
-			if (!Array.isArray(workflows)) {
-				continue;
-			}
-			normalized[repoKey] = workflows
-				.map((item) => (typeof item === 'string' ? item.trim() : ''))
-				.filter(Boolean);
-		}
-		return normalized;
-	} catch {
-		return {};
+		parsed = JSON.parse(raw);
+	} catch (error) {
+		throw new Error(
+			`GITHUB_ALLOWED_WORKFLOWS_BY_REPO must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
+	return parseWorkflowAllowlistRecord(parsed, 'GITHUB_ALLOWED_WORKFLOWS_BY_REPO');
+}
+
+export function getAllowedWorkflowsByRepo(env: AppEnv): Record<string, string[]> {
+	const fileByRepo = getFileAllowedWorkflowsByRepo();
+	const envByRepo = getEnvAllowedWorkflowsByRepo(env);
+	const merged: Record<string, string[]> = {};
+	for (const repoKey of new Set([...Object.keys(fileByRepo), ...Object.keys(envByRepo)])) {
+		merged[repoKey] = dedupeWorkflows([...(fileByRepo[repoKey] ?? []), ...(envByRepo[repoKey] ?? [])]);
+	}
+	return merged;
 }
 
 export function getAllowedWorkflowsForRepo(env: AppEnv, repo: string): string[] {
-	const byRepo = getAllowedWorkflowsByRepo(env);
-	if (repo in byRepo) {
-		return byRepo[repo] ?? [];
+	const fileByRepo = getFileAllowedWorkflowsByRepo();
+	const envByRepo = getEnvAllowedWorkflowsByRepo(env);
+	const repoSpecific = dedupeWorkflows([...(fileByRepo[repo] ?? []), ...(envByRepo[repo] ?? [])]);
+	if (repoSpecific.length > 0) {
+		return repoSpecific;
 	}
 	return getAllowedWorkflows(env);
+}
+
+export function inspectAllowedWorkflowsForRepo(env: AppEnv, repo: string): Record<string, unknown> {
+	const fileByRepo = getFileAllowedWorkflowsByRepo();
+	const envByRepo = getEnvAllowedWorkflowsByRepo(env);
+	const fileEntries = fileByRepo[repo] ?? [];
+	const envEntries = envByRepo[repo] ?? [];
+	const globalEnvFallback = getAllowedWorkflows(env);
+	const repoSpecificMerged = dedupeWorkflows([...fileEntries, ...envEntries]);
+	const usesRepoSpecific = repoSpecificMerged.length > 0;
+
+	return {
+		repo_key: repo,
+		file_based_entries: fileEntries,
+		env_based_entries: envEntries,
+		env_global_fallback: globalEnvFallback,
+		effective_allowlist: usesRepoSpecific ? repoSpecificMerged : globalEnvFallback,
+		repo_specific_match_found: usesRepoSpecific,
+		precedence: {
+			rules: [
+				'Repo-managed workflow allowlist entries from worker/config/workflow-allowlist.json are loaded first.',
+				'GITHUB_ALLOWED_WORKFLOWS_BY_REPO entries are merged on top for the same repo and can add more workflow ids.',
+				'If any repo-specific entries exist after merging, they are the effective allowlist for that repo.',
+				'If no repo-specific entry exists, GITHUB_ALLOWED_WORKFLOWS is used as the fallback allowlist.',
+			],
+		},
+	};
 }
 
 export function getBranchPrefix(env: AppEnv): string {
@@ -245,7 +321,7 @@ export function ensureNotDefaultBranch(env: AppEnv, branch: string): void {
 export function ensureWorkflowAllowed(env: AppEnv, repo: string, workflowId: string): void {
 	const allowed = getAllowedWorkflowsForRepo(env, repo);
 	if (allowed.length > 0 && !allowed.includes(workflowId)) {
-		throw new Error(`workflow not allowlisted: ${workflowId}`);
+		throw new Error(`workflow not allowlisted for ${repo}: ${workflowId}`);
 	}
 }
 

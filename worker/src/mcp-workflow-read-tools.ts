@@ -2,13 +2,44 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import { AppEnv } from './types';
 import { ToolAnnotations } from './mcp-overview-tools';
-import { ensureRepoAllowed, errorCodeFor, fail, githubGet, ok, toolText } from './utils';
+import {
+	ensureRepoAllowed,
+	errorCodeFor,
+	fail,
+	githubGet,
+	inspectAllowedWorkflowsForRepo,
+	ok,
+	toolText,
+} from './utils';
 
 export function registerWorkflowReadTools(
 	server: McpServer,
 	env: AppEnv,
 	readAnnotations: ToolAnnotations,
 ): void {
+	server.registerTool(
+		'workflow_allowlist_inspect',
+		{
+			description:
+				'Inspect the effective workflow allowlist for a repository, including repo-managed config, env overrides, the merged result, and precedence rules.',
+			inputSchema: {
+				owner: z.string(),
+				repo: z.string(),
+			},
+			annotations: readAnnotations,
+		},
+		async ({ owner, repo }) => {
+			const repoKey = `${owner}/${repo}`;
+			try {
+				ensureRepoAllowed(env, repoKey);
+				const inspection = inspectAllowedWorkflowsForRepo(env, repoKey);
+				return toolText(ok(inspection, readAnnotations));
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'workflow_allowlist_inspect_failed'), error, readAnnotations));
+			}
+		},
+	);
+
 	server.registerTool(
 		'workflow_runs_list',
 		{
