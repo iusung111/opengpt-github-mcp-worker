@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
 	decodeBase64Text,
 	ensureWorkflowAllowed,
+	ensureLiveSelfHostControl,
 	getAllowedWorkflowsByRepo,
 	getEnvAllowedWorkflowsByRepo,
 	getFileAllowedWorkflowsByRepo,
 	getAllowedWorkflowsForRepo,
+	getSelfDeployEnv,
 	inspectAllowedWorkflowsForRepo,
 	normalizeWorkflowInputs,
 } from '../src/utils';
@@ -77,6 +79,7 @@ describe('normalizeWorkflowInputs', () => {
 			'pr-merge.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker')).toEqual([
+			'gui-capture.yml',
 			'cloudflare-self-deploy.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/other')).toEqual(['agent-run.yml', 'pr-merge.yml']);
@@ -85,6 +88,7 @@ describe('normalizeWorkflowInputs', () => {
 	it('loads the repo-managed workflow allowlist config', () => {
 		expect(getFileAllowedWorkflowsByRepo()).toMatchObject({
 			'iusung111/OpenGPT': ['build-todo-exe.yml'],
+			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml'],
 		});
 	});
 
@@ -161,4 +165,26 @@ describe('normalizeWorkflowInputs', () => {
 		expect(() => ensureWorkflowAllowed({}, 'iusung111/OpenGPT', 'not-allowed.yml')).toThrow(
 			/workflow not allowlisted for iusung111\/OpenGPT: not-allowed\.yml/,
 		);
+	});
+
+	it('derives self deploy environment from current url when explicit env is absent', () => {
+		const env = {
+			SELF_CURRENT_URL: 'https://example-live.workers.dev/',
+			SELF_LIVE_URL: 'https://example-live.workers.dev',
+			SELF_MIRROR_URL: 'https://example-mirror.workers.dev',
+		};
+
+		expect(getSelfDeployEnv(env)).toBe('live');
+	});
+
+	it('blocks self-host control actions outside the live worker', () => {
+		expect(() =>
+			ensureLiveSelfHostControl(
+				{
+					SELF_DEPLOY_ENV: 'mirror',
+				},
+				'mirror secret sync',
+			),
+		).toThrow(/requires the live self-host worker/);
+	});
 });

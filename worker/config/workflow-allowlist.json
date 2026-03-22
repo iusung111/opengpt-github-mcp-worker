@@ -1,3 +1,4 @@
 {
-  "iusung111/OpenGPT": ["build-todo-exe.yml"]
+  "iusung111/OpenGPT": ["build-todo-exe.yml"],
+  "iusung111/opengpt-github-mcp-worker": ["gui-capture.yml"]
 }

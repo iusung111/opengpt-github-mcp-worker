@@ -3,7 +3,7 @@
     {
       "id": "overview",
       "label": "Overview and self-host",
-      "description": "Guidance, self-host inspection, deploy controls, and permission planning.",
+      "description": "Guidance, self-host inspection, live-only control-plane actions, and permission planning.",
       "tools": [
         "help",
         "request_permission_bundle",
@@ -55,7 +55,8 @@
         "pr_create",
         "pr_merge",
         "comment_create",
-        "workflow_dispatch"
+        "workflow_dispatch",
+        "gui_capture_run"
       ]
     },
     {
@@ -125,7 +126,7 @@
     {
       "id": "self_maintenance",
       "label": "Self maintenance and deploy",
-      "description": "Inspect self-host state, sync secrets, and promote mirror/live environments.",
+      "description": "Inspect self-host state from any environment, but allow secret sync and live promotion only from the live self-host worker.",
       "capabilities": ["read", "workflow", "self_host"],
       "groupIds": ["overview", "workspace", "repo_read", "repo_write", "queue"]
     }
