@@ -1,7 +1,7 @@
 import { AppEnv } from './types';
 import { getSelfCurrentUrl, getSelfLiveUrl } from './utils';
 
-export interface GuiCaptureAnalysisConfig {
+export interface GuiCaptureLegacyAnalysisConfig {
 	target_column?: string;
 	aggregate?: 'count' | 'sum' | 'average';
 	sort?: 'value_desc' | 'value_asc' | 'label_asc' | 'label_desc';
@@ -10,11 +10,59 @@ export interface GuiCaptureAnalysisConfig {
 	filter_text?: string;
 }
 
+export type GuiScenarioAction =
+	| 'open'
+	| 'click'
+	| 'type'
+	| 'select'
+	| 'hover'
+	| 'scroll'
+	| 'wait_for'
+	| 'assert_visible'
+	| 'assert_text'
+	| 'assert_count'
+	| 'assert_attribute'
+	| 'screenshot';
+
+export interface GuiCaptureScenarioStep {
+	id?: string;
+	action: GuiScenarioAction;
+	selector?: string;
+	value?: string;
+	url?: string;
+	timeout_ms?: number;
+	capture?: 'none' | 'after' | 'before_after';
+	name?: string;
+	expected_text?: string;
+	expected_count?: number;
+	attribute_name?: string;
+	expected_value?: string;
+}
+
+export interface GuiCaptureScenarioConfig {
+	name?: string;
+	viewport?: { width: number; height: number };
+	stop_on_failure?: boolean;
+	steps: GuiCaptureScenarioStep[];
+}
+
+export interface GuiCaptureReportConfig {
+	format?: 'markdown';
+	include_step_images?: boolean;
+	include_console_logs?: boolean;
+	include_network_errors?: boolean;
+}
+
+export type GuiCaptureMode = 'legacy_analysis' | 'html_scenario' | 'url_scenario';
+
 export interface GuiCaptureInstructions {
-	app_url: string;
-	file_name: string;
-	file_text: string;
-	analysis?: GuiCaptureAnalysisConfig;
+	mode: GuiCaptureMode;
+	app_url?: string;
+	file_name?: string;
+	file_text?: string;
+	analysis?: GuiCaptureLegacyAnalysisConfig;
+	scenario?: GuiCaptureScenarioConfig;
+	report?: GuiCaptureReportConfig;
 }
 
 function readUint16LE(bytes: Uint8Array, offset: number): number {
@@ -122,37 +170,106 @@ export function encodeBase64(bytes: Uint8Array): string {
 	return btoa(value);
 }
 
+function normalizeScenarioSteps(steps: GuiCaptureScenarioStep[]): GuiCaptureScenarioStep[] {
+	return steps.map((step, index) => ({
+		...step,
+		id: step.id?.trim() || `step-${index + 1}`,
+		name: step.name?.trim() || `${step.action}-${index + 1}`,
+		capture: step.capture ?? 'after',
+		timeout_ms: step.timeout_ms ?? 10_000,
+	}));
+}
+
+function normalizeReportConfig(report?: GuiCaptureReportConfig): GuiCaptureReportConfig | undefined {
+	if (!report) return undefined;
+	return {
+		format: 'markdown',
+		include_step_images: report.include_step_images !== false,
+		include_console_logs: report.include_console_logs !== false,
+		include_network_errors: report.include_network_errors !== false,
+	};
+}
+
 export function normalizeGuiCaptureInstructions(
 	env: AppEnv,
 	input: {
-		file_name: string;
-		file_text: string;
+		file_name?: string;
+		file_text?: string;
 		app_url?: string;
-		analysis?: GuiCaptureAnalysisConfig;
+		analysis?: GuiCaptureLegacyAnalysisConfig;
+		scenario?: GuiCaptureScenarioConfig;
+		report?: GuiCaptureReportConfig;
 	},
 ): GuiCaptureInstructions {
-	const fileName = input.file_name.trim();
+	const fileName = input.file_name?.trim();
+	const fileText = input.file_text ?? '';
+	const scenario = input.scenario;
+	const report = normalizeReportConfig(input.report);
+	const appUrl = (input.app_url?.trim() || getSelfCurrentUrl(env) || getSelfLiveUrl(env) || '').replace(/\/$/, '');
+
+	if (scenario) {
+		if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) {
+			throw new Error('scenario.steps must contain at least one step');
+		}
+		const normalizedScenario: GuiCaptureScenarioConfig = {
+			name: scenario.name?.trim() || 'gui validation scenario',
+			viewport: scenario.viewport ?? { width: 1440, height: 900 },
+			stop_on_failure: scenario.stop_on_failure !== false,
+			steps: normalizeScenarioSteps(scenario.steps),
+		};
+
+		if (fileName) {
+			if (!/\.html?$/i.test(fileName)) {
+				throw new Error('scenario file_name must end with .html');
+			}
+			if (!fileText.trim()) {
+				throw new Error('scenario file_text must not be empty');
+			}
+			if (fileText.length > 200_000) {
+				throw new Error('scenario file_text exceeds 200,000 characters');
+			}
+			return {
+				mode: 'html_scenario',
+				app_url: appUrl || undefined,
+				file_name: fileName,
+				file_text: fileText,
+				scenario: normalizedScenario,
+				report,
+			};
+		}
+
+		if (!appUrl) {
+			throw new Error('app_url is required for url_scenario mode');
+		}
+		return {
+			mode: 'url_scenario',
+			app_url: appUrl,
+			scenario: normalizedScenario,
+			report,
+		};
+	}
+
 	if (!fileName) {
 		throw new Error('file_name is required');
 	}
 	if (!/\.(csv|tsv|json)$/i.test(fileName)) {
-		throw new Error('file_name must end with .csv, .tsv, or .json');
+		throw new Error('file_name must end with .csv, .tsv, or .json unless scenario mode is used');
 	}
-	const fileText = input.file_text;
 	if (!fileText.trim()) {
 		throw new Error('file_text must not be empty');
 	}
-	if (fileText.length > 50000) {
+	if (fileText.length > 50_000) {
 		throw new Error('file_text exceeds 50,000 characters');
 	}
-	const appUrl = input.app_url?.trim() || getSelfCurrentUrl(env) || getSelfLiveUrl(env);
 	if (!appUrl) {
 		throw new Error('app_url is not configured');
 	}
 	return {
-		app_url: `${appUrl.replace(/\/$/, '')}/gui/`,
+		mode: 'legacy_analysis',
+		app_url: `${appUrl}/gui/`,
 		file_name: fileName,
 		file_text: fileText,
 		analysis: input.analysis,
+		report,
 	};
 }
