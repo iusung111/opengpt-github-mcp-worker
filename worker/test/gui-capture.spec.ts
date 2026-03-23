@@ -76,7 +76,7 @@ function u32(value: number): number[] {
 }
 
 describe('gui capture helpers', () => {
-	it('normalizes gui capture instructions', () => {
+	it('normalizes legacy gui capture instructions', () => {
 		const instructions = normalizeGuiCaptureInstructions(
 			{
 				SELF_CURRENT_URL: 'https://worker.example.com',
@@ -86,31 +86,35 @@ describe('gui capture helpers', () => {
 				file_text: 'name,value\nalpha,1',
 			},
 		);
+		expect(instructions.mode).toBe('legacy_analysis');
 		expect(instructions.app_url).toBe('https://worker.example.com/gui/');
 		expect(instructions.file_name).toBe('sample.csv');
 	});
 
-	it('rejects unsupported file names', () => {
-		expect(() =>
-			normalizeGuiCaptureInstructions(
-				{
-					SELF_CURRENT_URL: 'https://worker.example.com',
+	it('normalizes html scenario instructions', () => {
+		const instructions = normalizeGuiCaptureInstructions(
+			{
+				SELF_CURRENT_URL: 'https://worker.example.com',
+			},
+			{
+				file_name: 'sample.html',
+				file_text: '<button id="go">go</button>',
+				scenario: {
+					steps: [{ action: 'assert_visible', selector: '#go' }],
 				},
-				{
-					file_name: 'sample.xlsx',
-					file_text: 'x',
-				},
-			),
-		).toThrow(/must end with/);
+			},
+		);
+		expect(instructions.mode).toBe('html_scenario');
+		expect(instructions.scenario?.steps[0].id).toBe('step-1');
 	});
 
 	it('extracts stored zip entries', async () => {
 		const archive = buildStoredZip([
 			{ name: 'summary.json', text: '{"ok":true}' },
-			{ name: 'capture.jpg', text: 'fake-binary' },
+			{ name: 'report.md', text: '# report' },
 		]);
 		const entries = await extractZipEntries(archive.buffer);
 		expect(decodeUtf8(entries.get('summary.json')!)).toBe('{"ok":true}');
-		expect(decodeUtf8(entries.get('capture.jpg')!)).toBe('fake-binary');
+		expect(decodeUtf8(entries.get('report.md')!)).toBe('# report');
 	});
 });
