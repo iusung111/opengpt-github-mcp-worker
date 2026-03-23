@@ -35,11 +35,11 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
 
-      - name: Start local GUI fallback server
+      - name: Start local static server
         run: |
           python3 -m http.server 4173 --directory public >/tmp/gui-capture-http.log 2>&1 &
           for attempt in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:4173/gui/ >/dev/null; then
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
               exit 0
             fi
             sleep 1
@@ -50,113 +50,8 @@ jobs:
       - name: Run GUI capture
         env:
           INSTRUCTIONS_B64: ${{ inputs.instructions_b64 }}
-          LOCAL_GUI_URL: http://127.0.0.1:4173/gui/
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const os = require('os');
-          const path = require('path');
-          const { chromium } = require('playwright');
-
-          const artifactDir = path.join(process.cwd(), 'gui-capture-artifact');
-          fs.mkdirSync(artifactDir, { recursive: true });
-
-          const instructions = JSON.parse(Buffer.from(process.env.INSTRUCTIONS_B64, 'base64').toString('utf8'));
-          const localGuiUrl = process.env.LOCAL_GUI_URL;
-          const dataFilePath = path.join(os.tmpdir(), instructions.file_name);
-          fs.writeFileSync(dataFilePath, instructions.file_text, 'utf8');
-
-          (async () => {
-            const browser = await chromium.launch({ headless: true });
-            const page = await browser.newPage({ viewport: { width: 1440, height: 1800 } });
-            let resolvedAppUrl = localGuiUrl;
-            let appSource = 'checkout';
-            let deployedAppError = null;
-
-            async function openApp(url, source) {
-              const response = await page.goto(url, { waitUntil: 'networkidle' });
-              if (response && response.status() >= 400) {
-                throw new Error(`navigation failed with status ${response.status()} for ${url}`);
-              }
-              resolvedAppUrl = url;
-              appSource = source;
-            }
-
-            if (instructions.app_url) {
-              try {
-                await openApp(instructions.app_url, 'deployed');
-              } catch (error) {
-                deployedAppError = error instanceof Error ? error.message : String(error);
-                await openApp(localGuiUrl, 'checkout_fallback');
-              }
-            } else {
-              await openApp(localGuiUrl, 'checkout');
-            }
-
-            await page.setInputFiles('#file-input', dataFilePath);
-
-            if (instructions.analysis?.target_column) {
-              await page.selectOption('#target-column', instructions.analysis.target_column);
-            }
-            if (instructions.analysis?.aggregate) {
-              await page.selectOption('#aggregate-mode', instructions.analysis.aggregate);
-            }
-            if (instructions.analysis?.sort) {
-              await page.selectOption('#sort-mode', instructions.analysis.sort);
-            }
-            if (instructions.analysis?.missing) {
-              await page.selectOption('#missing-mode', instructions.analysis.missing);
-            }
-            if (instructions.analysis?.chart_type) {
-              await page.selectOption('#chart-type', instructions.analysis.chart_type);
-            }
-            if (typeof instructions.analysis?.filter_text === 'string') {
-              await page.fill('#filter-text', instructions.analysis.filter_text);
-            }
-
-            await page.waitForFunction(() => {
-              const el = document.getElementById('capture-ready-pill');
-              return el && /capture ready/i.test(el.textContent || '');
-            }, { timeout: 30000 });
-
-            const summaryText = await page.locator('#analysis-summary').textContent();
-            const summary = summaryText ? JSON.parse(summaryText) : null;
-
-            await page.locator('#gui-static-app').screenshot({
-              path: path.join(artifactDir, 'capture.jpg'),
-              type: 'jpeg',
-              quality: 70,
-            });
-            fs.writeFileSync(
-              path.join(artifactDir, 'summary.json'),
-              JSON.stringify({
-                ok: true,
-                instructions: {
-                  requested_app_url: instructions.app_url ?? null,
-                  resolved_app_url: resolvedAppUrl,
-                  app_source: appSource,
-                  deployed_app_error: deployedAppError,
-                  file_name: instructions.file_name,
-                  analysis: instructions.analysis ?? null,
-                },
-                summary,
-              }, null, 2),
-              'utf8',
-            );
-
-            await browser.close();
-          })().catch((error) => {
-            fs.writeFileSync(
-              path.join(artifactDir, 'summary.json'),
-              JSON.stringify({
-                ok: false,
-                error: error instanceof Error ? error.message : String(error),
-              }, null, 2),
-              'utf8',
-            );
-            throw error;
-          });
-          NODE
+          LOCAL_HTML_URL: http://127.0.0.1:4173/
+        run: node worker/scripts/run-gui-capture.mjs
 
       - name: Upload GUI capture artifact
         if: always()
