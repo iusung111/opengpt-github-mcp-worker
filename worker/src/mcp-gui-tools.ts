@@ -71,7 +71,8 @@ export function registerGuiTools(server: McpServer, env: AppEnv, writeAnnotation
 			const [owner, repo] = repoKey.split('/');
 			const instructions = normalizeGuiCaptureInstructions(env, { file_name, file_text, app_url, analysis, scenario, report });
 			const workflowRef = ref?.trim() || getDefaultBaseBranch(env);
-			const inputs: Record<string, unknown> = { request_kind: 'gui_capture', instructions_json: instructions };
+			const instructionsB64 = encodeBase64(new TextEncoder().encode(JSON.stringify(instructions)));
+			const inputs: Record<string, unknown> = { request_kind: 'gui_capture', instructions_b64: instructionsB64 };
 			validateWorkflowInputs(inputs);
 			const startedAt = new Date().toISOString();
 			await githubPost(env, `/repos/${owner}/${repo}/actions/workflows/${GUI_CAPTURE_WORKFLOW_ID}/dispatches`, { ref: workflowRef, inputs });
