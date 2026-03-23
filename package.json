@@ -9,21 +9,21 @@
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest --sequence.concurrent=false",
-		"test:unit": "vitest run worker/test/auth.spec.ts worker/test/github.spec.ts worker/test/gui-analysis.spec.ts worker/test/gui-capture.spec.ts worker/test/mcp-tree.spec.ts worker/test/queue-audit.spec.ts worker/test/queue-dispatch.spec.ts worker/test/queue-events.spec.ts worker/test/queue-index.spec.ts worker/test/queue-projections.spec.ts worker/test/queue-reconcile.spec.ts worker/test/queue-state.spec.ts worker/test/queue-store.spec.ts worker/test/queue-workflow.spec.ts worker/test/queue-workspaces.spec.ts worker/test/tool-catalog.spec.ts worker/test/utils.spec.ts --sequence.concurrent=false",
+		"test:unit": "vitest run worker/test/auth.spec.ts worker/test/github.spec.ts worker/test/gui-analysis.spec.ts worker/test/gui-capture.spec.ts worker/test/gui-capture-report.spec.ts worker/test/gui-capture-scenario.spec.ts worker/test/mcp-tree.spec.ts worker/test/queue-audit.spec.ts worker/test/queue-dispatch.spec.ts worker/test/queue-events.spec.ts worker/test/queue-index.spec.ts worker/test/queue-projections.spec.ts worker/test/queue-reconcile.spec.ts worker/test/queue-state.spec.ts worker/test/queue-store.spec.ts worker/test/queue-workflow.spec.ts worker/test/queue-workspaces.spec.ts worker/test/tool-catalog.spec.ts worker/test/utils.spec.ts --sequence.concurrent=false",
 		"test:integration": "node worker/scripts/run-integration-tests.mjs",
 		"test:integration:runtime": "node worker/scripts/run-integration-tests.mjs",
 		"test:all": "npm run test:unit && npm run test:integration",
 		"cf-typegen": "node worker/scripts/run-cf-typegen.mjs",
 		"ops:status": "node worker/scripts/check-self-hosts.mjs",
 		"docs:tool-surface": "node worker/scripts/generate-tool-surface-doc.mjs"
-	},
+		},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
 		"@types/node": "^25.5.0",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.76.0"
-	},
+		},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.27.1",
 		"agents": "^0.7.6",
