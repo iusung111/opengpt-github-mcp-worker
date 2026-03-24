@@ -59,3 +59,8 @@ After mirror or live deployment, confirm `/healthz` reports the expected mode:
 ```
 
 Also confirm the allowlist counts match the intended configuration.
+
+For general host smoke checks, confirm the Worker root does not return a JSON `404` anymore:
+
+- `GET /` should redirect to `/gui/`
+- `GET /gui/` should return the static GUI

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 - 2026-03-24
+
+Operational follow-up release after mirror/live validation.
+
+- Fixed self-host root routing so `GET /` redirects to `/gui/` instead of returning a JSON `404`.
+- Fixed ChatGPT OAuth protected resource metadata to point `resource_documentation` at a reachable repository doc URL.
+- Added runtime coverage for the root redirect and OAuth metadata documentation link.
+- Re-synced local, GitHub `main`, mirror, and live to release commit `fc5f86f088410c271ac97b8f5af810005fdfbbad`.
+
 ## 1.0.0 - 2026-03-21
 
 Initial stable release.

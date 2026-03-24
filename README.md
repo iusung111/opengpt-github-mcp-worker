@@ -176,6 +176,8 @@ Malformed config behavior:
 
 ## Runtime Endpoints
 
+- GUI root: `https://<worker-url>/` redirects to `/gui/`
+- Static GUI: `https://<worker-url>/gui/`
 - Direct MCP: `https://<worker-url>/mcp`
 - ChatGPT MCP: `https://<worker-url>/chatgpt/mcp`
 - Webhook: `https://<worker-url>/webhooks/github`
@@ -243,11 +245,13 @@ Recommended self-host flow:
 
 Basic smoke checks after deploy:
 
-1. `GET /healthz`
-2. `GET /github/app-installation`
-3. Connect a direct MCP client to `/mcp` and `listTools`
-4. Connect a ChatGPT custom connector to `/chatgpt/mcp`
-5. Create a queue job and verify webhook-driven state transitions
+1. `GET /` returns a redirect to `/gui/`
+2. `GET /healthz`
+3. `GET /.well-known/oauth-protected-resource/chatgpt/mcp`
+4. `GET /github/app-installation`
+5. Connect a direct MCP client to `/mcp` and `listTools`
+6. Connect a ChatGPT custom connector to `/chatgpt/mcp`
+7. Create a queue job and verify webhook-driven state transitions
 
 ## Security Note
 
