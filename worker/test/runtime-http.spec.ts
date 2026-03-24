@@ -11,26 +11,21 @@ describe('runtime http surface', () => {
 	it('returns healthz payload', async () => {
 		const response = await SELF.fetch('https://example.com/healthz');
 		expect(response.status).toBe(200);
-		await expect(response.json()).resolves.toMatchObject({
-			ok: true,
-			service: 'opengpt-github-mcp-worker',
-			runtime: 'cloudflare-workers',
-			mcp_access_auth_required: true,
-			mcp_access_mode: 'any_authenticated_user',
-			direct_mcp_auth_mode: 'any_authenticated_user',
-			chatgpt_mcp_auth_mode: 'oidc_email_allowlist',
-			chatgpt_allowed_emails_count: 1,
-		});
+	await expect(response.json()).resolves.toMatchObject({
+		ok: true,
+		service: 'opengpt-github-mcp-worker',
+		runtime: 'cloudflare-workers',
+		mcp_access_auth_required: false,
+		mcp_access_mode: 'disabled',
+		direct_mcp_auth_mode: 'disabled',
+		chatgpt_mcp_auth_mode: 'oidc_email_allowlist',
+		chatgpt_allowed_emails_count: 1,
 	});
+});
 
-	it('rejects unauthenticated MCP requests when Access protection is required', async () => {
+	it('returns protocol negotiation error for unauthenticated direct MCP probes by default', async () => {
 		const response = await SELF.fetch('https://example.com/mcp');
-		expect(response.status).toBe(401);
-		await expect(response.json()).resolves.toMatchObject({
-			ok: false,
-			code: 'unauthorized',
-			error: 'missing Cloudflare Access identity headers',
-		});
+		expect(response.status).toBe(406);
 	});
 
 	it('rejects unauthenticated ChatGPT MCP requests when bearer auth is required', async () => {
