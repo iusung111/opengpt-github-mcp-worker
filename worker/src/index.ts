@@ -1,15 +1,15 @@
 import { githubAuthConfigured, githubGet } from './github';
 import { JobQueueDurableObject } from './queue';
-import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
+import type { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import { fail, jsonResponse } from './utils';
 import {
-	chatgptMcpBootstrapResponse,
+IchatgptMcpBootstrapResponse,
 	handleChatgptMcpRequest,
 	handleGitHubAppInstallation,
 	handleHealth,
 	handleMcpRequest,
 	handleOAuthProtectedResourceMetadata,
-	handleQueueApi,
+	handleQueueEpi,
 	handleWebhook,
 } from './http';
 
