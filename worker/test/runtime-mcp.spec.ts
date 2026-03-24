@@ -449,6 +449,96 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	});
 
+	it('allows repo read and branch write operations for the backup mirror repository', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/contents/README.md') {
+				if ((init?.method ?? 'GET').toUpperCase() === 'PUT') {
+					const payload = JSON.parse(String(init?.body ?? '{}'));
+					return new Response(
+						JSON.stringify({
+							content: {
+								path: 'README.md',
+								sha: 'backup-readme-updated',
+							},
+							commit: {
+								sha: 'backup-commit-sha',
+								message: payload.message,
+							},
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } },
+					);
+				}
+				return new Response(
+					JSON.stringify({
+						path: 'README.md',
+						name: 'README.md',
+						type: 'file',
+						content: btoa('# Backup Repo\n'),
+						encoding: 'base64',
+						sha: 'backup-readme-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createMcpClient();
+		const readResult = await client.callTool({
+			name: 'repo_get_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'opengpt-github-mcp-worker-mirror-backup',
+				path: 'README.md',
+			},
+		});
+		const readText = 'text' in readResult.content[0] ? readResult.content[0].text : '';
+		expect(JSON.parse(readText)).toMatchObject({
+			ok: true,
+			data: {
+				path: 'README.md',
+				decoded_text: '# Backup Repo\n',
+			},
+		});
+
+		const writeResult = await client.callTool({
+			name: 'repo_update_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'opengpt-github-mcp-worker-mirror-backup',
+				branch: 'agent/backup-write-test',
+				path: 'README.md',
+				message: 'Verify backup repo MCP write path',
+				content_b64: btoa('# Backup Repo\n\nMCP write path verified.\n'),
+				expected_blob_sha: 'backup-readme-sha',
+			},
+		});
+		const writeText = 'text' in writeResult.content[0] ? writeResult.content[0].text : '';
+		expect(JSON.parse(writeText)).toMatchObject({
+			ok: true,
+			data: {
+				content: {
+					path: 'README.md',
+				},
+				commit: {
+					message: 'Verify backup repo MCP write path',
+				},
+			},
+		});
+		await client.close();
+	});
+
 	it('serves the direct /mcp surface for bearer-authenticated ChatGPT callers', async () => {
 		const client = await createDirectMcpBearerClient();
 		const jobsListResult = await client.callTool({

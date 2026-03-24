@@ -13,9 +13,9 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"vars": {
 		"GITHUB_API_URL": "https://api.github.com",
-		"GITHUB_ALLOWED_REPOS": "iusung111/OpenGPT,iusung111/opengpt-github-mcp-worker",
+		"GITHUB_ALLOWED_REPOS": "iusung111/OpenGPT,iusung111/opengpt-github-mcp-worker,iusung111/opengpt-github-mcp-worker-mirror-backup",
 		"GITHUB_ALLOWED_WORKFLOWS": "agent-run.yml,pr-merge.yml,cloudflare-live-deploy.yml,cloudflare-self-deploy.yml",
-		"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"]}",
+		"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"],\"iusung111/opengpt-github-mcp-worker-mirror-backup\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"]}",
 		"AGENT_BRANCH_PREFIX": "agent/",
 		"DEFAULT_BASE_BRANCH": "main",
 		"SELF_REPO_KEY": "iusung111/opengpt-github-mcp-worker",
@@ -77,9 +77,9 @@
 			],
 			"vars": {
 				"GITHUB_API_URL": "https://api.github.com",
-				"GITHUB_ALLOWED_REPOS": "iusung111/OpenGPT,iusung111/opengpt-github-mcp-worker",
+				"GITHUB_ALLOWED_REPOS": "iusung111/OpenGPT,iusung111/opengpt-github-mcp-worker,iusung111/opengpt-github-mcp-worker-mirror-backup",
 				"GITHUB_ALLOWED_WORKFLOWS": "agent-run.yml,pr-merge.yml,cloudflare-live-deploy.yml,cloudflare-self-deploy.yml",
-				"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"]}",
+				"GITHUB_ALLOWED_WORKFLOWS_BY_REPO": "{\"iusung111/OpenGPT\":[\"agent-run.yml\",\"pr-merge.yml\",\"cloudflare-live-deploy.yml\"],\"iusung111/opengpt-github-mcp-worker\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"],\"iusung111/opengpt-github-mcp-worker-mirror-backup\":[\"cloudflare-self-deploy.yml\",\"gui-capture.yml\"]}",
 				"AGENT_BRANCH_PREFIX": "agent/",
 				"DEFAULT_BASE_BRANCH": "main",
 				"SELF_REPO_KEY": "iusung111/opengpt-github-mcp-worker",

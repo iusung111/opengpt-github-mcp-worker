@@ -135,6 +135,12 @@ Most important vars:
 - `SELF_DEFAULT_DEPLOY_TARGET`
 - `SELF_REQUIRE_MIRROR_FOR_LIVE`
 
+Current default allowlist includes:
+
+- `iusung111/OpenGPT`
+- `iusung111/opengpt-github-mcp-worker`
+- `iusung111/opengpt-github-mcp-worker-mirror-backup`
+
 For local development, copy `.dev.vars.example` to `.dev.vars` and fill real values there.
 
 ## Workflow Allowlist Management

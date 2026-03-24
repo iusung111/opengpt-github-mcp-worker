@@ -70,6 +70,7 @@ describe('normalizeWorkflowInputs', () => {
 			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: JSON.stringify({
 				'iusung111/OpenGPT': ['agent-run.yml', 'pr-merge.yml'],
 				'iusung111/opengpt-github-mcp-worker': ['cloudflare-self-deploy.yml'],
+				'iusung111/opengpt-github-mcp-worker-mirror-backup': ['cloudflare-self-deploy.yml'],
 			}),
 		};
 
@@ -82,13 +83,19 @@ describe('normalizeWorkflowInputs', () => {
 			'gui-capture.yml',
 			'cloudflare-self-deploy.yml',
 		]);
+		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker-mirror-backup')).toEqual([
+			'gui-capture.yml',
+			'cloudflare-ci.yml',
+			'cloudflare-self-deploy.yml',
+		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/other')).toEqual(['agent-run.yml', 'pr-merge.yml']);
 	});
 
 	it('loads the repo-managed workflow allowlist config', () => {
 		expect(getFileAllowedWorkflowsByRepo()).toMatchObject({
 			'iusung111/OpenGPT': ['build-todo-exe.yml'],
-			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml'],
+			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml', 'cloudflare-ci.yml'],
+			'iusung111/opengpt-github-mcp-worker-mirror-backup': ['gui-capture.yml', 'cloudflare-ci.yml'],
 		});
 	});
 
