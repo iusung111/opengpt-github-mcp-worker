@@ -81,6 +81,7 @@ describe('normalizeWorkflowInputs', () => {
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker')).toEqual([
 			'gui-capture.yml',
+			'cloudflare-ci.yml',
 			'cloudflare-self-deploy.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker-mirror-backup')).toEqual([
