@@ -269,6 +269,14 @@ export function getSelfRepoKey(env: AppEnv): string {
 	return env.SELF_REPO_KEY?.trim() || 'iusung111/opengpt-github-mcp-worker';
 }
 
+export function getSelfRepoBrowserUrl(env: AppEnv): string {
+	return `https://github.com/${getSelfRepoKey(env)}`;
+}
+
+export function getChatgptMcpDocumentationUrl(env: AppEnv): string {
+	return `${getSelfRepoBrowserUrl(env)}/blob/main/docs/CHATGPT_MCP.md`;
+}
+
 export function getSelfDeployWorkflow(env: AppEnv): string {
 	return env.SELF_DEPLOY_WORKFLOW?.trim() || 'cloudflare-self-deploy.yml';
 }

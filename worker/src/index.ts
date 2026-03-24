@@ -20,6 +20,10 @@ export default {
 		const appEnv = env as AppEnv;
 		const url = new URL(request.url);
 
+		if (request.method === 'GET' && url.pathname === '/') {
+			return Response.redirect(`${url.protocol}//${url.host}/gui/`, 307);
+		}
+
 		if (request.method === 'GET' && url.pathname === '/healthz') {
 			return handleHealth(appEnv);
 		}

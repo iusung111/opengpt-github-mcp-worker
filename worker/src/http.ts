@@ -12,6 +12,7 @@ import {
 	getChatgptMcpAllowedEmails,
 	getChatgptMcpAudiences,
 	getChatgptMcpAuthMode,
+	getChatgptMcpDocumentationUrl,
 	getAllowedRepos,
 	getAllowedWorkflows,
 	getAllowedWorkflowsByRepo,
@@ -164,7 +165,7 @@ export function handleOAuthProtectedResourceMetadata(request: Request, env: AppE
 		authorization_servers: issuer ? [issuer.replace(/\/$/, '')] : [],
 		scopes_supported: ['openid', 'profile', 'email', 'offline_access'],
 		bearer_methods_supported: ['header'],
-		resource_documentation: `${origin}/docs/CHATGPT_MCP.md`,
+		resource_documentation: getChatgptMcpDocumentationUrl(env),
 		audiences,
 	});
 }

@@ -8,6 +8,12 @@ import {
 } from './runtime-helpers';
 
 describe('runtime http surface', () => {
+	it('redirects root requests to the GUI entrypoint', async () => {
+		const response = await SELF.fetch('https://example.com/', { redirect: 'manual' });
+		expect(response.status).toBe(307);
+		expect(response.headers.get('location')).toBe('https://example.com/gui/');
+	});
+
 	it('returns healthz payload', async () => {
 		const response = await SELF.fetch('https://example.com/healthz');
 		expect(response.status).toBe(200);
@@ -35,6 +41,16 @@ describe('runtime http surface', () => {
 			ok: true,
 			route: '/chatgpt/mcp',
 			auth_type: 'oauth',
+		});
+	});
+
+	it('returns OAuth protected resource metadata with a reachable documentation URL', async () => {
+		const response = await SELF.fetch('https://example.com/.well-known/oauth-protected-resource/chatgpt/mcp');
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({
+			resource: 'https://example.com/chatgpt/mcp',
+			resource_documentation:
+				'https://github.com/iusung111/opengpt-github-mcp-worker/blob/main/docs/CHATGPT_MCP.md',
 		});
 	});
 
