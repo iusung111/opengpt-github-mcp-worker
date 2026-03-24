@@ -1,4 +1,4 @@
-import { AppEnv } from './types';
+import type { AppEnv } from './types';
 import { getSelfCurrentUrl, getSelfLiveUrl } from './utils';
 
 export interface GuiCaptureLegacyAnalysisConfig {
