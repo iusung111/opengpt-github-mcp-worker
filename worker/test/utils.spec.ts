@@ -39,7 +39,7 @@ describe('normalizeWorkflowInputs', () => {
 	});
 
 	it('rejects instructions_b64 that does not decode to valid json', () => {
-		const malformedJson = '{"write_files":[{"path":"docs/test.md","content":"line1\nline2"}]}';
+		const malformedJson = '{\"write_files\":[{\"path\":\"docs/test.md\",\"content\":\"line1\\nline2\"}]}';
 		const malformedB64 = Buffer.from(malformedJson, 'utf8').toString('base64');
 
 	expect(() =>
@@ -80,6 +80,7 @@ describe('normalizeWorkflowInputs', () => {
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker')).toEqual([
 			'gui-capture.yml',
+			'cloudflare-ci.yml',
 			'cloudflare-self-deploy.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/other')).toEqual(['agent-run.yml', 'pr-merge.yml']);
@@ -88,7 +89,7 @@ describe('normalizeWorkflowInputs', () => {
 	it('loads the repo-managed workflow allowlist config', () => {
 		expect(getFileAllowedWorkflowsByRepo()).toMatchObject({
 			'iusung111/OpenGPT': ['build-todo-exe.yml'],
-			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml'],
+			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml', 'cloudflare-ci.yml'],
 		});
 	});
 
@@ -149,7 +150,7 @@ describe('normalizeWorkflowInputs', () => {
 
 	it('throws an actionable error for malformed repo-specific workflow env config', () => {
 		const env = {
-			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: '{"iusung111/OpenGPT":"agent-run.yml"}',
+			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: '{\"iusung111/OpenGPT\":\"agent-run.yml\"}',
 		};
 
 		expect(() => getEnvAllowedWorkflowsByRepo(env)).toThrow(
