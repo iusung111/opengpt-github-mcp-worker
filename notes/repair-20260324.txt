@@ -1,1 +1,2 @@
-pending fix: gui-capture.ts AppEnv import -> type-only import
+next action: patch worker/src/gui-capture.ts to use import type for AppEnv
+
