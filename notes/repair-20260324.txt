@@ -1,1 +1,1 @@
-repair
+pending fix: gui-capture.ts AppEnv import -> type-only import
