@@ -2,6 +2,24 @@
 
 Generated from `worker/src/tool-catalog.json`.
 
+## Stable identifiers for GPT and MCP clients
+
+The Worker publishes stable MCP routes and stable tool names. Connector-specific resource handles such as `/OpenGPT/link_<id>/...` or `/GitHub/link_<id>/...` are not part of the Worker contract.
+
+Treat the following as stable identifiers:
+
+- repo key such as `iusung111/opengpt-github-mcp-worker`
+- MCP routes such as `/mcp` and `/chatgpt/mcp`
+- tool names such as `repo_get_file`, `repo_search_code`, and `workflow_dispatch`
+
+Treat the following as ephemeral connector state and do not reuse them across sessions, approvals, reconnects, or mirror/live switches:
+
+- `link_<id>`
+- full connector resource paths that include `link_<id>`
+- any copied tool path from a previous ChatGPT or MCP session
+
+For automation, review, and operator guidance, identify tools by repo key + route + tool name. Do not use connector resource handles as long-lived identifiers.
+
 ## Groups
 
 ### Overview and self-host

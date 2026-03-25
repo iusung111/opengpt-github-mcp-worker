@@ -41,6 +41,14 @@ Make GitHub development feel conversational and low-friction without requiring t
 - When a local workspace path is needed, prefer `projects/<project-slug>` for real implementation work.
 - Use sandbox repo paths only for workflow or MCP validation tasks.
 
+## MCP Identifier Handling
+
+- Treat repo key, MCP route, and server-defined tool name as the stable identity of MCP operations.
+- Do not treat connector resource handles such as `link_<id>` or full connector paths like `/OpenGPT/link_<id>/...` as stable identifiers.
+- When a ChatGPT or MCP session shows a connector path with `link_<id>`, treat it as session-scoped connector state that may change across reconnects, approval refresh, mirror/live switching, or a new chat session.
+- When summarizing work, asking for permissions, or deciding whether an existing task should be reused, key the decision off `repo key + route + tool name`, not a previously copied connector path.
+- For operator-facing reference, keep `docs/chatgpt/MCP_IDENTIFIER_GUIDANCE.md` aligned with these rules.
+
 ## Existing Work Reuse Heuristic
 
 Check in this order:
