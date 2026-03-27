@@ -5,6 +5,7 @@ import { registerGuiTools } from './mcp-gui-tools';
 import { registerOverviewTools } from './mcp-overview-tools';
 import { registerQueueTools } from './mcp-queue-tools';
 import { registerRepoReadTools } from './mcp-repo-read-tools';
+import { registerUploadTools } from './mcp-upload-tools';
 import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
 import { registerWriteTools } from './mcp-write-tools';
@@ -14,8 +15,7 @@ export function buildMcpServer(env: AppEnv): McpServer {
 		name: 'opengpt-github-mcp-worker',
 		version: '0.2.2',
 	});
-
-	const readAnnotations = { readOnlyHint: true, openWorldHint: false };
+const readAnnotations = { readOnlyHint: true, openWorldHint: false };
 	const writeAnnotations = {
 		readOnlyHint: false,
 		openWorldHint: false,
@@ -27,6 +27,7 @@ export function buildMcpServer(env: AppEnv): McpServer {
 	registerCollabTools(server, env, readAnnotations, writeAnnotations);
 	registerWorkflowReadTools(server, env, readAnnotations);
 	registerWriteTools(server, env, writeAnnotations);
+	registerUploadTools(server, env, writeAnnotations);
 	registerWorkflowDispatchTools(server, env, writeAnnotations);
 	registerGuiTools(server, env, writeAnnotations);
 	registerQueueTools(server, env, readAnnotations, writeAnnotations);
