@@ -11,6 +11,8 @@ describe('tool catalog permission bundles', () => {
 		expect(bundle.tools).toContain('workflow_dispatch');
 		expect(bundle.tools).toContain('gui_capture_run');
 		expect(bundle.tools).toContain('repo_create_branch');
+		expect(bundle.tools).toContain('repo_upload_start');
+		expect(bundle.tools).toContain('repo_upload_commit');
 	});
 
 	it('builds a user-facing approval request for batch approval', () => {

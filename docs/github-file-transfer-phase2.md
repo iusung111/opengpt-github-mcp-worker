@@ -7,7 +7,8 @@
 
 ## Planned steps
 1. Extract common file-write helper logic into a small, new module
- 2. Wire `mcp-write-tools.ts` to import the helper with minimal diff
- 3. Add `repo_create_file` and `repo_upsert_file` using the shared helper
-4 . Add small test coverage for the new semantics
-- status: redesign documented, code split next
+2. Wire `mcp-write-tools.ts` to import the helper with minimal diff
+3. Add `repo_create_file` and `repo_upsert_file` using the shared helper
+4. Add small test coverage for the new semantics
+
+Status: redesign documented, code split next

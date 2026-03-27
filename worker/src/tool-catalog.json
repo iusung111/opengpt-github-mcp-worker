@@ -51,6 +51,10 @@
       "description": "Branch creation, file edits including .github/workflows, PR creation and merge, comments, and workflow dispatch.",
       "tools": [
         "repo_create_branch",
+        "repo_upload_start",
+        "repo_upload_append",
+        "repo_upload_commit",
+        "repo_upload_abort",
         "repo_update_file",
         "pr_create",
         "pr_merge",

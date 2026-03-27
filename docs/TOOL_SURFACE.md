@@ -2,29 +2,11 @@
 
 Generated from `worker/src/tool-catalog.json`.
 
-## Stable identifiers for GPT and MCP clients
-
-The Worker publishes stable MCP routes and stable tool names. Connector-specific resource handles such as `/OpenGPT/link_<id>/...` or `/GitHub/link_<id>/...` are not part of the Worker contract.
-
-Treat the following as stable identifiers:
-
-- repo key such as `iusung111/opengpt-github-mcp-worker`
-- MCP routes such as `/mcp` and `/chatgpt/mcp`
-- tool names such as `repo_get_file`, `repo_search_code`, and `workflow_dispatch`
-
-Treat the following as ephemeral connector state and do not reuse them across sessions, approvals, reconnects, or mirror/live switches:
-
-- `link_<id>`
-- full connector resource paths that include `link_<id>`
-- any copied tool path from a previous ChatGPT or MCP session
-
-For automation, review, and operator guidance, identify tools by repo key + route + tool name. Do not use connector resource handles as long-lived identifiers.
-
 ## Groups
 
 ### Overview and self-host
 
-Guidance, self-host inspection, deploy controls, and permission planning.
+Guidance, self-host inspection, live-only control-plane actions, and permission planning.
 
 - `help`
 - `request_permission_bundle`
@@ -66,11 +48,16 @@ Repository files, workflow files, trees, search, issues, PRs, and workflow run r
 Branch creation, file edits including .github/workflows, PR creation and merge, comments, and workflow dispatch.
 
 - `repo_create_branch`
+- `repo_upload_start`
+- `repo_upload_append`
+- `repo_upload_commit`
+- `repo_upload_abort`
 - `repo_update_file`
 - `pr_create`
 - `pr_merge`
 - `comment_create`
 - `workflow_dispatch`
+- `gui_capture_run`
 
 ### Collaboration and cleanup
 
@@ -135,7 +122,7 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 ### Self maintenance and deploy
 
 - preset id: `self_maintenance`
-- description: Inspect self-host state, sync secrets, and promote mirror/live environments.
+- description: Inspect self-host state from any environment, but allow secret sync and live promotion only from the live self-host worker.
 - capabilities: `read`, `workflow`, `self_host`
 - group ids: `overview`, `workspace`, `repo_read`, `repo_write`, `queue`
 

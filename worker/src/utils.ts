@@ -49,6 +49,21 @@ export function errorCodeFor(error: unknown, fallback: string): string {
 	if (message.includes('workflow does not support workflow_dispatch')) return 'workflow_missing_dispatch_trigger';
 	if (message.includes('unsafe path')) return 'unsafe_path';
 	if (message.includes('direct write to') && message.includes('forbidden')) return 'default_branch_forbidden';
+	if (message.includes('expected blob sha mismatch')) return 'expected_blob_sha_mismatch';
+	if (message.includes('upload session expired')) return 'upload_session_expired';
+	if (message.includes('upload session not found')) return 'upload_session_not_found';
+	if (message.includes('upload session already committed')) return 'upload_session_already_committed';
+	if (message.includes('upload session already aborted')) return 'upload_session_already_aborted';
+	if (message.includes('upload session already committing')) return 'upload_session_already_committing';
+	if (message.includes('unexpected upload chunk index')) return 'upload_chunk_index_mismatch';
+	if (message.includes('unexpected upload byte offset')) return 'upload_chunk_offset_mismatch';
+	if (message.includes('invalid upload chunk base64')) return 'upload_chunk_invalid_base64';
+	if (message.includes('upload chunk too large')) return 'upload_chunk_too_large';
+	if (message.includes('upload exceeds declared total bytes')) return 'upload_total_bytes_exceeded';
+	if (message.includes('upload exceeds max bytes')) return 'upload_max_bytes_exceeded';
+	if (message.includes('upload is incomplete')) return 'upload_incomplete';
+	if (message.includes('upload branch head changed')) return 'upload_branch_head_changed';
+	if (message.includes('content_b64 too large')) return 'repo_update_file_payload_too_large';
 	return fallback;
 }
 

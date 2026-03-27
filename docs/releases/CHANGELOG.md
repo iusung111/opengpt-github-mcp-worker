@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2 - 2026-03-24
+
+Operational hardening and incident-memory update.
+
+- Fixed self-host cross-worker health checks by enabling the Cloudflare `global_fetch_strictly_public` compatibility flag.
+- Refreshed MCP discovery versioning to reduce stale client-side tool exposure metadata.
+- Added `docs/incidents/` with an incident index, reusable template, and the March 24 MCP tool exposure incident report.
+- Updated ChatGPT and operator documentation so future runtime errors are recorded in-repo and can be read or updated through existing MCP repo file tools.
+
 ## 1.0.1 - 2026-03-24
 
 Operational follow-up release after mirror/live validation.

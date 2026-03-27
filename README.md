@@ -13,6 +13,8 @@ Remote GitHub MCP server for ChatGPT Developer mode, deployed on Cloudflare Work
 - [MCP access and deployment](/d:/VScode/opengpt-github-mcp-worker/docs/MCP_ACCESS.md)
 - [ChatGPT connector auth](/d:/VScode/opengpt-github-mcp-worker/docs/CHATGPT_MCP.md)
 - [ChatGPT connector incident report 2026-03-22](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_CONNECTOR_INCIDENT_2026-03-22.md)
+- [Incident report index](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/README.md)
+- [MCP tool exposure incident 2026-03-24](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/MCP_TOOL_EXPOSURE_INCIDENT_2026-03-24.md)
 - [Tool surface](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md)
 - [Release history](/d:/VScode/opengpt-github-mcp-worker/docs/releases/CHANGELOG.md)
 - [ChatGPT project instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md)
@@ -198,9 +200,18 @@ The server exposes grouped tool families rather than one flat surface:
 - overview and self-host guidance
 - workspace registry and active repo context
 - repository read and search
-- repository write including workflow-file edits, PR, comment, and workflow dispatch
+- repository write including workflow-file edits, streamed file upload, PR, comment, and workflow dispatch
 - branch cleanup and collaboration helpers
 - queue, audit, and reviewer loop state
+
+Large file writes for web ChatGPT should prefer the streamed upload flow:
+
+- `repo_upload_start`
+- `repo_upload_append`
+- `repo_upload_commit`
+- `repo_upload_abort`
+
+Keep `repo_update_file` for smaller payloads and compatibility-only callers. The worker now rejects oversized `content_b64` payloads and returns a stream-upload error instead of attempting a fragile single-request write.
 
 Regenerate the generated tool doc after catalog changes:
 
@@ -252,6 +263,13 @@ Basic smoke checks after deploy:
 5. Connect a direct MCP client to `/mcp` and `listTools`
 6. Connect a ChatGPT custom connector to `/chatgpt/mcp`
 7. Create a queue job and verify webhook-driven state transitions
+
+Incident handling rule:
+
+1. read related files under `docs/incidents/` before repeating investigation
+2. if the failure is new, create or update an incident report in `docs/incidents/`
+3. keep exact verification commands and final deployment state in the report
+4. use MCP file tools against `iusung111/opengpt-github-mcp-worker` so the same history is readable from ChatGPT
 
 ## Security Note
 

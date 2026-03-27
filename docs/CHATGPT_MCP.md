@@ -10,9 +10,28 @@ It is separate from the direct `/mcp` endpoint:
 Workflow file access goes through the normal repository file tools:
 
 - use `repo_get_file` to read files such as `.github/workflows/ci.yml`
-- use `repo_update_file` on an agent branch to edit workflow YAML
+- use `repo_update_file` on an agent branch only for smaller workflow edits
+- use `repo_upload_start -> repo_upload_append -> repo_upload_commit` for larger file edits or when ChatGPT web payload limits make single-request writes unreliable
 - use `workflow_dispatch` only to run an allowlisted workflow, not to edit its file
 - use `workflow_allowlist_inspect` when `workflow_dispatch` fails with `workflow_not_allowlisted`
+
+## Large File Upload Flow
+
+For web ChatGPT or any caller that hits request payload limits, use the streamed upload path instead of sending one large `content_b64` payload.
+
+Recommended sequence:
+
+1. `repo_upload_start`
+2. `repo_upload_append` repeated with ordered chunks
+3. `repo_upload_commit`
+4. `repo_upload_abort` if the upload must be discarded
+
+Operational notes:
+
+- `repo_update_file` remains available for smaller files and compatibility flows.
+- upload chunks must be sent in order with matching `chunk_index` and `byte_offset`
+- upload sessions expire after a short TTL
+- the final commit uses GitHub git data APIs instead of the contents API so the upload can be staged incrementally
 
 Workflow allowlist precedence for dispatch:
 
@@ -347,6 +366,23 @@ The March 22, 2026 incident was not a single bug. The connector failed across mu
 Reference report:
 
 - [ChatGPT Connector Incident 2026-03-22](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_CONNECTOR_INCIDENT_2026-03-22.md)
+- [Incident report index](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/README.md)
+- [MCP Tool Exposure Incident 2026-03-24](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/MCP_TOOL_EXPOSURE_INCIDENT_2026-03-24.md)
+
+## Incident Memory Rule
+
+For repeated connector, routing, auth, live/mirror, or tool-surface failures:
+
+1. read the relevant files under `docs/incidents/` first
+2. reproduce the issue with raw MCP or HTTP requests before assuming the UI diagnosis is correct
+3. after fixing the issue, create or update a report under `docs/incidents/`
+4. prefer self-repo MCP file tools for this:
+   - `repo_get_file`
+   - `repo_tree_snapshot`
+   - `repo_update_file`
+   - `repo_upload_start`
+   - `repo_upload_append`
+   - `repo_upload_commit`
 
 ## Verification
 

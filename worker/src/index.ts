@@ -1,5 +1,6 @@
 import { githubAuthConfigured, githubGet } from './github';
 import { JobQueueDurableObject } from './queue';
+import { UploadSessionDurableObject } from './upload-session';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import { fail, jsonResponse } from './utils';
 import {
@@ -13,7 +14,7 @@ import {
 	handleWebhook,
 } from './http';
 
-export { JobQueueDurableObject };
+export { JobQueueDurableObject, UploadSessionDurableObject };
 
 export default {
 	async fetch(request, env, ctx): Promise<Response> {

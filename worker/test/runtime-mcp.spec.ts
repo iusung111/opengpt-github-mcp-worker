@@ -122,6 +122,10 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'review_prepare_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'request_permission_bundle')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_create_file')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_upsert_file')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_upload_start')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_upload_commit')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'workflow_allowlist_inspect')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
@@ -445,6 +449,479 @@ describe('runtime mcp surface', () => {
 					message: 'Update workflow from MCP',
 				},
 			},
+		});
+		await client.close();
+	});
+
+	it('creates a new file over /mcp without requiring a blob sha', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/docs/new-file.md') {
+				const payload = JSON.parse(String(init?.body ?? '{}'));
+				expect(payload).toMatchObject({
+					message: 'Create new file from MCP',
+					branch: 'agent/create-file-test',
+				});
+				expect(payload.sha).toBeUndefined();
+				return new Response(
+					JSON.stringify({
+						content: {
+							path: 'docs/new-file.md',
+							sha: 'new-file-blob-sha',
+						},
+						commit: {
+							sha: 'new-file-commit-sha',
+							message: payload.message,
+						},
+					}),
+					{ status: 201, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createMcpClient();
+		const result = await client.callTool({
+			name: 'repo_create_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				branch: 'agent/create-file-test',
+				path: 'docs/new-file.md',
+				message: 'Create new file from MCP',
+				content_b64: btoa('# New File\n'),
+			},
+		});
+		const text = 'text' in result.content[0] ? result.content[0].text : '';
+		expect(JSON.parse(text)).toMatchObject({
+			ok: true,
+			data: {
+				content: {
+					path: 'docs/new-file.md',
+					sha: 'new-file-blob-sha',
+				},
+				commit: {
+					message: 'Create new file from MCP',
+				},
+			},
+		});
+		await client.close();
+	});
+
+	it('upserts a file over /mcp by probing the existing blob sha when omitted', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/docs/upsert-file.md?ref=agent%2Fupsert-file-test') {
+				return new Response(
+					JSON.stringify({
+						path: 'docs/upsert-file.md',
+						type: 'file',
+						sha: 'existing-upsert-blob-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/docs/upsert-file.md') {
+				const payload = JSON.parse(String(init?.body ?? '{}'));
+				expect(payload).toMatchObject({
+					message: 'Upsert file from MCP',
+					branch: 'agent/upsert-file-test',
+					sha: 'existing-upsert-blob-sha',
+				});
+				return new Response(
+					JSON.stringify({
+						content: {
+							path: 'docs/upsert-file.md',
+							sha: 'updated-upsert-blob-sha',
+						},
+						commit: {
+							sha: 'updated-upsert-commit-sha',
+							message: payload.message,
+						},
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createMcpClient();
+		const result = await client.callTool({
+			name: 'repo_upsert_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				branch: 'agent/upsert-file-test',
+				path: 'docs/upsert-file.md',
+				message: 'Upsert file from MCP',
+				content_b64: btoa('# Upsert\n'),
+			},
+		});
+		const text = 'text' in result.content[0] ? result.content[0].text : '';
+		expect(JSON.parse(text)).toMatchObject({
+			ok: true,
+			data: {
+				content: {
+					path: 'docs/upsert-file.md',
+					sha: 'updated-upsert-blob-sha',
+				},
+				commit: {
+					message: 'Upsert file from MCP',
+				},
+			},
+		});
+		await client.close();
+	});
+
+	it('streams workflow file uploads over /chatgpt/mcp', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/ref/heads/agent/workflow-stream-test') {
+				return new Response(
+					JSON.stringify({
+						object: {
+							sha: 'workflow-base-ref-sha',
+						},
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/test.yml?ref=agent%2Fworkflow-stream-test') {
+				return new Response(
+					JSON.stringify({
+						path: '.github/workflows/test.yml',
+						type: 'file',
+						sha: 'workflow-blob-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/commits/workflow-base-ref-sha') {
+				return new Response(
+					JSON.stringify({
+						tree: {
+							sha: 'workflow-base-tree-sha',
+						},
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/blobs') {
+				const payload = JSON.parse(String(init?.body ?? '{}'));
+				expect(payload.encoding).toBe('base64');
+				return new Response(
+					JSON.stringify({
+						sha: 'workflow-uploaded-blob-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/trees') {
+				const payload = JSON.parse(String(init?.body ?? '{}'));
+				expect(payload.base_tree).toBe('workflow-base-tree-sha');
+				expect(payload.tree[0]).toMatchObject({
+					path: '.github/workflows/test.yml',
+					sha: 'workflow-uploaded-blob-sha',
+				});
+				return new Response(
+					JSON.stringify({
+						sha: 'workflow-tree-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/commits' && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+				const payload = JSON.parse(String(init?.body ?? '{}'));
+				expect(payload).toMatchObject({
+					message: 'Upload workflow via stream',
+					tree: 'workflow-tree-sha',
+					parents: ['workflow-base-ref-sha'],
+				});
+				return new Response(
+					JSON.stringify({
+						sha: 'workflow-commit-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/refs/heads/agent/workflow-stream-test') {
+				if ((init?.method ?? 'GET').toUpperCase() === 'PATCH') {
+					return new Response(
+						JSON.stringify({
+							ref: 'refs/heads/agent/workflow-stream-test',
+							object: { sha: 'workflow-commit-sha' },
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } },
+					);
+				}
+				return new Response(
+					JSON.stringify({
+						object: { sha: 'workflow-base-ref-sha' },
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createChatgptMcpClient();
+		const startResult = await client.callTool({
+			name: 'repo_upload_start',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				branch: 'agent/workflow-stream-test',
+				path: '.github/workflows/test.yml',
+				message: 'Upload workflow via stream',
+				expected_blob_sha: 'workflow-blob-sha',
+				total_bytes: 42,
+			},
+		});
+		const startText = 'text' in startResult.content[0] ? startResult.content[0].text : '';
+		const startJson = JSON.parse(startText);
+		expect(startJson).toMatchObject({
+			ok: true,
+			data: {
+				upload_id: expect.any(String),
+				existing_blob_sha: 'workflow-blob-sha',
+			},
+		});
+
+		const uploadId = startJson.data.upload_id as string;
+		const chunkOne = btoa('name: test\non: workflow_');
+		const chunkTwo = btoa('dispatch\njobs: {}\n');
+		await client.callTool({
+			name: 'repo_upload_append',
+			arguments: {
+				upload_id: uploadId,
+				chunk_b64: chunkOne,
+				chunk_index: 0,
+				byte_offset: 0,
+			},
+		});
+		await client.callTool({
+			name: 'repo_upload_append',
+			arguments: {
+				upload_id: uploadId,
+				chunk_b64: chunkTwo,
+				chunk_index: 1,
+				byte_offset: 24,
+			},
+		});
+		const commitResult = await client.callTool({
+			name: 'repo_upload_commit',
+			arguments: {
+				upload_id: uploadId,
+			},
+		});
+		const commitText = 'text' in commitResult.content[0] ? commitResult.content[0].text : '';
+		expect(JSON.parse(commitText)).toMatchObject({
+			ok: true,
+			data: {
+				ok: true,
+				result: {
+					content: {
+						path: '.github/workflows/test.yml',
+						sha: 'workflow-uploaded-blob-sha',
+					},
+					commit: {
+						sha: 'workflow-commit-sha',
+						message: 'Upload workflow via stream',
+					},
+				},
+			},
+		});
+		await client.close();
+	});
+
+	it('streams general file uploads over /mcp and rejects oversized repo_update_file payloads', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/git/ref/heads/agent/backup-stream-test') {
+				return new Response(
+					JSON.stringify({
+						object: { sha: 'backup-base-ref-sha' },
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/contents/README.md?ref=agent%2Fbackup-stream-test') {
+				return new Response(
+					JSON.stringify({
+						path: 'README.md',
+						type: 'file',
+						sha: 'backup-readme-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/git/commits/backup-base-ref-sha') {
+				return new Response(
+					JSON.stringify({
+						tree: { sha: 'backup-base-tree-sha' },
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/git/blobs') {
+				return new Response(
+					JSON.stringify({
+						sha: 'backup-uploaded-blob-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/git/trees') {
+				return new Response(
+					JSON.stringify({
+						sha: 'backup-tree-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (
+				url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/git/commits' &&
+				(init?.method ?? 'GET').toUpperCase() === 'POST'
+			) {
+				return new Response(
+					JSON.stringify({
+						sha: 'backup-commit-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker-mirror-backup/git/refs/heads/agent/backup-stream-test') {
+				if ((init?.method ?? 'GET').toUpperCase() === 'PATCH') {
+					return new Response(
+						JSON.stringify({
+							ref: 'refs/heads/agent/backup-stream-test',
+							object: { sha: 'backup-commit-sha' },
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } },
+					);
+				}
+				return new Response(
+					JSON.stringify({
+						object: { sha: 'backup-base-ref-sha' },
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createMcpClient();
+		const startResult = await client.callTool({
+			name: 'repo_upload_start',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'opengpt-github-mcp-worker-mirror-backup',
+				branch: 'agent/backup-stream-test',
+				path: 'README.md',
+				message: 'Stream upload README',
+				expected_blob_sha: 'backup-readme-sha',
+				total_bytes: 37,
+			},
+		});
+		const startText = 'text' in startResult.content[0] ? startResult.content[0].text : '';
+		const uploadId = JSON.parse(startText).data.upload_id as string;
+		await client.callTool({
+			name: 'repo_upload_append',
+			arguments: {
+				upload_id: uploadId,
+				chunk_b64: btoa('# Backup Repo\n\n'),
+				chunk_index: 0,
+				byte_offset: 0,
+			},
+		});
+		await client.callTool({
+			name: 'repo_upload_append',
+			arguments: {
+				upload_id: uploadId,
+				chunk_b64: btoa('Stream path verified.\n'),
+				chunk_index: 1,
+				byte_offset: 15,
+			},
+		});
+		const commitResult = await client.callTool({
+			name: 'repo_upload_commit',
+			arguments: {
+				upload_id: uploadId,
+			},
+		});
+		const commitText = 'text' in commitResult.content[0] ? commitResult.content[0].text : '';
+		expect(JSON.parse(commitText)).toMatchObject({
+			ok: true,
+			data: {
+				result: {
+					content: {
+						path: 'README.md',
+						sha: 'backup-uploaded-blob-sha',
+					},
+					commit: {
+						sha: 'backup-commit-sha',
+					},
+				},
+			},
+		});
+
+		const hugePayload = btoa('a'.repeat(300_000));
+		const tooLargeResult = await client.callTool({
+			name: 'repo_update_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'opengpt-github-mcp-worker-mirror-backup',
+				branch: 'agent/backup-stream-test',
+				path: 'README.md',
+				message: 'This should be rejected',
+				content_b64: hugePayload,
+				expected_blob_sha: 'backup-readme-sha',
+			},
+		});
+		const tooLargeText = 'text' in tooLargeResult.content[0] ? tooLargeResult.content[0].text : '';
+		expect(JSON.parse(tooLargeText)).toMatchObject({
+			ok: false,
+			code: 'repo_update_file_payload_too_large',
 		});
 		await client.close();
 	});

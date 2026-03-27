@@ -268,6 +268,10 @@ export async function githubPut(env: AppEnv, path: string, body?: unknown): Prom
 	return githubRequest(env, 'PUT', path, { body });
 }
 
+export async function githubPatch(env: AppEnv, path: string, body?: unknown): Promise<unknown> {
+	return githubRequest(env, 'PATCH', path, { body });
+}
+
 export async function githubDelete(env: AppEnv, path: string): Promise<unknown> {
 	return githubRequest(env, 'DELETE', path);
 }
