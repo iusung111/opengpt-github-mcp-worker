@@ -74,10 +74,13 @@ export function registerWriteTools(
 				message: z.string(),
 				content_b64: z.string(),
 				expected_blob_sha: z.string().optional(),
+				content_kind: z.enum(['text', 'binary']).optional(),
+				mime_type: z.string().optional(),
+				validate_only: z.boolean().optional(),
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, branch, path, message, content_b64, expected_blob_sha }) => {
+		async ({ owner, repo, branch, path, message, content_b64, expected_blob_sha, content_kind, mime_type, validate_only }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
@@ -86,6 +89,24 @@ export function registerWriteTools(
 				ensureSafePath(path);
 				await activateRepoWorkspace(env, repoKey);
 				atob(content_b64);
+
+				if (validate_only) {
+					return toolText(
+						ok(
+							{
+								validate_only: true,
+								repo_key: repoKey,
+								branch,
+								path,
+								content_kind: content_kind ?? null,
+								mime_type: mime_type ?? null,
+								expected_blob_sha: expected_blob_sha ?? null,
+							},
+							writeAnnotations,
+						),
+					);
+				}
+
 				const payload: Record<string, unknown> = {
 					message,
 					content: content_b64,
