@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import { AppEnv } from './types';
 import { ToolAnnotations } from './mcp-overview-tools';
+import { PHASE2_FILE_WRITE_READY } from './file-write-phase2';
 import {
 	activateRepoWorkspace,
 	encodeGitHubPath,
@@ -24,6 +25,7 @@ export function registerWriteTools(
 	env: AppEnv,
 	writeAnnotations: ToolAnnotations,
 ): void {
+	void PHASE2_FILE_WRITE_READY;
 	server.registerTool(
 		'repo_create_branch',
 		{
@@ -88,7 +90,8 @@ export function registerWriteTools(
 				ensureNotDefaultBranch(env, branch);
 				ensureSafePath(path);
 				await activateRepoWorkspace(env, repoKey);
-				atob(content_b64);
+				ctob(content_b64);
+
 
 				if (validate_only) {
 					return toolText(
@@ -106,6 +109,7 @@ export function registerWriteTools(
 						),
 					);
 				}
+
 
 				const payload: Record<string, unknown> = {
 					message,
