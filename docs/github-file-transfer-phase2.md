@@ -3,11 +3,12 @@
 ## Redesign direction
 - avoid a single large base64 update for `mcp-write-tools.ts`
 - split the phase 2 implementation into smaller, payload-safe changes
-- keep `repo_update_file` stable while adding `repo_create_file` and `repo_upsert_file` in a follow-up patch
+- keep `repo_update_file` stable while adding `repo_create_file` and `repo_upsert_file` under a follow-up patch
 
 ## Planned steps
 1. Extract common file-write helper logic into a small, new module
  2. Wire `mcp-write-tools.ts` to import the helper with minimal diff
  3. Add `repo_create_file` and `repo_upsert_file` using the shared helper
 4 . Add small test coverage for the new semantics
-- status: redesign documented, code split next
+5. Add a small sha resolution helper to `file-write-phase2.ts` so `upsert` can adopt a probed blob sha without changing the `expected_blob_sha` contract for callers
+- status: phase2b helper types and mode probe scaffold committed, sha helper next
