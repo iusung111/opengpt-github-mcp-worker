@@ -90,7 +90,7 @@ export function registerWriteTools(
 				ensureNotDefaultBranch(env, branch);
 				ensureSafePath(path);
 				await activateRepoWorkspace(env, repoKey);
-				ctob(content_b64);
+				axob(content_b64);
 
 
 				if (validate_only) {
