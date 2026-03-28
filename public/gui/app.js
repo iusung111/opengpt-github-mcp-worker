@@ -92,6 +92,7 @@ const state = {
 	toolMeta: null,
 	toolInput: {},
 	tab: 'overview',
+	assistantDraft: '',
 	selectedJobId: '',
 	selectedNotificationId: '',
 	selectedLogId: '',
@@ -162,6 +163,7 @@ function restoreViewState() {
 		const saved = JSON.parse(raw);
 		if (!hasRecord(saved)) return;
 		if (typeof saved.tab === 'string') state.tab = saved.tab;
+		if (typeof saved.assistantDraft === 'string') state.assistantDraft = saved.assistantDraft;
 		if (typeof saved.selectedJobId === 'string') state.selectedJobId = saved.selectedJobId;
 		if (hasRecord(saved.feedFilters)) {
 			state.feedFilters = {
@@ -181,6 +183,7 @@ function persistLocalViewState() {
 			VIEW_STATE_STORAGE_KEY,
 			JSON.stringify({
 				tab: state.tab,
+				assistantDraft: state.assistantDraft,
 				selectedJobId: state.selectedJobId,
 				feedFilters: state.feedFilters,
 			}),
@@ -205,6 +208,9 @@ function currentHostApi() {
 		},
 		canSendMessage() {
 			return Boolean((bridge && bridge.isConnected()) || (openai && typeof openai.sendFollowUpMessage === 'function'));
+		},
+		canRequestModal() {
+			return Boolean(openai && typeof openai.requestModal === 'function');
 		},
 		async callTool(name, args) {
 			if (bridge && bridge.isConnected()) {
@@ -236,6 +242,12 @@ function currentHostApi() {
 				return openai.sendFollowUpMessage(text);
 			}
 			throw new Error('Host follow-up messaging is unavailable in this environment.');
+		},
+		async requestModal(params) {
+			if (openai && typeof openai.requestModal === 'function') {
+				return openai.requestModal(params);
+			}
+			throw new Error('Host modal extension is unavailable in this environment.');
 		},
 		async openLink(href) {
 			if (bridge && bridge.isConnected()) {
@@ -541,6 +553,7 @@ function buildModelContextSnapshot() {
 	const summary = runSummary(state.payload);
 	const blocker = blockingState(state.payload);
 	const notification = latestNotification(state.payload);
+	const permissionBundle = model.permissionBundle && hasRecord(model.permissionBundle) ? model.permissionBundle : null;
 	return {
 		kind: 'opengpt.notification_widget.context',
 		job_id: (selectedRun && selectedRun.jobId) || deriveJobId(state.payload) || null,
@@ -590,6 +603,12 @@ function buildModelContextSnapshot() {
 					live: model.hostStatus.live || null,
 					mirror: model.hostStatus.mirror || null,
 					current_deploy: model.hostStatus.currentDeploy || null,
+				}
+			: null,
+		permission_bundle: permissionBundle
+			? {
+					status: permissionBundle.status || null,
+					bundle: permissionBundle.bundle || null,
 				}
 			: null,
 		host: {
@@ -842,6 +861,146 @@ function renderRepoBundle() {
 	</section>`;
 }
 
+function currentPermissionBundle() {
+	const model = currentModel();
+	return model.permissionBundle || null;
+}
+
+function defaultAssistantPrompt() {
+	const snapshot = buildModelContextSnapshot();
+	const jobId = snapshot.job_id ? ` for ${snapshot.job_id}` : '';
+	const blocker = snapshot.blocking_state;
+	if (blocker && blocker.kind && blocker.kind !== 'none') {
+		return `Summarize the current blocker${jobId}, propose the next operator action, and call any MCP tools needed to continue the run.`;
+	}
+	return `Summarize the current notification state${jobId}, propose the next operator action, and call any MCP tools needed to continue the run.`;
+}
+
+function buildApprovalFollowUpText() {
+	const permissionBundle = currentPermissionBundle();
+	const snapshot = buildModelContextSnapshot();
+	const blockedAction = snapshot.blocking_state && snapshot.blocking_state.blocked_action ? snapshot.blocking_state.blocked_action : null;
+	const requestText =
+		permissionBundle &&
+		permissionBundle.bundle &&
+		typeof permissionBundle.bundle.approval_request === 'string' &&
+		permissionBundle.bundle.approval_request
+			? permissionBundle.bundle.approval_request
+			: 'Request approval for the current MCP permission bundle before continuing.';
+	const repoList =
+		permissionBundle &&
+		permissionBundle.bundle &&
+		Array.isArray(permissionBundle.bundle.repos) &&
+		permissionBundle.bundle.repos.length
+			? permissionBundle.bundle.repos.join(', ')
+			: snapshot.repo || 'the current repository';
+	const lines = [
+		`${requestText}`,
+		'',
+		`Repository scope: ${repoList}`,
+	];
+	if (snapshot.job_id) {
+		lines.push(`Blocked job: ${snapshot.job_id}`);
+	}
+	if (blockedAction) {
+		lines.push(`Blocked action: ${blockedAction}`);
+	}
+	lines.push('If the user approves this bundle, continue the run from its current state and refresh the notification feed.');
+	return lines.join('\n');
+}
+
+function renderAssistantComposer(host) {
+	const draft = state.assistantDraft || defaultAssistantPrompt();
+	return `<section class="panel full-span">
+		<div class="stack-header">
+			<div><p class="panel-kicker">GPT command</p><h3>Send an operator instruction from the widget</h3></div>
+			<span class="metric-chip">${escapeHtml(host.canSendMessage() ? 'host message enabled' : 'host message unavailable')}</span>
+		</div>
+		<form class="command-form" data-form="assistant-command">
+			<label class="field-stack" for="assistant-command-text">
+				<span class="supporting-copy">This sends a follow-up user message through the MCP Apps bridge. It can steer GPT and trigger next tool calls, but it does not remote-control the ChatGPT/web GPT host UI.</span>
+				<textarea
+					id="assistant-command-text"
+					class="command-textarea"
+					name="assistantPrompt"
+					rows="5"
+					data-field="assistant-draft"
+					placeholder="Tell GPT what to do next..."
+				>${escapeHtml(draft)}</textarea>
+			</label>
+			<div class="action-row inline-actions">
+				<button class="action-button" type="submit"${host.canSendMessage() ? '' : ' disabled'}>Send to GPT</button>
+				<button class="mini-button" type="button" data-action="use-suggested-prompt">Use suggested prompt</button>
+				<button class="mini-button" type="button" data-action="ask-assistant"${host.canSendMessage() && state.payload ? '' : ' disabled'}>Quick ask</button>
+			</div>
+		</form>
+	</section>`;
+}
+
+function renderPermissionBundle(host) {
+	const permissionBundle = currentPermissionBundle();
+	if (!permissionBundle) {
+		return '<div class="empty-card">Prepare an approval bundle to show exact tools, capabilities, and follow-up steps.</div>';
+	}
+	const bundle = hasRecord(permissionBundle.bundle) ? permissionBundle.bundle : {};
+	const preset = hasRecord(bundle.preset) ? bundle.preset : null;
+	const repos = Array.isArray(bundle.repos) ? bundle.repos : [];
+	const capabilities = Array.isArray(bundle.capabilities) ? bundle.capabilities : [];
+	const approvedTools = Array.isArray(bundle.approved_tools) ? bundle.approved_tools : [];
+	const toolGroups = Array.isArray(bundle.tool_groups) ? bundle.tool_groups : [];
+	const recommendedFollowUp = Array.isArray(bundle.recommended_follow_up) ? bundle.recommended_follow_up : [];
+	const approvalRequest = typeof bundle.approval_request === 'string' ? bundle.approval_request : '';
+	return `<section class="panel full-span">
+		<div class="stack-header">
+			<div><p class="panel-kicker">Approval bundle</p><h3>${escapeHtml(preset && preset.label ? preset.label : 'Custom approval bundle')}</h3></div>
+			<span class="metric-chip">${escapeHtml(permissionBundle.status || 'ready_for_approval')}</span>
+		</div>
+		<div class="detail-grid">
+			<section class="panel compact-panel">
+				<div class="detail-list">
+					<div><span>Repositories</span><strong>${escapeHtml(repos.length || 0)}</strong></div>
+					<div><span>Capabilities</span><strong>${escapeHtml(capabilities.length || 0)}</strong></div>
+					<div><span>Tool groups</span><strong>${escapeHtml(toolGroups.length || 0)}</strong></div>
+					<div><span>Approved tools</span><strong>${escapeHtml(approvedTools.length || 0)}</strong></div>
+				</div>
+			</section>
+			<section class="panel compact-panel">
+				<h4>Approval request</h4>
+				<p class="supporting-copy">${escapeHtml(approvalRequest || 'No approval request text available.')}</p>
+				<div class="action-row inline-actions">
+					<button class="mini-button" type="button" data-action="request-approval-chat"${host.canSendMessage() ? '' : ' disabled'}>Request approval in chat</button>
+					<button class="mini-button" type="button" data-action="copy-approval-request">Copy request</button>
+				</div>
+				${host.canRequestModal() ? '<p class="supporting-copy">ChatGPT host modal extension is available, but approval still routes through the conversation because there is no standardized grant API in this widget yet.</p>' : ''}
+			</section>
+		</div>
+		<div class="detail-grid">
+			<section class="panel compact-panel">
+				<h4>Capabilities</h4>
+				<pre class="detail-json">${escapeHtml(JSON.stringify(capabilities, null, 2))}</pre>
+			</section>
+			<section class="panel compact-panel">
+				<h4>Approved tools</h4>
+				<pre class="detail-json">${escapeHtml(JSON.stringify(approvedTools, null, 2))}</pre>
+			</section>
+		</div>
+		<div class="detail-grid">
+			<section class="panel compact-panel">
+				<h4>Tool groups</h4>
+				<pre class="detail-json">${escapeHtml(JSON.stringify(toolGroups, null, 2))}</pre>
+			</section>
+			<section class="panel compact-panel">
+				<h4>Recommended follow-up</h4>
+				${recommendedFollowUp.length ? `<ul class="detail-list-block">${recommendedFollowUp
+					.map(function (item) {
+						return `<li>${escapeHtml(item)}</li>`;
+					})
+					.join('')}</ul>` : '<div class="empty-card">No recommended follow-up notes.</div>'}
+			</section>
+		</div>
+	</section>`;
+}
+
 function render() {
 	const model = currentModel();
 	const selectedRun = selectedRunRecord(model);
@@ -923,11 +1082,12 @@ function render() {
 					<button class="action-button secondary" type="button" data-action="load-host-status"${host.canCallTools() ? '' : ' disabled'}>Load self host status</button>
 					<button class="action-button secondary" type="button" data-action="prepare-approval"${host.canCallTools() && currentJobId && currentRepo && blocker && blocker.kind === 'approval' ? '' : ' disabled'}>Prepare approval</button>
 					<button class="action-button secondary" type="button" data-action="build-incident"${host.canCallTools() && currentRepo ? '' : ' disabled'}>Prepare repo bundle</button>
-					<button class="action-button secondary" type="button" data-action="ask-assistant"${host.canSendMessage() && state.payload ? '' : ' disabled'}>Ask assistant</button>
 					<button class="action-button secondary" type="button" data-action="open-full-page">Open full page</button>
 				</div>
 				<p class="supporting-copy">${host.canCallTools() ? 'This view uses the MCP Apps bridge first and falls back to window.openai only when the standard host bridge is absent.' : 'Standalone preview mode only shows demo data.'}</p>
 			</section>
+			${renderAssistantComposer(host)}
+			${state.tab === 'overview' ? renderPermissionBundle(host) : ''}
 			<section class="panel">
 				<p class="panel-kicker">Counts</p>
 				${hasRecord(counts(state.payload)) ? `<div class="count-grid">${['idle', 'pending_approval', 'running', 'completed', 'failed']
@@ -1031,6 +1191,7 @@ async function buildIncidentBundle() {
 }
 
 async function askAssistant() {
+	state.assistantDraft = defaultAssistantPrompt();
 	const host = currentHostApi();
 	if (!host.canSendMessage()) {
 		state.error = 'Host follow-up messaging is unavailable in this environment.';
@@ -1051,6 +1212,89 @@ async function askAssistant() {
 		await host.updateModelContext(snapshot);
 		await host.sendMessage(prompt);
 		state.message = 'Follow-up message sent to the host.';
+	} catch (error) {
+		state.error = error instanceof Error ? error.message : String(error);
+		state.message = '';
+	}
+	render();
+}
+
+async function sendAssistantCommand(promptText) {
+	const host = currentHostApi();
+	const prompt = typeof promptText === 'string' ? promptText.trim() : '';
+	if (!prompt) {
+		state.error = 'Enter a GPT instruction before sending it to the host conversation.';
+		render();
+		return;
+	}
+	if (!host.canSendMessage()) {
+		state.error = 'Host follow-up messaging is unavailable in this environment.';
+		render();
+		return;
+	}
+	state.assistantDraft = prompt;
+	state.error = '';
+	state.message = 'Sending GPT instruction to the host conversation...';
+	render();
+	try {
+		await host.updateModelContext(buildModelContextSnapshot());
+		await host.sendMessage(prompt);
+		state.message = 'GPT instruction sent to the host conversation.';
+	} catch (error) {
+		state.error = error instanceof Error ? error.message : String(error);
+		state.message = '';
+	}
+	render();
+}
+
+async function requestApprovalInChat() {
+	const host = currentHostApi();
+	const permissionBundle = currentPermissionBundle();
+	if (!permissionBundle) {
+		state.error = 'Prepare an approval bundle before requesting approval in chat.';
+		render();
+		return;
+	}
+	if (!host.canSendMessage()) {
+		state.error = 'Host follow-up messaging is unavailable in this environment.';
+		render();
+		return;
+	}
+	state.error = '';
+	state.message = 'Requesting approval in the host conversation...';
+	render();
+	try {
+		const snapshot = buildModelContextSnapshot();
+		await host.updateModelContext(snapshot);
+		await host.sendMessage(buildApprovalFollowUpText());
+		state.message = 'Approval request sent to the host conversation.';
+	} catch (error) {
+		state.error = error instanceof Error ? error.message : String(error);
+		state.message = '';
+	}
+	render();
+}
+
+async function copyApprovalRequest() {
+	const permissionBundle = currentPermissionBundle();
+	const requestText =
+		permissionBundle &&
+		permissionBundle.bundle &&
+		typeof permissionBundle.bundle.approval_request === 'string'
+			? permissionBundle.bundle.approval_request
+			: '';
+	if (!requestText) {
+		state.error = 'No approval request text is available yet.';
+		render();
+		return;
+	}
+	try {
+		if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+			throw new Error('Clipboard API unavailable');
+		}
+		await navigator.clipboard.writeText(requestText);
+		state.error = '';
+		state.message = 'Approval request copied to the clipboard.';
 	} catch (error) {
 		state.error = error instanceof Error ? error.message : String(error);
 		state.message = '';
@@ -1221,6 +1465,19 @@ root.addEventListener('click', function (event) {
 		prepareApprovalBundle();
 		return;
 	}
+	if (action === 'use-suggested-prompt') {
+		state.assistantDraft = defaultAssistantPrompt();
+		render();
+		return;
+	}
+	if (action === 'request-approval-chat') {
+		requestApprovalInChat();
+		return;
+	}
+	if (action === 'copy-approval-request') {
+		copyApprovalRequest();
+		return;
+	}
 	if (action === 'build-incident') {
 		buildIncidentBundle();
 		return;
@@ -1234,10 +1491,24 @@ root.addEventListener('click', function (event) {
 	}
 });
 
+root.addEventListener('input', function (event) {
+	const fieldTarget = event.target;
+	if (!(fieldTarget instanceof HTMLTextAreaElement)) return;
+	if (fieldTarget.getAttribute('data-field') !== 'assistant-draft') return;
+	state.assistantDraft = fieldTarget.value;
+	persistLocalViewState();
+});
+
 root.addEventListener('submit', function (event) {
 	const form = event.target;
-	if (!(form instanceof HTMLFormElement) || form.getAttribute('data-form') !== 'feed-filters') return;
+	if (!(form instanceof HTMLFormElement)) return;
 	event.preventDefault();
+	if (form.getAttribute('data-form') === 'assistant-command') {
+		const formData = new FormData(form);
+		void sendAssistantCommand(String(formData.get('assistantPrompt') || ''));
+		return;
+	}
+	if (form.getAttribute('data-form') !== 'feed-filters') return;
 	const formData = new FormData(form);
 	state.feedFilters = {
 		status: String(formData.get('status') || ''),

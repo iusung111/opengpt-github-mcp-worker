@@ -132,6 +132,23 @@ export function buildModelContextText(snapshot) {
 	if (snapshot.latest_notification && snapshot.latest_notification.body) {
 		lines.push(`Notification detail: ${snapshot.latest_notification.body}`);
 	}
+	if (snapshot.permission_bundle && snapshot.permission_bundle.status) {
+		lines.push(`Permission bundle status: ${snapshot.permission_bundle.status}`);
+	}
+	const permissionBundle =
+		hasRecord(snapshot.permission_bundle) && hasRecord(snapshot.permission_bundle.bundle)
+			? snapshot.permission_bundle.bundle
+			: null;
+	if (permissionBundle && Array.isArray(permissionBundle.repos) && permissionBundle.repos.length) {
+		lines.push(`Permission scope: ${permissionBundle.repos.join(', ')}`);
+	}
+	if (
+		permissionBundle &&
+		typeof permissionBundle.approval_request === 'string' &&
+		permissionBundle.approval_request
+	) {
+		lines.push(`Approval request: ${permissionBundle.approval_request}`);
+	}
 	lines.push('Use this context to continue the current run or explain the next operator action.');
 	return lines.join('\n');
 }

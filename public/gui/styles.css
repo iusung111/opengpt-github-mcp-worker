@@ -204,7 +204,8 @@ h3 {
 .action-button,
 .mini-button,
 select,
-input[type="number"] {
+input[type="number"],
+textarea {
 	border: 1px solid transparent;
 	font: inherit;
 }
@@ -315,6 +316,10 @@ input[type="number"] {
 	margin-top: 6px;
 }
 
+.inline-actions {
+	align-items: center;
+}
+
 .action-button,
 .mini-button {
 	padding: 11px 16px;
@@ -342,12 +347,26 @@ input[type="number"] {
 }
 
 select,
-input[type="number"] {
+input[type="number"],
+.command-textarea {
 	padding: 10px 12px;
 	border-radius: 16px;
 	border-color: var(--color-border-secondary, rgba(129, 92, 62, 0.16));
 	background: var(--color-background-primary, rgba(255, 255, 255, 0.84));
 	color: var(--color-text-primary, var(--text));
+}
+
+.command-form,
+.field-stack {
+	display: grid;
+	gap: 12px;
+}
+
+.command-textarea {
+	width: 100%;
+	min-height: 132px;
+	resize: vertical;
+	line-height: 1.58;
 }
 
 .table-shell {
@@ -447,6 +466,15 @@ input[type="number"] {
 .detail-block {
 	display: grid;
 	gap: 12px;
+}
+
+.detail-list-block {
+	margin: 0;
+	padding-left: 18px;
+	display: grid;
+	gap: 8px;
+	color: var(--color-text-secondary, var(--muted));
+	line-height: 1.58;
 }
 
 .detail-json {
