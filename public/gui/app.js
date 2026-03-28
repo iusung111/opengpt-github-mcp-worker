@@ -2,9 +2,10 @@ import {
 	applyHostContextToDocument,
 	buildModelContextText,
 	createMcpUiBridge,
-	extractStructuredResult,
+	extractToolResultEnvelope,
 	hasRecord,
 } from './bridge-core.mjs';
+import { normalizeNotificationToolState } from './notification-model.mjs';
 
 const root = document.getElementById('notification-app');
 if (!root) {
@@ -21,7 +22,7 @@ const VIEW_STATE_STORAGE_KEY = 'opengpt.notification-center.view';
 const APP_INFO = {
 	name: 'opengpt-notification-center',
 	title: 'OpenGPT Notification Center',
-	version: '1.1.0',
+	version: '1.2.0',
 	websiteUrl: `${config.appOrigin}/gui/`,
 };
 
@@ -78,13 +79,28 @@ const demoPayload = {
 	],
 };
 
+const demoToolMeta = {
+	'opengpt/widget': {
+		version: 1,
+		kind: demoPayload.kind,
+		data: demoPayload,
+	},
+};
+
 const state = {
 	payload: null,
+	toolMeta: null,
 	toolInput: {},
 	tab: 'overview',
 	selectedJobId: '',
+	selectedNotificationId: '',
+	selectedLogId: '',
 	cachedRunSummary: null,
 	cachedBlockingState: null,
+	cachedRepoKey: '',
+	cachedHostStatus: null,
+	cachedRepoBundle: null,
+	cachedPermissionBundle: null,
 	feedFilters: { status: '', sourceLayer: '', limit: 50 },
 	message: '',
 	error: '',
@@ -133,6 +149,10 @@ function statusLabel(status) {
 
 function statusPill(status) {
 	return `<span class="status-pill ${escapeHtml(statusTone(status))}">${escapeHtml(statusLabel(status))}</span>`;
+}
+
+function selectedAttr(currentValue, optionValue) {
+	return currentValue === optionValue ? ' selected' : '';
 }
 
 function restoreViewState() {
@@ -248,14 +268,25 @@ function currentHostApi() {
 	};
 }
 
+function coerceToolEnvelope(value) {
+	const extracted = extractToolResultEnvelope(value);
+	if (extracted && (extracted.structuredContent || extracted.meta)) {
+		return extracted;
+	}
+	if (hasRecord(value) && typeof value.kind === 'string') {
+		return { structuredContent: value, meta: null };
+	}
+	return null;
+}
+
 function hostToolOutput() {
 	const openai = openaiBridge();
 	if (openai && hasRecord(openai.toolOutput)) {
-		return openai.toolOutput;
+		return coerceToolEnvelope(openai.toolOutput);
 	}
 	if (state.mcpBridge && state.mcpBridge.isConnected()) {
 		const bridgeState = state.mcpBridge.getState();
-		return extractStructuredResult(bridgeState.toolOutput);
+		return coerceToolEnvelope(bridgeState.toolOutput);
 	}
 	return null;
 }
@@ -277,6 +308,60 @@ function splitRepoKey(repoKey) {
 	const parts = repoKey.split('/');
 	if (parts.length !== 2) return null;
 	return { owner: parts[0], repo: parts[1] };
+}
+
+function currentModel(payload = state.payload, meta = state.toolMeta) {
+	const model = normalizeNotificationToolState(payload, meta, {
+		cachedRunSummary: state.cachedRunSummary,
+		cachedBlockingState: state.cachedBlockingState,
+		cachedRepoKey: state.cachedRepoKey,
+		selectedJobId: state.selectedJobId,
+	});
+	if (!model.hostStatus && hasRecord(state.cachedHostStatus)) {
+		model.hostStatus = state.cachedHostStatus;
+	}
+	if (!model.repoBundle && hasRecord(state.cachedRepoBundle)) {
+		model.repoBundle = state.cachedRepoBundle;
+	}
+	if (!model.permissionBundle && hasRecord(state.cachedPermissionBundle)) {
+		model.permissionBundle = state.cachedPermissionBundle;
+	}
+	return model;
+}
+
+function selectedRunRecord(model = currentModel()) {
+	if (!Array.isArray(model.runs) || !model.runs.length) return null;
+	return model.runs.find(function (run) {
+		return run.jobId === state.selectedJobId;
+	}) || model.runs[0] || null;
+}
+
+function selectedNotificationRecord(model = currentModel()) {
+	if (!Array.isArray(model.notifications) || !model.notifications.length) return null;
+	return (
+		model.notifications.find(function (item) {
+			return item.id === state.selectedNotificationId;
+		}) ||
+		model.notifications.find(function (item) {
+			return item.jobId === state.selectedJobId;
+		}) ||
+		model.notifications[0] ||
+		null
+	);
+}
+
+function selectedLogRecord(model = currentModel()) {
+	if (!Array.isArray(model.logs) || !model.logs.length) return null;
+	return (
+		model.logs.find(function (item) {
+			return item.id === state.selectedLogId;
+		}) ||
+		model.logs.find(function (item) {
+			return item.jobId === state.selectedJobId;
+		}) ||
+		model.logs[0] ||
+		null
+	);
 }
 
 function selectedJob(payload) {
@@ -304,6 +389,9 @@ function currentIncidentRun(payload) {
 }
 
 function deriveJobId(payload) {
+	const model = currentModel(payload, state.toolMeta);
+	const run = selectedRunRecord(model);
+	if (run && run.jobId) return run.jobId;
 	if (!hasRecord(payload)) return '';
 	if (payload.kind === 'opengpt.notification_contract.job_progress') {
 		return payload.progress && payload.progress.job_id ? String(payload.progress.job_id) : '';
@@ -327,6 +415,10 @@ function deriveJobId(payload) {
 }
 
 function currentRepoKey(payload) {
+	const model = currentModel(payload, state.toolMeta);
+	const run = selectedRunRecord(model);
+	if (run && run.repo) return run.repo;
+	if (model.repoBundle && model.repoBundle.repo) return model.repoBundle.repo;
 	if (!hasRecord(payload)) return '';
 	if (payload.kind === 'opengpt.notification_contract.job_progress') {
 		return payload.progress && typeof payload.progress.repo === 'string' ? payload.progress.repo : '';
@@ -389,6 +481,8 @@ function latestNotification(payload) {
 }
 
 function counts(payload) {
+	const model = currentModel(payload, state.toolMeta);
+	if (hasRecord(model.counts)) return model.counts;
 	if (!hasRecord(payload)) return null;
 	if (payload.kind === 'opengpt.notification_contract.job_progress') return payload.notification_counts || null;
 	if (payload.kind === 'opengpt.notification_contract.job_event_feed') return payload.counts || null;
@@ -398,21 +492,37 @@ function counts(payload) {
 function refreshContextCache() {
 	const summary = runSummary(state.payload);
 	const blocker = blockingState(state.payload);
+	const model = currentModel();
+	const run = selectedRunRecord(model);
 	if (hasRecord(summary)) {
 		state.cachedRunSummary = summary;
 	}
 	if (hasRecord(blocker)) {
 		state.cachedBlockingState = blocker;
 	}
+	if (run && run.repo) {
+		state.cachedRepoKey = run.repo;
+	}
+	if (model.hostStatus) {
+		state.cachedHostStatus = model.hostStatus;
+	}
+	if (model.repoBundle) {
+		state.cachedRepoBundle = model.repoBundle;
+	}
+	if (model.permissionBundle) {
+		state.cachedPermissionBundle = model.permissionBundle;
+	}
 }
 
 function syncCapture() {
+	const model = currentModel();
+	const run = selectedRunRecord(model);
 	const summary = {
 		screen: state.payload ? 'notification-ready' : 'idle',
 		mode: config.mode,
 		hostMode: currentBridgeLabel(),
-		kind: state.payload && state.payload.kind ? state.payload.kind : null,
-		jobId: deriveJobId(state.payload),
+		kind: model.kind || (state.payload && state.payload.kind ? state.payload.kind : null),
+		jobId: run && run.jobId ? run.jobId : deriveJobId(state.payload),
 		tab: state.tab,
 		captureReady: Boolean(state.payload),
 		generatedAt: new Date().toISOString(),
@@ -425,19 +535,46 @@ function syncCapture() {
 }
 
 function buildModelContextSnapshot() {
+	const model = currentModel();
+	const selectedRun = selectedRunRecord(model);
+	const selectedNotification = selectedNotificationRecord(model);
 	const summary = runSummary(state.payload);
 	const blocker = blockingState(state.payload);
 	const notification = latestNotification(state.payload);
 	return {
 		kind: 'opengpt.notification_widget.context',
-		job_id: deriveJobId(state.payload) || null,
-		repo: currentRepoKey(state.payload) || null,
+		job_id: (selectedRun && selectedRun.jobId) || deriveJobId(state.payload) || null,
+		repo: (selectedRun && selectedRun.repo) || currentRepoKey(state.payload) || null,
 		tab: state.tab,
-		payload_kind: state.payload && state.payload.kind ? state.payload.kind : null,
+		payload_kind: model.kind || (state.payload && state.payload.kind ? state.payload.kind : null),
 		feed_filters: { ...state.feedFilters },
-		run_summary: summary ? { ...summary } : null,
+		run_summary: selectedRun
+			? {
+					run_id: selectedRun.runId,
+					job_id: selectedRun.jobId,
+					title: selectedRun.title,
+					status: selectedRun.status,
+					progress_percent: selectedRun.progress,
+					last_event: selectedRun.lastEvent || null,
+					approval_reason: selectedRun.approvalReason,
+					updated_at: selectedRun.updatedAt || null,
+					workflow_run_id: selectedRun.workflowRunId,
+					pr_number: selectedRun.prNumber,
+				}
+			: summary
+				? { ...summary }
+				: null,
 		blocking_state: blocker ? { ...blocker } : null,
-		latest_notification: notification
+		latest_notification: selectedNotification
+			? {
+					id: selectedNotification.id,
+					title: selectedNotification.title,
+					body: selectedNotification.body,
+					status: selectedNotification.type,
+					source_layer: selectedNotification.sourceLayer,
+					created_at: selectedNotification.createdAt || null,
+				}
+			: notification
 			? {
 					id: notification.id ?? null,
 					title: notification.title ?? null,
@@ -445,6 +582,14 @@ function buildModelContextSnapshot() {
 					status: notification.status ?? null,
 					source_layer: notification.source_layer ?? null,
 					created_at: notification.created_at ?? null,
+				}
+			: null,
+		host_status: model.hostStatus
+			? {
+					self_repo_key: model.hostStatus.selfRepoKey || null,
+					live: model.hostStatus.live || null,
+					mirror: model.hostStatus.mirror || null,
+					current_deploy: model.hostStatus.currentDeploy || null,
 				}
 			: null,
 		host: {
@@ -499,62 +644,87 @@ function renderHostFacts() {
 }
 
 function renderJobs(payload) {
-	const jobs =
-		payload && payload.kind === 'opengpt.notification_contract.jobs_list'
-			? payload.jobs
-			: payload && payload.kind === 'opengpt.notification_contract.incident_bundle'
-				? payload.runs
-				: [];
-	if (!Array.isArray(jobs) || !jobs.length) return '<div class="empty-card">No jobs available.</div>';
-	return `<div class="table-shell"><table class="data-table"><thead><tr><th>Job</th><th>Status</th><th>Last event</th><th></th></tr></thead><tbody>${jobs
-		.map(function (job) {
-			const summary = job.run_summary || {};
-			return `<tr class="${job.job_id === state.selectedJobId ? 'selected-row' : ''}">
-				<td><strong>${escapeHtml(job.job_id || 'unknown')}</strong><div class="cell-muted">${escapeHtml(job.repo || 'n/a')}</div></td>
-				<td>${statusPill(summary.status || 'idle')}</td>
-				<td>${escapeHtml(summary.last_event || 'No event')}</td>
-				<td><button class="mini-button" type="button" data-action="open-job" data-job-id="${escapeHtml(job.job_id || '')}">Open</button></td>
+	const model = currentModel(payload, state.toolMeta);
+	if (!Array.isArray(model.runs) || !model.runs.length) return '<div class="empty-card">No jobs available.</div>';
+	return `<div class="table-shell"><table class="data-table"><thead><tr><th>Job</th><th>Status</th><th>Last event</th><th></th></tr></thead><tbody>${model.runs
+		.map(function (run) {
+			return `<tr class="${run.jobId === state.selectedJobId ? 'selected-row' : ''}">
+				<td><strong>${escapeHtml(run.jobId || 'unknown')}</strong><div class="cell-muted">${escapeHtml(run.repo || 'n/a')}</div></td>
+				<td>${statusPill(run.status || 'idle')}</td>
+				<td>${escapeHtml(run.lastEvent || run.summary || 'No event')}</td>
+				<td><button class="mini-button" type="button" data-action="open-job" data-job-id="${escapeHtml(run.jobId || '')}">Open</button></td>
 			</tr>`;
 		})
 		.join('')}</tbody></table></div>`;
 }
 
+function renderNotificationDetail(item) {
+	if (!item) {
+		return '<div class="empty-card">Select a notification to inspect its details.</div>';
+	}
+	const refs = item.linkedRefs && Object.keys(item.linkedRefs).length ? JSON.stringify(item.linkedRefs, null, 2) : '';
+	return `<article class="detail-card">
+		<div class="stack-header"><div><p class="panel-kicker">Notification detail</p><h4>${escapeHtml(item.title)}</h4></div>${statusPill(item.type)}</div>
+		<p>${escapeHtml(item.body || 'No message body')}</p>
+		<div class="detail-list">
+			<div><span>Run</span><strong>${escapeHtml(item.runId || 'n/a')}</strong></div>
+			<div><span>Job</span><strong>${escapeHtml(item.jobId || 'n/a')}</strong></div>
+			<div><span>Source</span><strong>${escapeHtml(item.sourceLayer || 'system')}</strong></div>
+			<div><span>Created</span><strong>${escapeHtml(item.createdAt ? formatTime(item.createdAt) : 'n/a')}</strong></div>
+		</div>
+		${refs ? `<pre class="detail-json">${escapeHtml(refs)}</pre>` : ''}
+	</article>`;
+}
+
+function renderLogDetail(entry) {
+	if (!entry) {
+		return '<div class="empty-card">Select a layer log to inspect its details.</div>';
+	}
+	return `<article class="detail-card">
+		<div class="stack-header"><div><p class="panel-kicker">Layer log detail</p><h4>${escapeHtml(entry.source || 'system')}</h4></div><span class="log-level">${escapeHtml(entry.level || 'info')}</span></div>
+		<p>${escapeHtml(entry.message || 'No log message')}</p>
+		<div class="detail-list">
+			<div><span>Run</span><strong>${escapeHtml(entry.runId || 'n/a')}</strong></div>
+			<div><span>Job</span><strong>${escapeHtml(entry.jobId || 'n/a')}</strong></div>
+			<div><span>Timestamp</span><strong>${escapeHtml(entry.ts ? formatTime(entry.ts) : 'n/a')}</strong></div>
+		</div>
+		<pre class="detail-json">${escapeHtml(JSON.stringify(entry.raw || {}, null, 2))}</pre>
+	</article>`;
+}
+
 function renderEvents(payload) {
-	const items =
-		payload && payload.kind === 'opengpt.notification_contract.job_event_feed'
-			? payload.items
-			: latestNotification(payload)
-				? [latestNotification(payload)]
-				: [];
-	const logs =
-		payload && payload.kind === 'opengpt.notification_contract.job_event_feed'
-			? payload.logs
-			: payload && payload.kind === 'opengpt.notification_contract.incident_bundle'
-				? payload.layer_logs
-				: [];
+	const model = currentModel(payload, state.toolMeta);
+	const items = Array.isArray(model.notifications) ? model.notifications : [];
+	const logs = Array.isArray(model.logs) ? model.logs : [];
+	const selectedNotification = selectedNotificationRecord(model);
+	const selectedLog = selectedLogRecord(model);
 	const host = currentHostApi();
 	const currentJobId = deriveJobId(payload);
 	return `<section class="panel full-span">
 		<div class="tab-header">
 			<div><p class="panel-kicker">Event feed</p><h3>Notifications and layer logs</h3></div>
 			<form class="filter-row" data-form="feed-filters">
-				<select name="status"><option value="">All status</option><option value="pending_approval">pending approval</option><option value="running">running</option><option value="completed">completed</option><option value="failed">failed</option></select>
-				<select name="sourceLayer"><option value="">All sources</option><option value="gpt">gpt</option><option value="mcp">mcp</option><option value="cloudflare">cloudflare</option><option value="repo">repo</option><option value="system">system</option></select>
+				<select name="status"><option value=""${selectedAttr(state.feedFilters.status, '')}>All status</option><option value="pending_approval"${selectedAttr(state.feedFilters.status, 'pending_approval')}>pending approval</option><option value="running"${selectedAttr(state.feedFilters.status, 'running')}>running</option><option value="completed"${selectedAttr(state.feedFilters.status, 'completed')}>completed</option><option value="failed"${selectedAttr(state.feedFilters.status, 'failed')}>failed</option></select>
+				<select name="sourceLayer"><option value=""${selectedAttr(state.feedFilters.sourceLayer, '')}>All sources</option><option value="gpt"${selectedAttr(state.feedFilters.sourceLayer, 'gpt')}>gpt</option><option value="mcp"${selectedAttr(state.feedFilters.sourceLayer, 'mcp')}>mcp</option><option value="cloudflare"${selectedAttr(state.feedFilters.sourceLayer, 'cloudflare')}>cloudflare</option><option value="repo"${selectedAttr(state.feedFilters.sourceLayer, 'repo')}>repo</option><option value="system"${selectedAttr(state.feedFilters.sourceLayer, 'system')}>system</option></select>
 				<input name="limit" type="number" min="1" max="200" value="${escapeHtml(state.feedFilters.limit)}" />
 				<button class="mini-button" type="submit"${host.canCallTools() && currentJobId ? '' : ' disabled'}>Reload</button>
 			</form>
 		</div>
-		<div class="split-grid">
+		<div class="detail-grid">
 			<section class="panel compact-panel">${Array.isArray(items) && items.length ? `<div class="timeline">${items
 				.map(function (item) {
-					return `<article class="timeline-item"><div class="timeline-rail ${escapeHtml(statusTone(item.status))}"></div><div class="timeline-body"><div class="stack-header"><h4>${escapeHtml(item.title || item.id || 'Notification')}</h4>${statusPill(item.status)}</div><p>${escapeHtml(item.body || 'No message')}</p><div class="meta-row"><span>${escapeHtml(item.source_layer || 'system')}</span><span>${escapeHtml(formatTime(item.created_at))}</span></div></div></article>`;
+					return `<button class="timeline-item selector-card${item.id === state.selectedNotificationId ? ' is-selected' : ''}" type="button" data-action="select-notification" data-notification-id="${escapeHtml(item.id)}"><div class="timeline-rail ${escapeHtml(statusTone(item.type))}"></div><div class="timeline-body"><div class="stack-header"><h4>${escapeHtml(item.title || item.id || 'Notification')}</h4>${statusPill(item.type)}</div><p>${escapeHtml(item.body || 'No message')}</p><div class="meta-row"><span>${escapeHtml(item.sourceLayer || 'system')}</span><span>${escapeHtml(formatTime(item.createdAt))}</span></div></div></button>`;
 				})
 				.join('')}</div>` : '<div class="empty-card">No notification items.</div>'}</section>
+			<section class="panel compact-panel">${renderNotificationDetail(selectedNotification)}</section>
+		</div>
+		<div class="detail-grid">
 			<section class="panel compact-panel">${Array.isArray(logs) && logs.length ? `<div class="log-list">${logs
 				.map(function (entry) {
-					return `<article class="log-entry ${escapeHtml(entry.level || 'info')}"><div class="stack-header"><h4>${escapeHtml(entry.source_layer || 'system')}</h4><span class="log-level">${escapeHtml(entry.level || 'info')}</span></div><p>${escapeHtml(entry.message || 'No log message')}</p><div class="meta-row"><span>${escapeHtml(entry.job_id || 'no job')}</span><span>${escapeHtml(formatTime(entry.created_at))}</span></div></article>`;
+					return `<button class="log-entry selector-card ${escapeHtml(entry.level || 'info')}${entry.id === state.selectedLogId ? ' is-selected' : ''}" type="button" data-action="select-log" data-log-id="${escapeHtml(entry.id)}"><div class="stack-header"><h4>${escapeHtml(entry.source || 'system')}</h4><span class="log-level">${escapeHtml(entry.level || 'info')}</span></div><p>${escapeHtml(entry.message || 'No log message')}</p><div class="meta-row"><span>${escapeHtml(entry.jobId || 'no job')}</span><span>${escapeHtml(formatTime(entry.ts))}</span></div></button>`;
 				})
 				.join('')}</div>` : '<div class="empty-card">No layer logs.</div>'}</section>
+			<section class="panel compact-panel">${renderLogDetail(selectedLog)}</section>
 		</div>
 	</section>`;
 }
@@ -567,7 +737,115 @@ function approvalPresetForAction(blockedAction) {
 	return 'implementation_with_workflow';
 }
 
+function renderHostStatus() {
+	const model = currentModel();
+	if (!model.hostStatus) {
+		return '<div class="empty-card">Load self host status to inspect live and mirror deployment health.</div>';
+	}
+	const liveHealth = model.hostStatus.live && hasRecord(model.hostStatus.live.healthz) ? model.hostStatus.live.healthz : null;
+	const mirrorHealth = model.hostStatus.mirror && hasRecord(model.hostStatus.mirror.healthz) ? model.hostStatus.mirror.healthz : null;
+	const currentDeploy = model.hostStatus.currentDeploy && hasRecord(model.hostStatus.currentDeploy) ? model.hostStatus.currentDeploy : null;
+	const workflowAllowlist =
+		model.hostStatus.workflowAllowlist && hasRecord(model.hostStatus.workflowAllowlist)
+			? model.hostStatus.workflowAllowlist
+			: null;
+	const readObservability =
+		model.hostStatus.readObservability && hasRecord(model.hostStatus.readObservability)
+			? model.hostStatus.readObservability
+			: null;
+	const counters =
+		readObservability && hasRecord(readObservability.counters) ? readObservability.counters : null;
+	const warningMarkup =
+		Array.isArray(model.hostStatus.warnings) && model.hostStatus.warnings.length
+			? `<section class="panel compact-panel">
+				<h4>Warnings</h4>
+				<div class="log-list">${model.hostStatus.warnings
+					.map(function (warning, index) {
+						return `<article class="log-entry warn"><div class="stack-header"><h4>Warning ${index + 1}</h4><span class="log-level">warn</span></div><p>${escapeHtml(warning)}</p></article>`;
+					})
+					.join('')}</div>
+			</section>`
+			: '';
+	return `<section class="panel full-span">
+		<div class="stack-header"><div><p class="panel-kicker">Self host status</p><h3>${escapeHtml(model.hostStatus.selfRepoKey || 'self repo')}</h3></div><span class="metric-chip">${escapeHtml(model.hostStatus.selfDeployWorkflow || 'n/a')}</span></div>
+		<div class="detail-grid">
+			<section class="panel compact-panel">
+				<h4>Live</h4>
+				<div class="detail-list">
+					<div><span>URL</span><strong>${escapeHtml(model.hostStatus.live && model.hostStatus.live.url ? model.hostStatus.live.url : 'n/a')}</strong></div>
+					<div><span>Deploy env</span><strong>${escapeHtml(liveHealth && liveHealth.deploy_environment ? liveHealth.deploy_environment : 'n/a')}</strong></div>
+					<div><span>Release</span><strong>${escapeHtml(liveHealth && liveHealth.release_commit_sha ? liveHealth.release_commit_sha : 'n/a')}</strong></div>
+				</div>
+			</section>
+			<section class="panel compact-panel">
+				<h4>Mirror</h4>
+				<div class="detail-list">
+					<div><span>URL</span><strong>${escapeHtml(model.hostStatus.mirror && model.hostStatus.mirror.url ? model.hostStatus.mirror.url : 'n/a')}</strong></div>
+					<div><span>Deploy env</span><strong>${escapeHtml(mirrorHealth && mirrorHealth.deploy_environment ? mirrorHealth.deploy_environment : 'n/a')}</strong></div>
+					<div><span>Release</span><strong>${escapeHtml(mirrorHealth && mirrorHealth.release_commit_sha ? mirrorHealth.release_commit_sha : 'n/a')}</strong></div>
+				</div>
+			</section>
+		</div>
+		<div class="detail-grid">
+			<section class="panel compact-panel">
+				<h4>Current deploy</h4>
+				<div class="detail-list">
+					<div><span>Environment</span><strong>${escapeHtml(currentDeploy && currentDeploy.environment ? currentDeploy.environment : 'unknown')}</strong></div>
+					<div><span>Current URL</span><strong>${escapeHtml(currentDeploy && currentDeploy.current_url ? currentDeploy.current_url : 'n/a')}</strong></div>
+					<div><span>Release SHA</span><strong>${escapeHtml(currentDeploy && currentDeploy.release_commit_sha ? currentDeploy.release_commit_sha : 'n/a')}</strong></div>
+				</div>
+			</section>
+			<section class="panel compact-panel">
+				<h4>Workflow allowlist</h4>
+				<div class="detail-list">
+					<div><span>Self repo workflows</span><strong>${escapeHtml(workflowAllowlist && Array.isArray(workflowAllowlist.self_repo) ? workflowAllowlist.self_repo.length : 0)}</strong></div>
+					<div><span>Global workflows</span><strong>${escapeHtml(workflowAllowlist && Array.isArray(workflowAllowlist.global) ? workflowAllowlist.global.length : 0)}</strong></div>
+					<div><span>Repos covered</span><strong>${escapeHtml(workflowAllowlist && hasRecord(workflowAllowlist.by_repo) ? Object.keys(workflowAllowlist.by_repo).length : 0)}</strong></div>
+				</div>
+			</section>
+		</div>
+		<div class="detail-grid">
+			<section class="panel compact-panel">
+				<h4>Observability counters</h4>
+				<pre class="detail-json">${escapeHtml(JSON.stringify(counters || {}, null, 2))}</pre>
+			</section>
+			<section class="panel compact-panel">
+				<h4>Recent self deploy runs</h4>
+				<pre class="detail-json">${escapeHtml(JSON.stringify(model.hostStatus.recentRuns || [], null, 2))}</pre>
+			</section>
+		</div>
+		${warningMarkup}
+	</section>`;
+}
+
+function renderRepoBundle() {
+	const model = currentModel();
+	if (!model.repoBundle) {
+		return '<div class="empty-card">Prepare a repo bundle to gather incident data, artifacts, and layer logs.</div>';
+	}
+	return `<section class="panel full-span">
+		<div class="stack-header"><div><p class="panel-kicker">Repo bundle</p><h3>${escapeHtml(model.repoBundle.bundleId || 'bundle')}</h3></div><span class="metric-chip">${escapeHtml(model.repoBundle.scope || 'job')}</span></div>
+		<div class="detail-grid">
+			<section class="panel compact-panel">
+				<div class="detail-list">
+					<div><span>Repo</span><strong>${escapeHtml(model.repoBundle.repo || 'n/a')}</strong></div>
+					<div><span>Artifacts</span><strong>${escapeHtml(model.repoBundle.artifacts.length)}</strong></div>
+					<div><span>Layer logs</span><strong>${escapeHtml(model.repoBundle.layerLogs.length)}</strong></div>
+					<div><span>Error logs</span><strong>${escapeHtml(model.repoBundle.errorLogs.length)}</strong></div>
+				</div>
+			</section>
+			<section class="panel compact-panel">
+				<h4>Bundle summary</h4>
+				<pre class="detail-json">${escapeHtml(JSON.stringify(model.repoBundle.summary || {}, null, 2))}</pre>
+			</section>
+		</div>
+	</section>`;
+}
+
 function render() {
+	const model = currentModel();
+	const selectedRun = selectedRunRecord(model);
+	const selectedItem = selectedNotificationRecord(model);
 	const summary = runSummary(state.payload);
 	const blocker = blockingState(state.payload);
 	const notification = latestNotification(state.payload);
@@ -575,6 +853,8 @@ function render() {
 	const currentJobId = deriveJobId(state.payload);
 	const currentRepo = currentRepoKey(state.payload);
 	if (!state.selectedJobId && currentJobId) state.selectedJobId = currentJobId;
+	if (!state.selectedNotificationId && selectedItem) state.selectedNotificationId = selectedItem.id;
+	if (!state.selectedLogId && model.logs && model.logs[0]) state.selectedLogId = model.logs[0].id;
 
 	root.innerHTML = `<div class="app-shell ${escapeHtml(config.mode)}">
 		<header class="topbar">
@@ -640,12 +920,13 @@ function render() {
 					<button class="action-button secondary" type="button" data-action="load-jobs"${host.canCallTools() ? '' : ' disabled'}>Load jobs</button>
 					<button class="action-button" type="button" data-action="refresh-current"${host.canCallTools() && currentJobId ? '' : ' disabled'}>Refresh run</button>
 					<button class="action-button" type="button" data-action="load-feed"${host.canCallTools() && currentJobId ? '' : ' disabled'}>Load event feed</button>
+					<button class="action-button secondary" type="button" data-action="load-host-status"${host.canCallTools() ? '' : ' disabled'}>Load self host status</button>
 					<button class="action-button secondary" type="button" data-action="prepare-approval"${host.canCallTools() && currentJobId && currentRepo && blocker && blocker.kind === 'approval' ? '' : ' disabled'}>Prepare approval</button>
-					<button class="action-button secondary" type="button" data-action="build-incident"${host.canCallTools() && currentRepo ? '' : ' disabled'}>Build incident</button>
+					<button class="action-button secondary" type="button" data-action="build-incident"${host.canCallTools() && currentRepo ? '' : ' disabled'}>Prepare repo bundle</button>
 					<button class="action-button secondary" type="button" data-action="ask-assistant"${host.canSendMessage() && state.payload ? '' : ' disabled'}>Ask assistant</button>
 					<button class="action-button secondary" type="button" data-action="open-full-page">Open full page</button>
 				</div>
-				<p class="supporting-copy">${host.canCallTools() ? 'This view can call MCP tools directly through the host bridge and push view context back to the model.' : 'Standalone preview mode only shows demo data.'}</p>
+				<p class="supporting-copy">${host.canCallTools() ? 'This view uses the MCP Apps bridge first and falls back to window.openai only when the standard host bridge is absent.' : 'Standalone preview mode only shows demo data.'}</p>
 			</section>
 			<section class="panel">
 				<p class="panel-kicker">Counts</p>
@@ -655,9 +936,10 @@ function render() {
 					})
 					.join('')}</div>` : '<div class="empty-card">No derived counters yet.</div>'}
 			</section>
+			${state.tab === 'overview' ? renderHostStatus() : ''}
 			${state.tab === 'jobs' ? `<section class="panel full-span"><p class="panel-kicker">Jobs</p>${renderJobs(state.payload)}</section>` : ''}
 			${state.tab === 'events' ? renderEvents(state.payload) : ''}
-			${state.tab === 'incident' ? `<section class="panel full-span"><p class="panel-kicker">Incident bundle</p>${renderJobs(state.payload)}${renderEvents(state.payload)}</section>` : ''}
+			${state.tab === 'incident' ? `${renderRepoBundle()}${renderEvents(state.payload)}` : ''}
 		</main>
 		<section class="panel capture-panel">
 			<div class="stack-header"><div><p class="panel-kicker">Capture state</p><h3>Stable summary for browser capture and manual inspection</h3></div>${statusPill(state.payload ? 'completed' : 'idle')}</div>
@@ -686,14 +968,22 @@ async function runTool(name, args, nextTab) {
 	render();
 	try {
 		const result = await host.callTool(name, args);
-		const payload = extractStructuredResult(result);
-		if (!payload) throw new Error(`${name} returned no structured content`);
-		state.payload = payload;
+		const envelope = coerceToolEnvelope(result);
+		if (!envelope || (!envelope.structuredContent && !envelope.meta)) {
+			throw new Error(`${name} returned no widget payload`);
+		}
+		state.payload = envelope.structuredContent;
+		state.toolMeta = envelope.meta;
 		state.toolInput = args || {};
 		state.message = `${name} completed successfully.`;
 		if (nextTab) state.tab = nextTab;
-		const currentJobId = deriveJobId(payload);
+		const currentJobId = deriveJobId(state.payload);
 		if (currentJobId) state.selectedJobId = currentJobId;
+		const model = currentModel();
+		const selectedNotification = selectedNotificationRecord(model);
+		const selectedLog = selectedLogRecord(model);
+		if (selectedNotification) state.selectedNotificationId = selectedNotification.id;
+		if (selectedLog) state.selectedLogId = selectedLog.id;
 	} catch (error) {
 		state.error = error instanceof Error ? error.message : String(error);
 		state.message = '';
@@ -782,18 +1072,25 @@ function hydrate() {
 		applyHostContextToDocument(state.hostContext, document);
 	}
 	state.toolInput = hostToolInput();
-	const payload = hostToolOutput();
-	if (payload) {
-		state.payload = payload;
+	const envelope = hostToolOutput();
+	if (envelope) {
+		state.payload = envelope.structuredContent;
+		state.toolMeta = envelope.meta;
 		state.message = 'Host bridge connected.';
 	} else {
 		state.payload = demoPayload;
+		state.toolMeta = demoToolMeta;
 		state.message = 'Showing standalone preview data.';
 		if (!state.selectedJobId) {
 			state.tab = 'jobs';
 		}
 	}
 	if (!state.selectedJobId) state.selectedJobId = deriveJobId(state.payload);
+	const model = currentModel();
+	const selectedNotification = selectedNotificationRecord(model);
+	const selectedLog = selectedLogRecord(model);
+	if (!state.selectedNotificationId && selectedNotification) state.selectedNotificationId = selectedNotification.id;
+	if (!state.selectedLogId && selectedLog) state.selectedLogId = selectedLog.id;
 	currentHostApi().setOpenInAppUrl();
 	refreshContextCache();
 	render();
@@ -822,13 +1119,19 @@ async function connectStandardBridge() {
 			render();
 		},
 		onToolResult(params) {
-			const payload = extractStructuredResult(params);
-			if (!payload) return;
-			state.payload = payload;
-			const currentJobId = deriveJobId(payload);
+			const envelope = coerceToolEnvelope(params);
+			if (!envelope) return;
+			state.payload = envelope.structuredContent;
+			state.toolMeta = envelope.meta;
+			const currentJobId = deriveJobId(state.payload);
 			if (currentJobId) {
 				state.selectedJobId = currentJobId;
 			}
+			const model = currentModel();
+			const selectedNotification = selectedNotificationRecord(model);
+			const selectedLog = selectedLogRecord(model);
+			if (selectedNotification) state.selectedNotificationId = selectedNotification.id;
+			if (selectedLog) state.selectedLogId = selectedLog.id;
 			state.message = 'Host pushed fresh tool output.';
 			state.error = '';
 			render();
@@ -891,11 +1194,27 @@ root.addEventListener('click', function (event) {
 		}
 		return;
 	}
+	if (action === 'load-host-status') {
+		runTool('self_host_status', { include_healthz: true }, 'overview');
+		return;
+	}
 	if (action === 'open-job') {
 		const jobId = actionTarget.getAttribute('data-job-id') || '';
 		if (!jobId) return;
 		state.selectedJobId = jobId;
+		state.selectedNotificationId = '';
+		state.selectedLogId = '';
 		runTool('job_progress', { job_id: jobId }, 'overview');
+		return;
+	}
+	if (action === 'select-notification') {
+		state.selectedNotificationId = actionTarget.getAttribute('data-notification-id') || '';
+		render();
+		return;
+	}
+	if (action === 'select-log') {
+		state.selectedLogId = actionTarget.getAttribute('data-log-id') || '';
+		render();
 		return;
 	}
 	if (action === 'prepare-approval') {

@@ -18,8 +18,17 @@ export function readParentOrigin(referrer, fallbackOrigin = '*') {
 }
 
 export function extractStructuredResult(result) {
+	const extracted = extractToolResultEnvelope(result);
+	return extracted ? extracted.structuredContent : null;
+}
+
+export function extractToolResultEnvelope(result) {
 	if (!hasRecord(result)) return null;
-	return hasRecord(result.structuredContent) ? result.structuredContent : null;
+	const payload = hasRecord(result.result) ? result.result : result;
+	return {
+		structuredContent: hasRecord(payload.structuredContent) ? payload.structuredContent : null,
+		meta: hasRecord(payload._meta) ? payload._meta : null,
+	};
 }
 
 function setDatasetValue(dataset, key, value) {

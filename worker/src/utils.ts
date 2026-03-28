@@ -124,18 +124,53 @@ function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, u
 			error_logs: data.error_logs ?? null,
 		};
 	}
+	if (typeof data.self_repo_key === 'string' && 'live' in data && 'mirror' in data && 'deploy_strategy' in data) {
+		return {
+			kind: 'opengpt.notification_contract.self_host_status',
+			self_repo_key: data.self_repo_key,
+			github: hasRecord(data.github) ? data.github : null,
+			workspace: hasRecord(data.workspace) ? data.workspace : null,
+			live: hasRecord(data.live) ? data.live : { url: null, healthz: null },
+			mirror: hasRecord(data.mirror) ? data.mirror : { url: null, healthz: null },
+			deploy_strategy: hasRecord(data.deploy_strategy) ? data.deploy_strategy : {},
+			current_deploy: hasRecord(data.current_deploy) ? data.current_deploy : {},
+			workflow_allowlist: hasRecord(data.workflow_allowlist) ? data.workflow_allowlist : {},
+			read_observability: hasRecord(data.read_observability) ? data.read_observability : {},
+			self_deploy_workflow: typeof data.self_deploy_workflow === 'string' ? data.self_deploy_workflow : '',
+			recent_self_deploy_runs: Array.isArray(data.recent_self_deploy_runs) ? data.recent_self_deploy_runs : [],
+			warnings: Array.isArray(data.warnings) ? data.warnings : [],
+		};
+	}
 	return undefined;
+}
+
+function buildToolResultMeta(
+	result: ToolResultEnvelope,
+	structuredContent: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	const baseMeta = hasRecord(result.meta) ? { ...result.meta } : {};
+	if (result.ok && hasRecord(result.data) && structuredContent) {
+		baseMeta['opengpt/widget'] = {
+			version: 1,
+			kind: structuredContent.kind ?? null,
+			data: result.data,
+		};
+	}
+	return Object.keys(baseMeta).length > 0 ? baseMeta : undefined;
 }
 
 export function toolText(result: ToolResultEnvelope): {
 	content: [{ type: 'text'; text: string }];
 	structuredContent?: Record<string, unknown>;
+	_meta?: Record<string, unknown>;
 	isError?: boolean;
 } {
 	const structuredContent = buildStructuredToolResult(result);
+	const meta = buildToolResultMeta(result, structuredContent);
 	return {
 		content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
 		structuredContent,
+		_meta: meta,
 		isError: result.ok ? undefined : true,
 	};
 }

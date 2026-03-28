@@ -3,20 +3,26 @@ import { seal } from 'tweetsodium';
 import * as z from 'zod/v4';
 import { cloudflarePut } from './cloudflare';
 import { notificationWidgetToolMeta } from './mcp-widget-resources';
+import { getReadObservabilitySnapshot } from './read-observability';
 import { buildPermissionBundleMessage, listPermissionPresets, listToolGroups } from './tool-catalog';
 import { AppEnv } from './types';
 import {
 	activateRepoWorkspace,
 	errorCodeFor,
 	fail,
+	getAllowedWorkflows,
+	getAllowedWorkflowsByRepo,
+	getAllowedWorkflowsForRepo,
 	getBranchPrefix,
 	getDefaultBaseBranch,
 	getSelfCurrentUrl,
 	getSelfDefaultDeployTarget,
+	getSelfDeployEnv,
 	getSelfDeployWorkflow,
 	getSelfLiveUrl,
 	getSelfMirrorUrl,
 	getSelfRepoKey,
+	getSelfReleaseCommitSha,
 	githubGet,
 	githubPost,
 	githubPut,
@@ -40,6 +46,24 @@ const permissionBundleStructuredSchema = z
 		bundle: z.object({}).passthrough(),
 		notification: z.object({}).passthrough().nullable().optional(),
 		status: z.string().nullable().optional(),
+	})
+	.passthrough();
+
+const selfHostStatusStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.self_host_status'),
+		self_repo_key: z.string(),
+		github: z.object({}).passthrough().nullable().optional(),
+		workspace: z.object({}).passthrough().nullable().optional(),
+		live: z.object({}).passthrough(),
+		mirror: z.object({}).passthrough(),
+		deploy_strategy: z.object({}).passthrough(),
+		current_deploy: z.object({}).passthrough().optional(),
+		workflow_allowlist: z.object({}).passthrough().optional(),
+		read_observability: z.object({}).passthrough().optional(),
+		self_deploy_workflow: z.string(),
+		recent_self_deploy_runs: z.array(z.object({}).passthrough()),
+		warnings: z.array(z.string()).optional(),
 	})
 	.passthrough();
 
@@ -94,6 +118,20 @@ async function fetchHealthSnapshot(
 		return {
 			url: baseUrl,
 			ok: false,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+async function captureResult<T>(task: Promise<T>): Promise<{ value: T | null; error: string | null }> {
+	try {
+		return {
+			value: await task,
+			error: null,
+		};
+	} catch (error) {
+		return {
+			value: null,
 			error: error instanceof Error ? error.message : String(error),
 		};
 	}
@@ -404,21 +442,28 @@ export function registerOverviewTools(
 	});
 	server.registerTool('workspace_find_similar', { description: 'Find registered workspace folders similar to a repo or folder name before creating a new GitHub workspace folder.', inputSchema: { query: z.string().optional(), repo_key: z.string().optional() }, annotations: readAnnotations }, async ({ query, repo_key }) => { try { return toolText(await queueJson(env, { action: 'workspace_find_similar', query, repo_key })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_find_similar_failed'), error, readAnnotations)); } });
 	server.registerTool('workspace_list', { description: 'List registered GitHub workspace folders known to this MCP server.', annotations: readAnnotations }, async () => { try { return toolText(await queueJson(env, { action: 'workspace_list' })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_list_failed'), error, readAnnotations)); } });
-	server.registerTool('self_host_status', { description: 'Inspect the GitHub self-repo plus configured Cloudflare live and mirror health endpoints for maintenance and self-improvement checks.', inputSchema: { include_healthz: z.boolean().default(true) }, annotations: readAnnotations }, async ({ include_healthz }) => {
+	server.registerTool('self_host_status', { description: 'Inspect the GitHub self-repo plus configured Cloudflare live and mirror health endpoints for maintenance and self-improvement checks.', inputSchema: { include_healthz: z.boolean().default(true) }, outputSchema: selfHostStatusStructuredSchema, annotations: readAnnotations, _meta: notificationWidgetToolMeta({ 'openai/toolInvocation/invoking': 'Loading self host status', 'openai/toolInvocation/invoked': 'Self host status ready' }) }, async ({ include_healthz }) => {
 		try {
 			const selfRepoKey = getSelfRepoKey(env);
 			const [owner, repo] = selfRepoKey.split('/');
 			const liveUrl = getSelfLiveUrl(env);
 			const mirrorUrl = getSelfMirrorUrl(env);
 			const currentUrl = getSelfCurrentUrl(env);
-			const [workspaceResult, repoResult, workflowRunsResult, liveHealth, mirrorHealth] = await Promise.all([
+			const [workspaceResult, repoSnapshot, workflowRunsSnapshot, liveHealth, mirrorHealth] = await Promise.all([
 				queueJson(env, { action: 'workspace_get', repo_key: selfRepoKey }),
-				githubGet(env, `/repos/${owner}/${repo}`) as Promise<Record<string, unknown>>,
-				githubGet(env, `/repos/${owner}/${repo}/actions/runs`, { params: { per_page: 5 } }) as Promise<{ workflow_runs?: Array<Record<string, unknown>> }>,
+				captureResult(githubGet(env, `/repos/${owner}/${repo}`) as Promise<Record<string, unknown>>),
+				captureResult(
+					githubGet(env, `/repos/${owner}/${repo}/actions/runs`, { params: { per_page: 5 } }) as Promise<{
+						workflow_runs?: Array<Record<string, unknown>>;
+					}>,
+				),
 				include_healthz ? fetchHealthSnapshot(liveUrl, currentUrl) : Promise.resolve(null),
 				include_healthz ? fetchHealthSnapshot(mirrorUrl, currentUrl) : Promise.resolve(null),
 			]);
-			return toolText(ok({ self_repo_key: selfRepoKey, github: { html_url: repoResult.html_url ?? null, default_branch: repoResult.default_branch ?? null, pushed_at: repoResult.pushed_at ?? null, open_issues_count: repoResult.open_issues_count ?? null }, workspace: workspaceResult.ok ? workspaceResult.data?.workspace ?? null : null, live: { url: liveUrl, healthz: liveHealth }, mirror: { url: mirrorUrl, healthz: mirrorHealth }, deploy_strategy: { default_target: getSelfDefaultDeployTarget(env), require_mirror_for_live: selfRequiresMirrorForLive(env), mirror_distinct_from_live: mirrorConfigured(env) }, self_deploy_workflow: getSelfDeployWorkflow(env), recent_self_deploy_runs: (workflowRunsResult.workflow_runs ?? []).filter((run) => run.path === `.github/workflows/${getSelfDeployWorkflow(env)}`).slice(0, 5).map((run) => ({ id: run.id, name: run.name, status: run.status, conclusion: run.conclusion, html_url: run.html_url, created_at: run.created_at, head_branch: run.head_branch, event: run.event })) }, readAnnotations));
+			const warnings = [repoSnapshot.error, workflowRunsSnapshot.error].filter((value): value is string => Boolean(value));
+			const repoResult = repoSnapshot.value ?? {};
+			const workflowRuns = workflowRunsSnapshot.value?.workflow_runs ?? [];
+			return toolText(ok({ self_repo_key: selfRepoKey, github: { html_url: repoResult.html_url ?? null, default_branch: repoResult.default_branch ?? null, pushed_at: repoResult.pushed_at ?? null, open_issues_count: repoResult.open_issues_count ?? null }, workspace: workspaceResult.ok ? workspaceResult.data?.workspace ?? null : null, live: { url: liveUrl, healthz: liveHealth }, mirror: { url: mirrorUrl, healthz: mirrorHealth }, deploy_strategy: { default_target: getSelfDefaultDeployTarget(env), require_mirror_for_live: selfRequiresMirrorForLive(env), mirror_distinct_from_live: mirrorConfigured(env) }, current_deploy: { environment: getSelfDeployEnv(env), current_url: currentUrl, release_commit_sha: getSelfReleaseCommitSha(env) }, workflow_allowlist: { global: getAllowedWorkflows(env), self_repo: getAllowedWorkflowsForRepo(env, selfRepoKey), by_repo: getAllowedWorkflowsByRepo(env) }, read_observability: getReadObservabilitySnapshot(), self_deploy_workflow: getSelfDeployWorkflow(env), recent_self_deploy_runs: workflowRuns.filter((run) => run.path === `.github/workflows/${getSelfDeployWorkflow(env)}`).slice(0, 5).map((run) => ({ id: run.id, name: run.name, status: run.status, conclusion: run.conclusion, html_url: run.html_url, created_at: run.created_at, head_branch: run.head_branch, event: run.event })), warnings }, readAnnotations));
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'self_host_status_failed'), error, readAnnotations)); }
 	});
 	server.registerTool('self_deploy', { description: 'Deploy the self repo through the self-deploy workflow with mirror-first guardrails. Use mirror for self-improvement validation, then explicitly promote to live.', inputSchema: { deploy_target: z.enum(['mirror', 'live']).default(getSelfDefaultDeployTarget(env)), reason: z.string().optional(), expected_commit_sha: z.string().optional(), verify_mirror_first: z.boolean().default(true) }, annotations: writeAnnotations }, async ({ deploy_target, reason, expected_commit_sha, verify_mirror_first }) => {
