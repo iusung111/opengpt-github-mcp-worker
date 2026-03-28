@@ -3,6 +3,7 @@ import * as z from 'zod/v4';
 
 import { GUI_CAPTURE_WORKFLOW_ID, runGuiCaptureWorkflow } from './mcp-gui-tools';
 import { ToolAnnotations } from './mcp-overview-tools';
+import { notificationWidgetToolMeta } from './mcp-widget-resources';
 import { mergeWorkerManifest } from './job-manifest';
 import { computeRunAttentionStatus } from './queue-projections';
 import {
@@ -2124,10 +2125,10 @@ export function registerFullstackTools(
 			},
 			outputSchema: incidentBundleStructuredSchema,
 			annotations: writeAnnotations,
-			_meta: {
+			_meta: notificationWidgetToolMeta({
 				'openai/toolInvocation/invoking': 'Collecting incident bundle',
 				'openai/toolInvocation/invoked': 'Incident bundle ready',
-			},
+			}),
 		},
 		async ({ owner, repo, run_id, job_id, preview_token, browser_result_token, scope, include_layer_logs }) => {
 			try {

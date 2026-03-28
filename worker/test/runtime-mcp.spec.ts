@@ -186,6 +186,7 @@ describe('runtime mcp surface', () => {
 	it('serves MCP tools and queue actions over /mcp', async () => {
 		const client = await createMcpClient();
 		const tools = await client.listTools();
+		const widgetUri = 'ui://widget/notification-center.html';
 		expect(tools.tools.some((tool) => tool.name === 'help')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'audit_list')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_candidates')).toBe(true);
@@ -247,6 +248,36 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.find((tool) => tool.name === 'job_event_feed')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'request_permission_bundle')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'incident_bundle_create')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'job_progress')?._meta).toMatchObject({
+			ui: {
+				resourceUri: widgetUri,
+			},
+			'openai/outputTemplate': widgetUri,
+			'openai/widgetAccessible': true,
+		});
+		expect(tools.tools.find((tool) => tool.name === 'job_event_feed')?._meta).toMatchObject({
+			ui: {
+				resourceUri: widgetUri,
+			},
+			'openai/outputTemplate': widgetUri,
+			'openai/widgetAccessible': true,
+		});
+
+		const resources = await client.listResources();
+		expect(resources.resources.some((resource) => resource.uri === widgetUri)).toBe(true);
+		const resourceResult = await client.readResource({ uri: widgetUri });
+		const widgetResource = resourceResult.contents.find((resource) => resource.uri === widgetUri);
+		expect(widgetResource).toBeTruthy();
+		expect(widgetResource).toMatchObject({
+			mimeType: 'text/html',
+			_meta: {
+				ui: {
+					prefersBorder: true,
+				},
+				'openai/widgetDescription': expect.any(String),
+			},
+		});
+		expect('text' in (widgetResource ?? {}) ? widgetResource.text : '').toContain('/gui/app.js');
 
 		const createResult = await client.callTool({
 			name: 'job_create',
