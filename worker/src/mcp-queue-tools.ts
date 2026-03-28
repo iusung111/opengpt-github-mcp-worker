@@ -3,6 +3,7 @@ import * as z from 'zod/v4';
 import { AppEnv } from './types';
 import { createEmptyWorkerManifest } from './job-manifest';
 import { ToolAnnotations } from './mcp-overview-tools';
+import { notificationWidgetToolMeta } from './mcp-widget-resources';
 import {
 	activateRepoWorkspace,
 	ensureBranchAllowed,
@@ -15,10 +16,10 @@ import {
 	toolText,
 } from './utils';
 
-const notificationReadMeta = {
+const notificationReadMeta = notificationWidgetToolMeta({
 	'openai/toolInvocation/invoking': 'Loading run status',
 	'openai/toolInvocation/invoked': 'Run status ready',
-} as const;
+});
 
 const attentionStatusSchema = z.enum(['idle', 'pending_approval', 'running', 'completed', 'failed']);
 const sourceLayerSchema = z.enum(['gpt', 'mcp', 'cloudflare', 'repo', 'system']);
@@ -239,10 +240,10 @@ export function registerQueueTools(
 			},
 			outputSchema: jobEventFeedStructuredSchema,
 			annotations: readAnnotations,
-			_meta: {
+			_meta: notificationWidgetToolMeta({
 				'openai/toolInvocation/invoking': 'Loading run events',
 				'openai/toolInvocation/invoked': 'Run events ready',
-			},
+			}),
 		},
 		async ({ job_id, status, source_layer, since, limit }) => {
 			try {

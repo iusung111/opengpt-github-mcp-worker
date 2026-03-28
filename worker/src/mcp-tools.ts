@@ -6,6 +6,7 @@ import { registerFullstackTools } from './mcp-fullstack-tools';
 import { registerOverviewTools } from './mcp-overview-tools';
 import { registerQueueTools } from './mcp-queue-tools';
 import { registerRepoReadTools } from './mcp-repo-read-tools';
+import { registerWidgetResources } from './mcp-widget-resources';
 import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
 import { registerWriteTools } from './mcp-write-tools';
@@ -23,6 +24,7 @@ export function buildMcpServer(env: AppEnv): McpServer {
 		destructiveHint: false,
 	};
 
+	registerWidgetResources(server, env);
 	registerOverviewTools(server, env, readAnnotations, writeAnnotations);
 	registerRepoReadTools(server, env, readAnnotations);
 	registerCollabTools(server, env, readAnnotations, writeAnnotations);
