@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	authorizeChatgptMcpRequest,
 	authorizeDirectMcpRequest,
+	authorizeGuiOperatorRequest,
 	authorizeMcpRequest,
 	getQueueAuthToken,
 	queueRequestAuthorized,
@@ -141,6 +142,62 @@ describe('mcp access auth', () => {
 		await expect(authorizeDirectMcpRequest(request, env)).resolves.toMatchObject({
 			ok: true,
 			email: 'developer@example.com',
+		});
+	});
+
+	it('requires explicit auth for the standalone GUI operator API', async () => {
+		const env = buildEnv({
+			MCP_REQUIRE_ACCESS_AUTH: 'false',
+			CHATGPT_MCP_AUTH_MODE: 'oidc',
+			CHATGPT_MCP_ISSUER: 'https://auth.example.com',
+			CHATGPT_MCP_AUDIENCE: 'chatgpt-mcp-worker',
+			CHATGPT_MCP_JWKS_JSON:
+				'{"keys":[{"kty":"RSA","kid":"chatgpt-test-rs256","use":"sig","alg":"RS256","n":"n_CCP8v6eqjs-MvA65GSr29UxL-_zLzl_PVzywg7YXtY-H6m4XZOxAos6AZKvQn4ADBxGEa5kDXgx3XYvqAuDnB5acC_IuqJ1ts76SJUGaTeY_oAu34gUnS3nV6nDAv3VfdUnVHTppHFsC_HKWDsW3zfNUZSOgjFtax0Q5Pz8QKF02BRYAI6L5nw9iE_2WXkhOB18BzVkL7vhPcDHxR1nYKnqzpQKpBFk-rH6VQjwgn5fzrvZ2OjkzCX8NKhnpJ_tXaF5nUH0CchfZkROukBV1e9HYj8THTD2i9dLQuvd13IAmulGfQY47VCUEEpjeYelQ8gky3EGEn9CYY5PCwW2Q","e":"AQAB"}]}',
+			CHATGPT_MCP_ALLOWED_EMAILS: 'developer@example.com',
+		});
+		const request = new Request('https://example.com/gui/api/session');
+		await expect(authorizeGuiOperatorRequest(request, env)).resolves.toMatchObject({
+			ok: false,
+			status: 401,
+			code: 'unauthorized',
+		});
+	});
+
+	it('allows Cloudflare Access identity for the standalone GUI operator API', async () => {
+		const env = buildEnv({
+			MCP_REQUIRE_ACCESS_AUTH: 'true',
+			MCP_ALLOWED_EMAILS: 'developer@example.com',
+		});
+		const request = new Request('https://example.com/gui/api/session', {
+			headers: {
+				'cf-access-authenticated-user-email': 'developer@example.com',
+				'cf-access-jwt-assertion': 'signed-jwt',
+			},
+		});
+		await expect(authorizeGuiOperatorRequest(request, env)).resolves.toMatchObject({
+			ok: true,
+			email: 'developer@example.com',
+			auth_type: 'access',
+		});
+	});
+
+	it('allows a valid bearer token for the standalone GUI operator API', async () => {
+		const env = buildEnv({
+			CHATGPT_MCP_AUTH_MODE: 'oidc',
+			CHATGPT_MCP_ISSUER: 'https://auth.example.com',
+			CHATGPT_MCP_AUDIENCE: 'chatgpt-mcp-worker',
+			CHATGPT_MCP_JWKS_JSON:
+				'{"keys":[{"kty":"RSA","kid":"chatgpt-test-rs256","use":"sig","alg":"RS256","n":"n_CCP8v6eqjs-MvA65GSr29UxL-_zLzl_PVzywg7YXtY-H6m4XZOxAos6AZKvQn4ADBxGEa5kDXgx3XYvqAuDnB5acC_IuqJ1ts76SJUGaTeY_oAu34gUnS3nV6nDAv3VfdUnVHTppHFsC_HKWDsW3zfNUZSOgjFtax0Q5Pz8QKF02BRYAI6L5nw9iE_2WXkhOB18BzVkL7vhPcDHxR1nYKnqzpQKpBFk-rH6VQjwgn5fzrvZ2OjkzCX8NKhnpJ_tXaF5nUH0CchfZkROukBV1e9HYj8THTD2i9dLQuvd13IAmulGfQY47VCUEEpjeYelQ8gky3EGEn9CYY5PCwW2Q","e":"AQAB"}]}',
+			CHATGPT_MCP_ALLOWED_EMAILS: 'developer@example.com',
+		});
+		const token = await signChatgptOidcToken();
+		const request = new Request('https://example.com/gui/api/session', {
+			headers: { authorization: `Bearer ${token}` },
+		});
+		await expect(authorizeGuiOperatorRequest(request, env)).resolves.toMatchObject({
+			ok: true,
+			email: 'developer@example.com',
+			auth_type: 'bearer',
 		});
 	});
 });

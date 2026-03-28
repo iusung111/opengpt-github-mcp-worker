@@ -1,6 +1,7 @@
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import {
+	mcpAccessHeaders,
 	queueAuthHeaders,
 	queueJsonHeaders,
 	waitFor,
@@ -54,6 +55,35 @@ describe('runtime http surface', () => {
 		});
 	});
 
+	it('requires auth for the standalone GUI operator API', async () => {
+		const response = await SELF.fetch('https://example.com/gui/api/session');
+		expect(response.status).toBe(401);
+		await expect(response.json()).resolves.toMatchObject({
+			ok: false,
+			code: 'unauthorized',
+		});
+	});
+
+	it('returns a standalone GUI session payload when Access auth is present', async () => {
+		const response = await SELF.fetch('https://example.com/gui/api/session', {
+			headers: mcpAccessHeaders,
+		});
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				session: {
+					email: 'developer@example.com',
+					auth_type: 'access',
+				},
+				capabilities: {
+					live_queue_api: true,
+					host_message_bridge: false,
+				},
+			},
+		});
+	});
+
 	it('creates and fetches queue jobs', async () => {
 		const createResponse = await SELF.fetch('https://example.com/queue/job', {
 			method: 'POST',
@@ -84,6 +114,80 @@ describe('runtime http surface', () => {
 		};
 		expect(fetched.ok).toBe(true);
 		expect(fetched.data.job.work_branch).toBe('agent/job-1');
+	});
+
+	it('lists jobs and controls them through the standalone GUI operator API', async () => {
+		await SELF.fetch('https://example.com/queue/job', {
+			method: 'POST',
+			headers: queueJsonHeaders,
+			body: JSON.stringify({
+				job_id: 'job-gui-1',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				work_branch: 'agent/job-gui-1',
+				status: 'working',
+				next_actor: 'system',
+				auto_improve_enabled: false,
+			}),
+		});
+
+		const listResponse = await SELF.fetch('https://example.com/gui/api/jobs', {
+			headers: mcpAccessHeaders,
+		});
+		expect(listResponse.status).toBe(200);
+		await expect(listResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				jobs: expect.arrayContaining([
+					expect.objectContaining({
+						job_id: 'job-gui-1',
+						repo: 'iusung111/OpenGPT',
+					}),
+				]),
+			},
+		});
+
+		const pauseResponse = await SELF.fetch('https://example.com/gui/api/jobs/job-gui-1/control', {
+			method: 'POST',
+			headers: {
+				...mcpAccessHeaders,
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				action: 'pause',
+				reason: 'Pause from standalone GUI test',
+				expected_state: 'running',
+			}),
+		});
+		expect(pauseResponse.status).toBe(200);
+		await expect(pauseResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				action: 'pause',
+				progress: {
+					job_id: 'job-gui-1',
+					control_state: {
+						state: 'paused',
+					},
+				},
+			},
+		});
+
+		const detailResponse = await SELF.fetch('https://example.com/gui/api/jobs/job-gui-1', {
+			headers: mcpAccessHeaders,
+		});
+		expect(detailResponse.status).toBe(200);
+		await expect(detailResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				progress: {
+					job_id: 'job-gui-1',
+					control_state: {
+						state: 'paused',
+					},
+				},
+			},
+		});
 	});
 
 	it('rejects unauthenticated queue access', async () => {

@@ -1,4 +1,5 @@
 import { githubAuthConfigured, githubGet } from './github';
+import { handleGuiApi } from './gui-api';
 import { JobQueueDurableObject } from './queue';
 import { UploadSessionDurableObject } from './upload-session';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
@@ -27,6 +28,10 @@ export default {
 
 		if (request.method === 'GET' && url.pathname === '/healthz') {
 			return handleHealth(appEnv);
+		}
+
+		if (url.pathname.startsWith('/gui/api/')) {
+			return handleGuiApi(request, appEnv);
 		}
 
 		if (request.method === 'GET' && url.pathname === '/github/app-installation') {

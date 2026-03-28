@@ -3,18 +3,51 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>OpenGPT Notification Center</title>
+	<title>OpenGPT Run Console</title>
 	<link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
 	<div id="notification-app" data-testid="notification-root"></div>
 	<script>
+		const root = document.getElementById('notification-app');
 		window.__OPENGPT_GUI_CONFIG__ = {
 			mode: 'standalone',
 			appOrigin: window.location.origin,
 			assetOrigin: window.location.origin,
 		};
+		function renderBootMessage(title, body) {
+			if (!root) return;
+			root.innerHTML = `
+				<section class="panel action-panel" style="padding: 24px; margin-top: 24px;">
+					<p class="panel-kicker">Run Console</p>
+					<h2>${title}</h2>
+					<p class="supporting-copy">${body}</p>
+					<pre class="detail-json">Recommended local run:
+1. cd opengpt-github-mcp-worker
+2. npm run dev
+3. open the Worker URL and go to /gui/</pre>
+				</section>
+			`;
+		}
+		if (window.location.protocol === 'file:') {
+			renderBootMessage(
+				'HTTP server required',
+				'Do not open this GUI as a local file. Serve it through the Worker or another local HTTP server so module imports and /gui/api requests can work.',
+			);
+		} else {
+			window.addEventListener('error', (event) => {
+				renderBootMessage(
+					'Frontend boot failed',
+					event && event.message
+						? `The GUI failed during startup: ${event.message}`
+						: 'The GUI failed during startup. Check the browser console for details.',
+				);
+			});
+			const script = document.createElement('script');
+			script.type = 'module';
+			script.src = './app.js';
+			document.body.appendChild(script);
+		}
 	</script>
-	<script type="module" src="./app.js"></script>
 </body>
 </html>

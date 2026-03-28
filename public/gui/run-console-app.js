@@ -15,6 +15,7 @@ const config = window.__OPENGPT_GUI_CONFIG__ || {
 	mode: 'standalone',
 	appOrigin: window.location.origin,
 	assetOrigin: window.location.origin,
+	chatUiUrl: 'https://chatgpt.com/',
 };
 
 const APP_INFO = {
@@ -25,8 +26,10 @@ const APP_INFO = {
 };
 
 const VIEW_STATE_STORAGE_KEY = 'opengpt.run-console.view';
+const STANDALONE_TOKEN_STORAGE_KEY = 'opengpt.run-console.token';
 const ATTENTION_STATUSES = ['idle', 'pending_approval', 'running', 'paused', 'cancelled', 'interrupted', 'completed', 'failed'];
 const SOURCE_LAYERS = ['gpt', 'mcp', 'cloudflare', 'repo', 'system'];
+const POLL_INTERVAL_MS = 20000;
 
 const DEMO_ENVELOPES = [
 	{
@@ -274,6 +277,7 @@ const state = {
 	focusSection: 'overview',
 	approvalNote: '',
 	controlNote: '',
+	chatDraft: '',
 	feedFilters: {
 		status: '',
 		sourceLayer: '',
@@ -286,6 +290,16 @@ const state = {
 	localSessionCounter: 1,
 	lastModelContextKey: '',
 	hostStatusAutoloaded: false,
+	session: {
+		ready: false,
+		email: null,
+		authType: null,
+		error: '',
+	},
+	standaloneToken: '',
+	pollTimer: null,
+	alertSignatures: {},
+	alertBaselineReady: false,
 };
 
 function createStore() {
@@ -349,6 +363,270 @@ function ensureJob(jobId) {
 		state.store.jobs[jobId] = createEmptyJob(jobId);
 	}
 	return state.store.jobs[jobId];
+}
+
+function currentRouteJobId() {
+	const params = new URLSearchParams(window.location.search);
+	const jobId = params.get('job');
+	return typeof jobId === 'string' && jobId.trim() ? jobId.trim() : '';
+}
+
+function currentPage() {
+	return currentRouteJobId() ? 'detail' : 'list';
+}
+
+function syncRouteStateFromLocation() {
+	const jobId = currentRouteJobId();
+	const params = new URLSearchParams(window.location.search);
+	const tab = params.get('tab');
+	if (jobId) {
+		state.selectedJobId = jobId;
+	}
+	if (tab === 'overview' || tab === 'activity' || tab === 'approval' || tab === 'control' || tab === 'chat') {
+		state.focusSection = tab;
+	}
+}
+
+function navigateToList() {
+	const nextUrl = new URL(window.location.href);
+	nextUrl.searchParams.delete('job');
+	nextUrl.searchParams.delete('tab');
+	window.history.pushState({}, '', nextUrl);
+	state.selectedNotificationId = '';
+	state.selectedLogId = '';
+	render();
+}
+
+function navigateToJob(jobId, nextSection = state.focusSection) {
+	if (!jobId) return;
+	const nextUrl = new URL(window.location.href);
+	nextUrl.searchParams.set('job', jobId);
+	nextUrl.searchParams.set('tab', nextSection || 'overview');
+	window.history.pushState({}, '', nextUrl);
+	state.selectedJobId = jobId;
+	state.focusSection = nextSection || 'overview';
+	render();
+}
+
+function restoreStandaloneToken() {
+	try {
+		state.standaloneToken = window.localStorage.getItem(STANDALONE_TOKEN_STORAGE_KEY) || '';
+	} catch (error) {
+		console.warn(error);
+	}
+}
+
+function persistStandaloneToken() {
+	try {
+		if (state.standaloneToken.trim()) {
+			window.localStorage.setItem(STANDALONE_TOKEN_STORAGE_KEY, state.standaloneToken.trim());
+			return;
+		}
+		window.localStorage.removeItem(STANDALONE_TOKEN_STORAGE_KEY);
+	} catch (error) {
+		console.warn(error);
+	}
+}
+
+async function apiRequest(path, options = {}) {
+	const headers = new Headers(options.headers || {});
+	headers.set('accept', 'application/json');
+	if (options.body != null && !headers.has('content-type')) {
+		headers.set('content-type', 'application/json');
+	}
+	if (state.standaloneToken.trim()) {
+		headers.set('authorization', `Bearer ${state.standaloneToken.trim()}`);
+	}
+	const response = await fetch(`${config.appOrigin}${path}`, {
+		method: options.method || 'GET',
+		headers,
+		body: options.body != null ? JSON.stringify(options.body) : undefined,
+		credentials: 'same-origin',
+	});
+	const contentType = response.headers.get('content-type') || '';
+	const payload = contentType.includes('application/json')
+		? await response.json()
+		: {
+			ok: response.ok,
+			error: await response.text(),
+		};
+	if (!response.ok || payload.ok === false) {
+		const message = payload && typeof payload.error === 'string'
+			? payload.error
+			: `${response.status} ${response.statusText}`.trim();
+		const error = new Error(message);
+		error.status = response.status;
+		throw error;
+	}
+	return payload;
+}
+
+function asToolEnvelope(structuredContent) {
+	return {
+		structuredContent,
+		meta: null,
+	};
+}
+
+async function standaloneCallTool(name, args = {}) {
+	switch (name) {
+		case 'jobs_list': {
+			const params = new URLSearchParams();
+			if (typeof args.status === 'string' && args.status) params.set('status', args.status);
+			if (typeof args.next_actor === 'string' && args.next_actor) params.set('next_actor', args.next_actor);
+			const payload = await apiRequest(`/gui/api/jobs${params.toString() ? `?${params}` : ''}`);
+			return asToolEnvelope({
+				kind: 'opengpt.notification_contract.jobs_list',
+				jobs: payload.data && Array.isArray(payload.data.jobs) ? payload.data.jobs : [],
+			});
+		}
+		case 'job_progress': {
+			if (typeof args.job_id !== 'string' || !args.job_id) {
+				throw new Error('job_progress requires job_id');
+			}
+			const payload = await apiRequest(`/gui/api/jobs/${encodeURIComponent(args.job_id)}`);
+			const progress = payload.data && hasRecord(payload.data.progress) ? payload.data.progress : {};
+			return asToolEnvelope({
+				kind: 'opengpt.notification_contract.job_progress',
+				progress,
+				run_summary: progress.run_summary || null,
+				blocking_state: progress.blocking_state || null,
+				latest_notification: progress.latest_notification || null,
+				notification_counts: progress.notification_counts || createEmptyCounts(),
+			});
+		}
+		case 'job_event_feed': {
+			if (typeof args.job_id !== 'string' || !args.job_id) {
+				throw new Error('job_event_feed requires job_id');
+			}
+			const params = new URLSearchParams();
+			if (typeof args.status === 'string' && args.status) params.set('status', args.status);
+			if (typeof args.source_layer === 'string' && args.source_layer) params.set('source_layer', args.source_layer);
+			if (typeof args.since === 'string' && args.since) params.set('since', args.since);
+			if (Number.isFinite(Number(args.limit))) params.set('limit', String(Number(args.limit)));
+			const payload = await apiRequest(`/gui/api/jobs/${encodeURIComponent(args.job_id)}/feed?${params.toString()}`);
+			return asToolEnvelope({
+				kind: 'opengpt.notification_contract.job_event_feed',
+				items: payload.data && Array.isArray(payload.data.items) ? payload.data.items : [],
+				logs: payload.data && Array.isArray(payload.data.logs) ? payload.data.logs : [],
+				counts: payload.data && hasRecord(payload.data.counts) ? payload.data.counts : createEmptyCounts(),
+			});
+		}
+		case 'job_control': {
+			if (typeof args.job_id !== 'string' || !args.job_id) {
+				throw new Error('job_control requires job_id');
+			}
+			const payload = await apiRequest(`/gui/api/jobs/${encodeURIComponent(args.job_id)}/control`, {
+				method: 'POST',
+				body: {
+					action: args.action,
+					reason: args.reason,
+					expected_state: args.expected_state,
+					resume_strategy: args.resume_strategy,
+				},
+			});
+			const progress = payload.data && hasRecord(payload.data.progress) ? payload.data.progress : {};
+			return asToolEnvelope({
+				kind: 'opengpt.notification_contract.job_progress',
+				action: payload.data ? payload.data.action : null,
+				progress,
+				run_summary: progress.run_summary || null,
+				blocking_state: progress.blocking_state || null,
+				latest_notification: progress.latest_notification || null,
+				notification_counts: progress.notification_counts || createEmptyCounts(),
+				resume_strategy: payload.data ? payload.data.resume_strategy : null,
+				workflow_cancel: payload.data ? payload.data.workflow_cancel || null : null,
+			});
+		}
+		case 'permission_request_resolve': {
+			if (typeof args.job_id !== 'string' || !args.job_id) {
+				throw new Error('permission_request_resolve requires job_id');
+			}
+			const payload = await apiRequest(`/gui/api/jobs/${encodeURIComponent(args.job_id)}/approval/resolve`, {
+				method: 'POST',
+				body: {
+					request_id: args.request_id,
+					resolution: args.resolution,
+					note: args.note,
+				},
+			});
+			return asToolEnvelope({
+				kind: 'opengpt.notification_contract.permission_bundle',
+				request_id: payload.data ? payload.data.request_id ?? null : null,
+				status: payload.data ? payload.data.status ?? null : null,
+				requested_at: payload.data ? payload.data.requested_at ?? null : null,
+				resolved_at: payload.data ? payload.data.resolved_at ?? null : null,
+				bundle: payload.data ? payload.data.bundle ?? null : null,
+				notification: payload.data ? payload.data.notification ?? null : null,
+				current_progress: payload.data ? payload.data.current_progress ?? null : null,
+			});
+		}
+		default:
+			throw new Error(`${name} is unavailable from the standalone web control API.`);
+	}
+}
+
+function browserAlertsSupported() {
+	return typeof window.Notification === 'function';
+}
+
+async function requestBrowserAlertsPermission() {
+	if (!browserAlertsSupported()) {
+		throw new Error('Browser notifications are unavailable in this environment.');
+	}
+	return window.Notification.requestPermission();
+}
+
+function jobAlertSignature(job) {
+	if (!job) return '';
+	const attention = jobAttentionStatus(job);
+	const latestId = job.latestNotification && job.latestNotification.id ? job.latestNotification.id : 'none';
+	return `${attention}:${latestId}`;
+}
+
+function maybeEmitBrowserAlerts(jobs) {
+	if (!Array.isArray(jobs) || !jobs.length) {
+		return;
+	}
+	const nextSignatures = {};
+	for (const job of jobs) {
+		nextSignatures[job.jobId] = jobAlertSignature(job);
+	}
+	if (!state.alertBaselineReady) {
+		state.alertSignatures = nextSignatures;
+		state.alertBaselineReady = true;
+		return;
+	}
+	if (!browserAlertsSupported() || window.Notification.permission !== 'granted') {
+		state.alertSignatures = nextSignatures;
+		return;
+	}
+	for (const job of jobs) {
+		const attention = jobAttentionStatus(job);
+		const previous = state.alertSignatures[job.jobId] || '';
+		const current = nextSignatures[job.jobId];
+		if (previous === current) {
+			continue;
+		}
+		if (attention !== 'pending_approval' && attention !== 'interrupted' && attention !== 'failed') {
+			continue;
+		}
+		const title = job.run && job.run.title ? job.run.title : job.jobId;
+		const detail =
+			(job.latestNotification && job.latestNotification.body) ||
+			(job.blockingState && job.blockingState.reason) ||
+			(job.run && job.run.lastEvent) ||
+			'Operator attention is required.';
+		try {
+			new window.Notification(title, {
+				body: `[${statusLabel(attention)}] ${detail}`,
+				tag: `job-alert-${job.jobId}`,
+			});
+		} catch (error) {
+			console.warn(error);
+		}
+	}
+	state.alertSignatures = nextSignatures;
 }
 
 function openaiBridge() {
@@ -991,6 +1269,9 @@ function currentJob() {
 		if (selected) {
 			return selected;
 		}
+		if (currentPage() === 'detail') {
+			return null;
+		}
 	}
 	return jobs[0];
 }
@@ -1033,6 +1314,7 @@ function latestToolSession(jobId = currentJob()?.jobId || null) {
 
 function currentBridgeLabel() {
 	if (state.bridge && state.bridge.isConnected()) return 'MCP Apps host';
+	if (state.session.ready) return 'Web control API';
 	if (openaiBridge()) return 'window.openai fallback';
 	return 'Standalone preview';
 }
@@ -1158,9 +1440,9 @@ function currentHostApi() {
 		};
 	}
 	return {
-		source: 'standalone',
+		source: state.session.ready ? 'standalone-api' : 'standalone',
 		canCallTools() {
-			return false;
+			return state.session.ready;
 		},
 		canSendMessage() {
 			return false;
@@ -1173,15 +1455,18 @@ function currentHostApi() {
 		},
 		capabilities() {
 			return {
-				toolCalls: false,
+				toolCalls: state.session.ready,
 				message: false,
 				modelContext: false,
 				openLink: true,
 				raw: null,
 			};
 		},
-		callTool() {
-			return Promise.reject(new Error('Live MCP calls are only available inside a connected host bridge.'));
+		callTool(name, args) {
+			if (!state.session.ready) {
+				return Promise.reject(new Error('Web control API is not connected. Add browser auth or reconnect the page.'));
+			}
+			return standaloneCallTool(name, args || {});
 		},
 		updateModelContext() {
 			return Promise.resolve(null);
@@ -1196,6 +1481,80 @@ function currentHostApi() {
 		notifySize() {},
 		setOpenInAppUrl() {},
 	};
+}
+
+const STANDALONE_TOOL_NAMES = new Set([
+	'jobs_list',
+	'job_progress',
+	'job_event_feed',
+	'job_control',
+	'permission_request_resolve',
+]);
+
+function toolAvailable(name) {
+	const host = currentHostApi();
+	if (!host.canCallTools()) {
+		return false;
+	}
+	if (host.source === 'standalone-api' || host.source === 'standalone') {
+		return STANDALONE_TOOL_NAMES.has(name);
+	}
+	return true;
+}
+
+async function refreshStandaloneSession(options = {}) {
+	if (window.parent && window.parent !== window) {
+		return;
+	}
+	try {
+		const payload = await apiRequest('/gui/api/session');
+		const session = payload.data && hasRecord(payload.data.session) ? payload.data.session : {};
+		state.session.ready = true;
+		state.session.email = typeof session.email === 'string' ? session.email : null;
+		state.session.authType = typeof session.auth_type === 'string' ? session.auth_type : 'none';
+		state.session.error = '';
+		state.store.host.source = 'standalone-api';
+		if (!options.skipRender) {
+			render();
+		}
+	} catch (error) {
+		state.session.ready = false;
+		state.session.email = null;
+		state.session.authType = null;
+		state.session.error = error instanceof Error ? error.message : String(error);
+		state.store.host.source = openaiBridge() ? 'window.openai fallback' : 'standalone';
+		stopPolling();
+		if (!options.skipRender) {
+			render();
+		}
+	}
+}
+
+function stopPolling() {
+	if (state.pollTimer) {
+		window.clearInterval(state.pollTimer);
+		state.pollTimer = null;
+	}
+}
+
+function startPolling() {
+	stopPolling();
+	if (window.parent && window.parent !== window) {
+		return;
+	}
+	if (!state.session.ready) {
+		return;
+	}
+	state.pollTimer = window.setInterval(() => {
+		if (document.hidden || !state.session.ready) {
+			return;
+		}
+		void loadJobs({ silent: true, keepSection: true });
+		if (currentPage() === 'detail' && currentJob()) {
+			void refreshCurrentRun({ silent: true, keepSection: true });
+			void loadFeed({ silent: true, keepSection: true });
+		}
+	}, POLL_INTERVAL_MS);
 }
 
 function coerceToolEnvelope(value) {
@@ -1365,17 +1724,26 @@ function approvalPresetForAction(blockedAction) {
 	return 'implementation_with_pr';
 }
 
-async function runTool(name, args = {}, nextSection = state.focusSection) {
+async function runTool(name, args = {}, nextSection = state.focusSection, options = {}) {
 	const host = currentHostApi();
-	if (!host.canCallTools()) {
-		state.error = 'Live MCP calls are only available inside a connected host bridge.';
+	if (!toolAvailable(name)) {
+		state.error =
+			host.source === 'standalone-api' || host.source === 'standalone'
+				? `${name} is not exposed by the standalone web control API.`
+				: 'Live MCP calls are only available inside a connected host bridge.';
 		render();
 		return null;
 	}
 	state.error = '';
-	state.message = `Running ${name}...`;
-	state.focusSection = nextSection;
-	render();
+	if (!options.silent) {
+		state.message = `Running ${name}...`;
+	}
+	if (!options.keepSection) {
+		state.focusSection = nextSection;
+	}
+	if (!options.skipRender) {
+		render();
+	}
 	const localSessionId = host.source === 'openai' ? startLocalSession('tools/call', name, args) : null;
 	try {
 		const result = await host.callTool(name, args);
@@ -1397,7 +1765,9 @@ async function runTool(name, args = {}, nextSection = state.focusSection) {
 		if (derivedJobId) {
 			state.selectedJobId = derivedJobId;
 		}
-		state.message = `${name} completed successfully.`;
+		if (!options.silent) {
+			state.message = `${name} completed successfully.`;
+		}
 		return envelope;
 	} catch (error) {
 		if (localSessionId) {
@@ -1408,25 +1778,32 @@ async function runTool(name, args = {}, nextSection = state.focusSection) {
 			});
 		}
 		state.error = error instanceof Error ? error.message : String(error);
-		state.message = '';
-		render();
+		if (!options.silent) {
+			state.message = '';
+		}
+		if (!options.skipRender) {
+			render();
+		}
 		return null;
 	} finally {
-		render();
+		if (!options.skipRender) {
+			render();
+		}
 	}
 }
 
-async function refreshCurrentRun() {
+async function refreshCurrentRun(options = {}) {
 	const job = currentJob();
 	if (!job) return;
-	await runTool('job_progress', { job_id: job.jobId }, 'overview');
+	await runTool('job_progress', { job_id: job.jobId }, 'overview', options);
 }
 
-async function loadJobs() {
-	await runTool('jobs_list', {}, 'overview');
+async function loadJobs(options = {}) {
+	await runTool('jobs_list', {}, 'overview', options);
+	maybeEmitBrowserAlerts(sortedJobs());
 }
 
-async function loadFeed() {
+async function loadFeed(options = {}) {
 	const job = currentJob();
 	if (!job) return;
 	await runTool(
@@ -1438,6 +1815,7 @@ async function loadFeed() {
 			limit: state.feedFilters.limit,
 		},
 		'activity',
+		options,
 	);
 }
 
@@ -1568,6 +1946,118 @@ async function performControl(action) {
 	);
 }
 
+function currentChatDraft(job = currentJob()) {
+	if (typeof state.chatDraft === 'string' && state.chatDraft.trim()) {
+		return state.chatDraft;
+	}
+	if (!job) {
+		return 'Continue the current OpenGPT run and explain the next operator action.';
+	}
+	const lines = [
+		`Continue job ${job.jobId} for ${job.repo || 'the selected repository'}.`,
+		job.run && job.run.title ? `Run title: ${job.run.title}` : '',
+		job.run && job.run.lastEvent ? `Latest event: ${job.run.lastEvent}` : '',
+		job.blockingState && job.blockingState.kind !== 'none'
+			? `Blocking state: ${job.blockingState.kind}${job.blockingState.reason ? ` - ${job.blockingState.reason}` : ''}`
+			: '',
+		job.approval && job.approval.pending && job.approval.requestId
+			? `Approval request: ${job.approval.requestId}`
+			: '',
+		'Next step:',
+	];
+	return lines.filter(Boolean).join('\n');
+}
+
+async function copyChatDraft() {
+	const text = currentChatDraft();
+	if (!text.trim()) {
+		state.error = 'No chat draft is available for the selected run.';
+		render();
+		return;
+	}
+	try {
+		if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+			throw new Error('Clipboard API unavailable');
+		}
+		await navigator.clipboard.writeText(text);
+		state.error = '';
+		state.message = 'Chat prompt copied to the clipboard.';
+	} catch (error) {
+		state.error = error instanceof Error ? error.message : String(error);
+		state.message = '';
+	}
+	render();
+}
+
+function openChatUi() {
+	const targetUrl = typeof config.chatUiUrl === 'string' && config.chatUiUrl ? config.chatUiUrl : 'https://chatgpt.com/';
+	currentHostApi()
+		.openLink(targetUrl)
+		.catch((error) => console.warn(error));
+}
+
+async function sendChatDraft() {
+	const host = currentHostApi();
+	const text = currentChatDraft();
+	if (!host.canSendMessage()) {
+		state.error = 'Direct ChatGPT message sending is only available when the run console is embedded in a compatible host.';
+		render();
+		return;
+	}
+	state.error = '';
+	state.message = 'Sending the draft to the host conversation...';
+	render();
+	try {
+		await syncModelContext(true);
+		await host.sendMessage(text);
+		state.message = 'The draft was sent to the host conversation.';
+	} catch (error) {
+		state.error = error instanceof Error ? error.message : String(error);
+		state.message = '';
+	}
+	render();
+}
+
+async function runAttentionShortcut(jobId = currentJob()?.jobId || '') {
+	if (!jobId) return;
+	state.selectedJobId = jobId;
+	const job = ensureJob(jobId);
+	if (!job) return;
+	await refreshCurrentRun({ silent: true, keepSection: true });
+	const refreshed = currentJob();
+	if (!refreshed) return;
+	if (refreshed.approval && refreshed.approval.pending && refreshed.approval.requestId) {
+		await runTool(
+			'permission_request_resolve',
+			{
+				job_id: refreshed.jobId,
+				request_id: refreshed.approval.requestId,
+				resolution: 'approved',
+				note: state.approvalNote.trim() || undefined,
+			},
+			'approval',
+			{ silent: true, keepSection: true },
+		);
+	}
+	const afterApproval = currentJob();
+	if (!afterApproval || !afterApproval.run) {
+		return;
+	}
+	const attention = jobAttentionStatus(afterApproval);
+	const controlState =
+		afterApproval.control && afterApproval.control.state ? afterApproval.control.state : afterApproval.run.controlState || 'active';
+	if (controlState === 'paused' || attention === 'pending_approval') {
+		await performControl('resume');
+		return;
+	}
+	if (attention === 'interrupted' || attention === 'failed') {
+		await performControl('retry');
+		return;
+	}
+	state.message = 'The selected run does not currently need a retry or approval shortcut.';
+	render();
+}
+
 async function copyApprovalRequest() {
 	const approval = currentApproval();
 	const requestText =
@@ -1609,6 +2099,7 @@ function restoreViewState() {
 		if (typeof saved.focusSection === 'string') state.focusSection = saved.focusSection;
 		if (typeof saved.approvalNote === 'string') state.approvalNote = saved.approvalNote;
 		if (typeof saved.controlNote === 'string') state.controlNote = saved.controlNote;
+		if (typeof saved.chatDraft === 'string') state.chatDraft = saved.chatDraft;
 		if (hasRecord(saved.feedFilters)) {
 			state.feedFilters = {
 				status: typeof saved.feedFilters.status === 'string' ? saved.feedFilters.status : '',
@@ -1630,6 +2121,7 @@ function persistViewState() {
 				focusSection: state.focusSection,
 				approvalNote: state.approvalNote,
 				controlNote: state.controlNote,
+				chatDraft: state.chatDraft,
 				feedFilters: state.feedFilters,
 			}),
 		);
@@ -2004,7 +2496,7 @@ function renderActivity(job) {
 					${SOURCE_LAYERS.map((layer) => `<option value="${escapeHtml(layer)}"${selectedAttr(state.feedFilters.sourceLayer, layer)}>${escapeHtml(layer)}</option>`).join('')}
 				</select>
 				<input type="number" min="1" max="200" name="feed-limit" value="${escapeHtml(state.feedFilters.limit)}" />
-				<button type="submit" class="action-button"${buttonDisabledAttr(!currentHostApi().canCallTools() || !job)}>Load feed</button>
+				<button type="submit" class="action-button"${buttonDisabledAttr(!toolAvailable('job_event_feed') || !job)}>Load feed</button>
 			</form>
 			${renderCountsGrid(job ? job.feed.counts : aggregateRunCounts())}
 		</section>
@@ -2048,7 +2540,8 @@ function renderApproval(job, host) {
 	const bundle = approval && approval.bundle ? approval.bundle : null;
 	const blockedAction = job && job.blockingState ? job.blockingState.blockedAction : '';
 	const requestText = bundle && typeof bundle.approval_request === 'string' ? bundle.approval_request : '';
-	const canCallTools = host.canCallTools();
+	const canCallTools = toolAvailable('permission_request_resolve');
+	const canPrepareBundle = toolAvailable('request_permission_bundle');
 	const canRequestInChat = canCallTools && host.canSendMessage() && host.canUpdateModelContext() && Boolean(requestText);
 	const hasRequest = Boolean(approval && approval.requestId);
 	return `
@@ -2068,7 +2561,7 @@ function renderApproval(job, host) {
 				<textarea id="approval-note" class="command-textarea" name="approval-note" placeholder="Add context for the approver or the queue audit log.">${escapeHtml(state.approvalNote)}</textarea>
 			</div>
 			<div class="action-row">
-				<button type="button" class="action-button" data-action="prepare-approval"${buttonDisabledAttr(!canCallTools || !job)}>Prepare bundle</button>
+				<button type="button" class="action-button" data-action="prepare-approval"${buttonDisabledAttr(!canPrepareBundle || !job)}>Prepare bundle</button>
 				<button type="button" class="action-button secondary" data-action="request-approval-chat"${buttonDisabledAttr(!canRequestInChat)}>Request in chat</button>
 				<button type="button" class="action-button secondary" data-action="copy-approval"${buttonDisabledAttr(!requestText)}>Copy request</button>
 			</div>
@@ -2179,13 +2672,14 @@ function renderIncident(job) {
 function renderControl(job, host) {
 	const runStatus = jobAttentionStatus(job);
 	const controlState = job && job.control && job.control.state ? job.control.state : job && job.run ? job.run.controlState || 'active' : 'active';
-	const canCallTools = host.canCallTools();
+	const canCallTools = toolAvailable('job_control');
 	const canPause = canCallTools && Boolean(job && job.run) && controlState !== 'paused' && controlState !== 'cancelled' && runStatus !== 'completed';
 	const canResume = canCallTools && Boolean(job && job.run) && controlState === 'paused';
 	const canRetry = canCallTools && Boolean(job && job.run) && (runStatus === 'failed' || runStatus === 'interrupted');
 	const canCancel = canCallTools && Boolean(job && job.run) && controlState !== 'cancelled' && runStatus !== 'completed';
-	const canRefresh = canCallTools && Boolean(job);
-	const canBuildIncident = canCallTools && Boolean(job && job.repo && job.repo.includes('/'));
+	const canRefresh = toolAvailable('job_progress') && Boolean(job);
+	const canLoadFeed = toolAvailable('job_event_feed') && Boolean(job);
+	const canBuildIncident = toolAvailable('incident_bundle_create') && Boolean(job && job.repo && job.repo.includes('/'));
 	const interrupt = currentInterrupt(job);
 	return `
 		<section class="panel action-panel" id="section-control" data-section="control">
@@ -2212,7 +2706,7 @@ function renderControl(job, host) {
 			</div>
 			<div class="action-row">
 				<button type="button" class="mini-button" data-action="refresh-run"${buttonDisabledAttr(!canRefresh)}>Refresh run</button>
-				<button type="button" class="mini-button" data-action="load-feed"${buttonDisabledAttr(!canRefresh)}>Load feed</button>
+				<button type="button" class="mini-button" data-action="load-feed"${buttonDisabledAttr(!canLoadFeed)}>Load feed</button>
 				<button type="button" class="mini-button" data-action="build-incident"${buttonDisabledAttr(!canBuildIncident)}>Build incident</button>
 			</div>
 		</section>
@@ -2231,25 +2725,239 @@ function renderControl(job, host) {
 	`;
 }
 
+function attentionShortcutLabel(job) {
+	if (!job) return 'Open';
+	const attention = jobAttentionStatus(job);
+	const controlState = job.control && job.control.state ? job.control.state : job.run?.controlState || 'active';
+	if (job.approval && job.approval.pending && job.approval.requestId) return 'Approve & Continue';
+	if (controlState === 'paused') return 'Resume';
+	if (attention === 'interrupted' || attention === 'failed') return 'Retry';
+	return 'Open';
+}
+
+function canRunAttentionShortcut(job) {
+	if (!job) return false;
+	if (job.approval && job.approval.pending && job.approval.requestId) {
+		return toolAvailable('permission_request_resolve') || toolAvailable('job_control');
+	}
+	return toolAvailable('job_control');
+}
+
+function renderStandaloneAccessPanel() {
+	if (window.parent && window.parent !== window) {
+		return '';
+	}
+	if (state.session.ready) {
+		return '';
+	}
+	return `
+		<section class="panel action-panel auth-panel">
+			<div class="stack-header">
+				<p class="panel-kicker">Standalone Access</p>
+				<h2>Connect the web control API</h2>
+				<p class="supporting-copy">This page can drive queue status, approvals, and retry actions directly when Cloudflare Access is active in the browser or when you provide a bearer token.</p>
+			</div>
+			<div class="field-stack">
+				<label for="standalone-token">Bearer token</label>
+				<textarea id="standalone-token" class="command-textarea" name="standalone-token" placeholder="Paste a ChatGPT MCP bearer token when Cloudflare Access is not available.">${escapeHtml(state.standaloneToken)}</textarea>
+			</div>
+			<div class="action-row">
+				<button type="button" class="action-button" data-action="save-standalone-token">Save token</button>
+				<button type="button" class="action-button secondary" data-action="retry-standalone-session">Retry connection</button>
+				<button type="button" class="mini-button" data-action="clear-standalone-token"${buttonDisabledAttr(!state.standaloneToken.trim())}>Clear token</button>
+				<button type="button" class="mini-button" data-action="load-demo">Demo mode</button>
+			</div>
+			${state.session.error ? `<article class="empty-card">${escapeHtml(state.session.error)}</article>` : ''}
+		</section>
+	`;
+}
+
+function renderDashboardJobs() {
+	const jobs = sortedJobs();
+	if (!jobs.length) {
+		return `
+			<section class="panel info-panel">
+				<article class="empty-card">No tracked coding runs are available yet. Load queue jobs or open demo mode for a static preview.</article>
+			</section>
+		`;
+	}
+	return `
+		<section class="panel info-panel">
+			<div class="stack-header">
+				<p class="panel-kicker">Coding Runs</p>
+				<h2>Project list</h2>
+				<p class="supporting-copy">The first screen stays compact: select a run or apply the one-click attention shortcut. Use the detail page for logs, approval history, and raw payloads.</p>
+			</div>
+			<div class="job-grid">
+				${jobs
+					.map((job) => {
+						const attention = jobAttentionStatus(job);
+						const shortcutLabel = attentionShortcutLabel(job);
+						return `
+							<article class="job-card">
+								<div class="stack-header">
+									<div class="meta-row">
+										${statusPill(attention)}
+										${job.repo ? metricChip(job.repo) : ''}
+									</div>
+									<h3>${escapeHtml(job.run ? job.run.title : job.jobId)}</h3>
+									<p class="supporting-copy">${escapeHtml(job.run && job.run.lastEvent ? job.run.lastEvent : job.blockingState?.reason || 'No summary yet.')}</p>
+								</div>
+								<div class="detail-list">
+									<div><span>Job</span><strong>${escapeHtml(job.jobId)}</strong></div>
+									<div><span>Updated</span><strong>${escapeHtml(job.run?.updatedAt ? formatTime(job.run.updatedAt) : 'Unknown')}</strong></div>
+									<div><span>Progress</span><strong>${escapeHtml(job.run ? `${job.run.progressPercent}%` : 'n/a')}</strong></div>
+									<div><span>Next</span><strong>${escapeHtml(job.nextActor || 'system')}</strong></div>
+								</div>
+								<div class="action-row">
+									<button type="button" class="action-button" data-action="open-job" data-job-id="${escapeHtml(job.jobId)}">Details</button>
+									<button type="button" class="action-button secondary" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRunAttentionShortcut(job) || shortcutLabel === 'Open')}>${escapeHtml(shortcutLabel)}</button>
+								</div>
+							</article>
+						`;
+					})
+					.join('')}
+			</div>
+		</section>
+	`;
+}
+
+function renderDetailOverview(job) {
+	if (!job || !job.run) {
+		return `
+			<section class="panel hero-panel">
+				<div class="hero-copy">
+					<p class="panel-kicker">Overview</p>
+					<h2>Run not loaded</h2>
+					<p class="supporting-copy">Return to the list and reload queue jobs, or keep the current URL and wait for the next poll cycle.</p>
+					<div class="action-row">
+						<button type="button" class="action-button" data-action="back-to-list">Back to list</button>
+						<button type="button" class="action-button secondary" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>Reload list</button>
+					</div>
+				</div>
+				<div class="hero-side">${renderCountsGrid(aggregateRunCounts())}</div>
+			</section>
+		`;
+	}
+	const controlState = job.control && job.control.state ? job.control.state : job.run.controlState || 'active';
+	const attention = jobAttentionStatus(job);
+	const blocker =
+		job.blockingState && job.blockingState.kind && job.blockingState.kind !== 'none'
+			? `${job.blockingState.kind}: ${job.blockingState.reason || 'Operator action required.'}`
+			: 'No blocking state is currently active.';
+	return `
+		<section class="panel hero-panel" id="section-overview" data-section="overview">
+			<div class="hero-copy">
+				<p class="panel-kicker">Overview</p>
+				<h2>${escapeHtml(job.run.title)}</h2>
+				<div class="hero-inline">
+					${statusPill(attention)}
+					${metricChip(`control ${controlState}`)}
+					${job.repo ? metricChip(job.repo) : ''}
+				</div>
+				<p class="lede">${escapeHtml(job.run.lastEvent || blocker)}</p>
+				<p class="supporting-copy">${escapeHtml(blocker)}</p>
+				${renderReferences(job)}
+				<div class="topbar-meta">
+					<article class="hero-metric"><span>Progress</span><strong>${escapeHtml(job.run.progressPercent)}%</strong></article>
+					<article class="hero-metric"><span>Updated</span><strong>${escapeHtml(formatTime(job.run.updatedAt))}</strong></article>
+					<article class="hero-metric"><span>Next actor</span><strong>${escapeHtml(job.nextActor || 'system')}</strong></article>
+				</div>
+			</div>
+			<div class="hero-side">${renderCountsGrid(job.feed.counts)}</div>
+		</section>
+		<section class="panel info-panel">
+			<div class="split-grid">
+				${renderHostFacts(state.store.host)}
+				${renderLatestToolSession(job)}
+			</div>
+		</section>
+	`;
+}
+
+function renderChat(job, host) {
+	const draft = currentChatDraft(job);
+	return `
+		<section class="panel action-panel" id="section-chat" data-section="chat">
+			<div class="stack-header">
+				<p class="panel-kicker">Chat</p>
+				<h2>Prepare the next ChatGPT instruction</h2>
+				<p class="supporting-copy">Outside the embedded host, this page can compose and copy the next operator prompt. Direct message sending stays available only when the run console is opened inside a compatible ChatGPT host bridge.</p>
+			</div>
+			<div class="field-stack">
+				<label for="chat-draft">Chat draft</label>
+				<textarea id="chat-draft" class="command-textarea" name="chat-draft" placeholder="Describe the next coding action for ChatGPT.">${escapeHtml(draft)}</textarea>
+			</div>
+			<div class="action-row">
+				<button type="button" class="action-button" data-action="send-chat-draft"${buttonDisabledAttr(!host.canSendMessage())}>Send to ChatGPT</button>
+				<button type="button" class="action-button secondary" data-action="copy-chat-draft">Copy prompt</button>
+				<button type="button" class="mini-button" data-action="open-chat-ui">Open ChatGPT</button>
+			</div>
+		</section>
+		<section class="panel info-panel">
+			<div class="split-grid">
+				<div class="detail-card">
+					<div class="stack-header">
+						<p class="panel-kicker">Prompt Preview</p>
+						<h3>Current message</h3>
+					</div>
+					<pre class="detail-json">${escapeHtml(draft)}</pre>
+				</div>
+				<div class="detail-card">
+					<div class="stack-header">
+						<p class="panel-kicker">Context Snapshot</p>
+						<h3>Run state for the next message</h3>
+					</div>
+					<pre class="detail-json">${escapeHtml(safeJson(buildContextSnapshot()))}</pre>
+				</div>
+			</div>
+		</section>
+	`;
+}
+
 function renderTopbar(host) {
 	const job = currentJob();
 	const counts = aggregateRunCounts();
-	const canCallTools = currentHostApi().canCallTools();
+	const page = currentPage();
+	const alertPermission = browserAlertsSupported() ? window.Notification.permission : 'unsupported';
+	const sessionLabel = state.session.email || currentBridgeLabel();
+	if (page === 'detail') {
+		return `
+			<header class="topbar">
+				<div class="hero-copy">
+					<p class="eyebrow">MCP Run Console</p>
+					<h1>${escapeHtml(job && job.run ? job.run.title : APP_INFO.title)}</h1>
+					<p class="lede">${escapeHtml(job ? `${job.jobId} · ${job.repo || 'Repository pending'}` : 'Open a tracked run from the list.')}</p>
+					<div class="action-row">
+						<button type="button" class="action-button" data-action="back-to-list">Back to list</button>
+						<button type="button" class="action-button secondary" data-action="job-shortcut" data-job-id="${escapeHtml(job ? job.jobId : '')}"${buttonDisabledAttr(!job || !canRunAttentionShortcut(job) || attentionShortcutLabel(job) === 'Open')}>${escapeHtml(attentionShortcutLabel(job))}</button>
+						<button type="button" class="mini-button" data-action="refresh-run"${buttonDisabledAttr(!toolAvailable('job_progress') || !job)}>Refresh</button>
+					</div>
+				</div>
+				<div class="topbar-meta topbar-meta-wide">
+					<article class="topbar-card"><span>Bridge</span><strong>${escapeHtml(currentBridgeLabel())}</strong></article>
+					<article class="topbar-card"><span>Operator</span><strong>${escapeHtml(sessionLabel)}</strong></article>
+					<article class="topbar-card"><span>Open approvals</span><strong>${escapeHtml(Object.values(state.store.jobs).filter((entry) => entry.approval && entry.approval.status === 'requested').length)}</strong></article>
+					<article class="topbar-card"><span>Interrupted runs</span><strong>${escapeHtml(counts.interrupted)}</strong></article>
+				</div>
+			</header>
+		`;
+	}
 	return `
 		<header class="topbar">
 			<div class="hero-copy">
 				<p class="eyebrow">MCP Run Console</p>
 				<h1>${escapeHtml(APP_INFO.title)}</h1>
-				<p class="lede">Queue state, approval lifecycle, interrupt handling, and live MCP tool traffic for actual worker jobs.</p>
+				<p class="lede">Compact first screen for project runs, approval waits, interrupt alerts, and one-click retry or resume actions.</p>
 				<div class="action-row">
-					<button type="button" class="action-button" data-action="load-jobs"${buttonDisabledAttr(!canCallTools)}>Load runs</button>
-					<button type="button" class="action-button secondary" data-action="load-host-status"${buttonDisabledAttr(!canCallTools)}>Load host status</button>
-					<button type="button" class="mini-button" data-action="open-full-page"${buttonDisabledAttr(!currentHostApi().canOpenLink())}>Open full page</button>
+					<button type="button" class="action-button" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>Load runs</button>
+					<button type="button" class="action-button secondary" data-action="retry-standalone-session"${buttonDisabledAttr(window.parent && window.parent !== window)}>Reconnect API</button>
+					<button type="button" class="mini-button" data-action="enable-alerts"${buttonDisabledAttr(!browserAlertsSupported() || alertPermission === 'granted')}>${escapeHtml(alertPermission === 'granted' ? 'Alerts enabled' : 'Enable alerts')}</button>
 				</div>
 			</div>
 			<div class="topbar-meta topbar-meta-wide">
 				<article class="topbar-card"><span>Bridge</span><strong>${escapeHtml(currentBridgeLabel())}</strong></article>
-				<article class="topbar-card"><span>Selected run</span><strong>${escapeHtml(job ? job.jobId : 'none')}</strong></article>
+				<article class="topbar-card"><span>Operator</span><strong>${escapeHtml(sessionLabel)}</strong></article>
 				<article class="topbar-card"><span>Open approvals</span><strong>${escapeHtml(Object.values(state.store.jobs).filter((entry) => entry.approval && entry.approval.status === 'requested').length)}</strong></article>
 				<article class="topbar-card"><span>Interrupted runs</span><strong>${escapeHtml(counts.interrupted)}</strong></article>
 			</div>
@@ -2258,11 +2966,15 @@ function renderTopbar(host) {
 }
 
 function renderNavigation() {
+	if (currentPage() !== 'detail') {
+		return '';
+	}
 	const tabs = [
 		['overview', 'Overview'],
 		['activity', 'Activity'],
 		['approval', 'Approval'],
 		['control', 'Control'],
+		['chat', 'Chat'],
 	];
 	return `
 		<nav class="tab-row" aria-label="Run console sections">
@@ -2277,9 +2989,33 @@ function renderNavigation() {
 	`;
 }
 
+function renderDashboard() {
+	return `
+		<section class="panel hero-panel">
+			<div class="hero-copy">
+				<p class="panel-kicker">Queue</p>
+				<h2>Project attention summary</h2>
+				<p class="supporting-copy">Approval waits, interrupted runs, and failed jobs are polled in the background and can raise browser notifications.</p>
+			</div>
+			<div class="hero-side">${renderCountsGrid(aggregateRunCounts())}</div>
+		</section>
+		${renderStandaloneAccessPanel()}
+		${renderDashboardJobs()}
+	`;
+}
+
+function renderDetailSection(job, host) {
+	if (state.focusSection === 'activity') return renderActivity(job);
+	if (state.focusSection === 'approval') return renderApproval(job, host);
+	if (state.focusSection === 'control') return renderControl(job, host);
+	if (state.focusSection === 'chat') return renderChat(job, host);
+	return renderDetailOverview(job);
+}
+
 function render() {
 	const job = currentJob();
 	const host = currentHostApi();
+	const page = currentPage();
 	root.innerHTML = `
 		<div class="app-shell">
 			${renderTopbar(state.store.host)}
@@ -2287,19 +3023,10 @@ function render() {
 			${state.error ? `<div class="banner error">${escapeHtml(state.error)}</div>` : ''}
 			${renderNavigation()}
 			<div class="content-shell">
-				${renderOverview(job, state.store.host)}
-				${renderActivity(job)}
-				${renderApproval(job, host)}
-				${renderControl(job, host)}
-				<section class="panel capture-panel">
-					<div class="stack-header">
-						<p class="panel-kicker">Capture</p>
-						<h2>Widget snapshot</h2>
-						<p class="supporting-copy" id="analysis-summary"></p>
-					</div>
-					<pre class="capture-json" id="capture-json"></pre>
-				</section>
+				${page === 'detail' ? renderDetailSection(job, host) : renderDashboard()}
 			</div>
+			<p id="analysis-summary" class="supporting-copy"></p>
+			<pre class="capture-json" id="capture-json" hidden></pre>
 		</div>
 	`;
 	persistViewState();
@@ -2327,6 +3054,8 @@ function seedDemoStore() {
 
 function hydrate() {
 	restoreViewState();
+	restoreStandaloneToken();
+	syncRouteStateFromLocation();
 	const globals = hasRecord(window.__OPENGPT_WIDGET_PAYLOAD__)
 		? window.__OPENGPT_WIDGET_PAYLOAD__
 		: hasRecord(window.__OPENGPT_WIDGET_DATA__)
@@ -2335,7 +3064,11 @@ function hydrate() {
 	if (globals) {
 		hydrateFromEnvelope(globals);
 	}
-	if (!openaiBridge() && (!window.parent || window.parent === window)) {
+	if (
+		!openaiBridge() &&
+		(!window.parent || window.parent === window) &&
+		new URLSearchParams(window.location.search).get('demo') === '1'
+	) {
 		seedDemoStore();
 	}
 	render();
@@ -2345,6 +3078,15 @@ async function connectStandardBridge() {
 	currentHostApi().setOpenInAppUrl();
 	if (!window.parent || window.parent === window) {
 		state.store.host.source = openaiBridge() ? 'window.openai fallback' : 'standalone';
+		await refreshStandaloneSession({ skipRender: true });
+		if (state.session.ready) {
+			await loadJobs({ silent: true, keepSection: true });
+			if (currentPage() === 'detail' && currentJob()) {
+				await refreshCurrentRun({ silent: true, keepSection: true });
+				await loadFeed({ silent: true, keepSection: true });
+			}
+		}
+		startPolling();
 		render();
 		return;
 	}
@@ -2418,12 +3160,15 @@ async function connectStandardBridge() {
 		}
 		currentHostApi().setOpenInAppUrl();
 		state.message = 'Connected to the MCP Apps host.';
+		stopPolling();
 		render();
 		await syncModelContext(true);
 		void autoloadHostStatus().catch((error) => console.warn(error));
 	} catch (error) {
 		state.error = error instanceof Error ? error.message : String(error);
 		state.store.host.source = openaiBridge() ? 'window.openai fallback' : 'standalone';
+		await refreshStandaloneSession({ skipRender: true });
+		startPolling();
 		render();
 	}
 }
@@ -2433,11 +3178,12 @@ root.addEventListener('click', (event) => {
 	if (!(target instanceof HTMLElement)) return;
 	if (target.dataset.focusSection) {
 		state.focusSection = target.dataset.focusSection;
-		render();
+		if (currentPage() === 'detail' && currentJob()) {
+			navigateToJob(currentJob().jobId, state.focusSection);
+		} else {
+			render();
+		}
 		void syncModelContext(false).catch((error) => console.warn(error));
-		window.requestAnimationFrame(() => {
-			document.getElementById(`section-${state.focusSection}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-		});
 		return;
 	}
 	if (target.dataset.selectJob) {
@@ -2461,6 +3207,20 @@ root.addEventListener('click', (event) => {
 	switch (target.dataset.action) {
 		case 'load-jobs':
 			void loadJobs();
+			break;
+		case 'open-job':
+			if (target.dataset.jobId) {
+				state.selectedJobId = target.dataset.jobId;
+				navigateToJob(target.dataset.jobId, 'overview');
+				void refreshCurrentRun({ silent: true, keepSection: true });
+				void loadFeed({ silent: true, keepSection: true });
+			}
+			break;
+		case 'back-to-list':
+			navigateToList();
+			break;
+		case 'job-shortcut':
+			void runAttentionShortcut(target.dataset.jobId || currentJob()?.jobId || '');
 			break;
 		case 'load-host-status':
 			void loadHostStatus();
@@ -2510,6 +3270,53 @@ root.addEventListener('click', (event) => {
 		case 'build-incident':
 			void buildIncidentBundle();
 			break;
+		case 'enable-alerts':
+			void requestBrowserAlertsPermission()
+				.then((permission) => {
+					state.message = permission === 'granted' ? 'Browser alerts enabled.' : `Browser alerts permission: ${permission}.`;
+					state.error = '';
+					render();
+				})
+				.catch((error) => {
+					state.error = error instanceof Error ? error.message : String(error);
+					render();
+				});
+			break;
+		case 'save-standalone-token':
+			persistStandaloneToken();
+			void refreshStandaloneSession().then(() => {
+				if (state.session.ready) {
+					startPolling();
+					void loadJobs({ silent: true, keepSection: true });
+				}
+			});
+			break;
+		case 'clear-standalone-token':
+			state.standaloneToken = '';
+			persistStandaloneToken();
+			void refreshStandaloneSession();
+			break;
+		case 'retry-standalone-session':
+			void refreshStandaloneSession().then(() => {
+				if (state.session.ready) {
+					startPolling();
+					void loadJobs({ silent: true, keepSection: true });
+				}
+			});
+			break;
+		case 'load-demo':
+			seedDemoStore();
+			render();
+			break;
+		case 'send-chat-draft':
+			void sendChatDraft();
+			break;
+		case 'copy-chat-draft':
+			void copyChatDraft();
+			break;
+		case 'open-chat-ui':
+			openChatUi();
+			break;
 		default:
 			break;
 	}
@@ -2525,6 +3332,12 @@ function handleMutableInput(target) {
 			break;
 		case 'control-note':
 			state.controlNote = target.value;
+			break;
+		case 'chat-draft':
+			state.chatDraft = target.value;
+			break;
+		case 'standalone-token':
+			state.standaloneToken = target.value;
 			break;
 		case 'feed-status':
 			state.feedFilters.status = target.value;
@@ -2577,6 +3390,11 @@ window.addEventListener('openai:set_globals', (event) => {
 	if (payload) {
 		hydrateFromEnvelope(payload);
 	}
+	render();
+});
+
+window.addEventListener('popstate', () => {
+	syncRouteStateFromLocation();
 	render();
 });
 

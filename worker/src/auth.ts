@@ -11,12 +11,13 @@ import {
 	getMcpRequireAccessAuth,
 } from './utils';
 
-interface McpAccessAuthResult {
+export interface McpAccessAuthResult {
 	ok: boolean;
 	status?: number;
 	code?: string;
 	error?: string;
 	email?: string | null;
+	auth_type?: 'access' | 'bearer' | 'none';
 }
 
 interface JwtHeader {
@@ -375,4 +376,33 @@ export async function authorizeChatgptMcpRequest(request: Request, env: AppEnv):
 	}
 
 	return { ok: true, email };
+}
+
+export async function authorizeGuiOperatorRequest(
+	request: Request,
+	env: AppEnv,
+): Promise<McpAccessAuthResult> {
+	const accessEmail = getMcpAccessEmail(request);
+	const accessHeadersPresent = Boolean(accessEmail || getMcpAccessJwtAssertion(request));
+	if (accessHeadersPresent) {
+		const result = authorizeMcpRequest(request, env);
+		return result.ok ? { ...result, email: result.email ?? accessEmail, auth_type: 'access' } : result;
+	}
+
+	const bearerToken = getBearerToken(request);
+	if (bearerToken) {
+		const result = await authorizeChatgptMcpRequest(request, env);
+		return result.ok ? { ...result, auth_type: 'bearer' } : result;
+	}
+
+	if (!getMcpRequireAccessAuth(env) && getChatgptMcpAuthMode(env) === 'disabled') {
+		return { ok: true, email: null, auth_type: 'none' };
+	}
+
+	return {
+		ok: false,
+		status: 401,
+		code: 'unauthorized',
+		error: 'GUI operator auth requires Cloudflare Access or a bearer token',
+	};
 }
