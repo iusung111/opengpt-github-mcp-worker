@@ -346,7 +346,11 @@ const screenshotFiles = fs.existsSync(screenshotsDir)
 
 const summary = {
   ok: overallStatus !== 'fail',
+  request_id: typeof instructions.request_id === 'string' ? instructions.request_id : null,
   mode: String(instructions.mode ?? 'unknown'),
+  request: {
+    request_id: typeof instructions.request_id === 'string' ? instructions.request_id : null,
+  },
   execution: {
     requested_app_url: instructions.app_url ?? null,
     resolved_app_url: baseUrl,

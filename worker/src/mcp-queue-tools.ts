@@ -133,6 +133,37 @@ export function registerQueueTools(
 	);
 
 	server.registerTool(
+		'job_event_feed',
+		{
+			description:
+				'List derived MCP notification items and layer logs for one job or across active jobs. Use this when you need the normalized run attention feed rather than raw audit rows.',
+			inputSchema: {
+				job_id: z.string().optional(),
+				status: z.enum(['idle', 'pending_approval', 'running', 'completed', 'failed']).optional(),
+				source_layer: z.enum(['gpt', 'mcp', 'cloudflare', 'repo', 'system']).optional(),
+				since: z.string().optional(),
+				limit: z.number().int().positive().max(200).default(50),
+			},
+			annotations: readAnnotations,
+		},
+		async ({ job_id, status, source_layer, since, limit }) => {
+			try {
+				const result = await queueJson(env, {
+					action: 'job_event_feed',
+					job_id,
+					attention_status: status,
+					source_layer,
+					since,
+					limit,
+				});
+				return toolText(result);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'job_event_feed_failed'), error, readAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
 		'audit_list',
 		{
 			description: 'List recent audit events for a specific job or global events.',

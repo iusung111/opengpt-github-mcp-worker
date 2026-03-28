@@ -3,6 +3,79 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildDispatchFingerprint } from '../src/utils';
 import { createChatgptMcpClient, createDirectMcpBearerClient, createMcpClient, queueJsonHeaders } from './runtime-helpers';
 
+function buildStoredZip(entries: Array<{ name: string; text: string }>): Uint8Array {
+	const encoder = new TextEncoder();
+	const fileRecords: number[] = [];
+	const centralRecords: number[] = [];
+	let offset = 0;
+
+	for (const entry of entries) {
+		const nameBytes = Array.from(encoder.encode(entry.name));
+		const dataBytes = Array.from(encoder.encode(entry.text));
+		const localHeaderOffset = offset;
+		const localHeader = [
+			0x50, 0x4b, 0x03, 0x04,
+			20, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0, 0, 0,
+			...u32(dataBytes.length),
+			...u32(dataBytes.length),
+			...u16(nameBytes.length),
+			...u16(0),
+			...nameBytes,
+			...dataBytes,
+		];
+		fileRecords.push(...localHeader);
+		offset += localHeader.length;
+
+		const centralHeader = [
+			0x50, 0x4b, 0x01, 0x02,
+			20, 0,
+			20, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0, 0, 0,
+			...u32(dataBytes.length),
+			...u32(dataBytes.length),
+			...u16(nameBytes.length),
+			...u16(0),
+			...u16(0),
+			...u16(0),
+			...u16(0),
+			...u32(0),
+			...u32(localHeaderOffset),
+			...nameBytes,
+		];
+		centralRecords.push(...centralHeader);
+	}
+
+	const centralOffset = fileRecords.length;
+	const eocd = [
+		0x50, 0x4b, 0x05, 0x06,
+		0, 0, 0, 0,
+		...u16(entries.length),
+		...u16(entries.length),
+		...u32(centralRecords.length),
+		...u32(centralOffset),
+		...u16(0),
+	];
+
+	return new Uint8Array([...fileRecords, ...centralRecords, ...eocd]);
+}
+
+function u16(value: number): number[] {
+	return [value & 0xff, (value >> 8) & 0xff];
+}
+
+function u32(value: number): number[] {
+	return [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff];
+}
+
 describe('runtime mcp surface', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -118,6 +191,7 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_candidates')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_execute')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_progress')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'job_event_feed')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_work_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'review_prepare_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'request_permission_bundle')).toBe(true);
@@ -207,6 +281,44 @@ describe('runtime mcp surface', () => {
 					status: 'queued',
 					latest_note: 'reading repo state',
 					recent_notes: ['reading repo state'],
+					run_summary: {
+						run_id: 'job-mcp-1',
+						status: 'idle',
+					},
+					blocking_state: {
+						kind: 'none',
+					},
+					notification_counts: {
+						idle: expect.any(Number),
+					},
+				},
+			},
+		});
+		expect((progressResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.job_progress',
+			run_summary: {
+				run_id: 'job-mcp-1',
+			},
+		});
+
+		const eventFeedResult = await client.callTool({
+			name: 'job_event_feed',
+			arguments: {
+				job_id: 'job-mcp-1',
+				limit: 10,
+			},
+		});
+		expect((eventFeedResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.job_event_feed',
+		});
+		const eventFeedText = 'text' in eventFeedResult.content[0] ? eventFeedResult.content[0].text : '';
+		expect(JSON.parse(eventFeedText)).toMatchObject({
+			ok: true,
+			data: {
+				items: expect.any(Array),
+				logs: expect.any(Array),
+				counts: {
+					idle: expect.any(Number),
 				},
 			},
 		});
@@ -429,6 +541,363 @@ describe('runtime mcp surface', () => {
 				},
 				session_token: expect.any(String),
 			},
+		});
+		await client.close();
+	});
+
+	it('rejects unsigned preview tokens and preserves inline html browser sessions', async () => {
+		const client = await createMcpClient();
+
+		const forgedPreviewResult = await client.callTool({
+			name: 'preview_env_get',
+			arguments: {
+				preview_token: 'preview.invalid.invalid',
+				probe_health: false,
+			},
+		});
+		const forgedPreviewText =
+			'text' in forgedPreviewResult.content[0] ? forgedPreviewResult.content[0].text : '';
+		expect(JSON.parse(forgedPreviewText)).toMatchObject({
+			ok: false,
+			code: 'preview_env_get_failed',
+			error: expect.stringContaining('invalid token'),
+		});
+
+		const forgedDestroyResult = await client.callTool({
+			name: 'preview_env_destroy',
+			arguments: {
+				preview_token: 'preview.invalid.invalid',
+			},
+		});
+		const forgedDestroyText =
+			'text' in forgedDestroyResult.content[0] ? forgedDestroyResult.content[0].text : '';
+		expect(JSON.parse(forgedDestroyText)).toMatchObject({
+			ok: false,
+			code: 'preview_env_destroy_failed',
+			error: expect.stringContaining('invalid token'),
+		});
+
+		const browserSessionResult = await client.callTool({
+			name: 'browser_session_start',
+			arguments: {
+				file_name: 'inline.html',
+				file_text: '<!doctype html><html><body><h1>inline</h1></body></html>',
+				viewport: 'desktop',
+			},
+		});
+		const browserSessionText =
+			'text' in browserSessionResult.content[0] ? browserSessionResult.content[0].text : '';
+		expect(JSON.parse(browserSessionText)).toMatchObject({
+			ok: true,
+			data: {
+				session: {
+					target: {
+						type: 'static_file',
+					},
+					file_name: 'inline.html',
+					file_text: '<!doctype html><html><body><h1>inline</h1></body></html>',
+				},
+				session_token: expect.any(String),
+			},
+		});
+
+		await client.close();
+	});
+
+	it('reuses inline html browser sessions and matches gui capture workflow runs by request id', async () => {
+		let dispatchedRequestId = '';
+		let dispatchedFileText = '';
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			const parsed = new URL(url);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (
+				parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/workflows/gui-capture.yml/dispatches' &&
+				(init?.method ?? 'GET').toUpperCase() === 'POST'
+			) {
+				const payload = JSON.parse(String(init?.body ?? '{}')) as {
+					inputs?: { instructions_b64?: string };
+				};
+				const instructions = JSON.parse(
+					Buffer.from(String(payload.inputs?.instructions_b64 ?? ''), 'base64').toString('utf8'),
+				) as {
+					request_id?: string;
+					file_text?: string;
+				};
+				dispatchedRequestId =
+					typeof instructions.request_id === 'string' ? instructions.request_id : '';
+				dispatchedFileText = typeof instructions.file_text === 'string' ? instructions.file_text : '';
+				return new Response(null, { status: 204 });
+			}
+			if (
+				parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/runs' &&
+				parsed.searchParams.get('branch') === 'main' &&
+				parsed.searchParams.get('event') === 'workflow_dispatch' &&
+				parsed.searchParams.get('per_page') === '10'
+			) {
+				return new Response(
+					JSON.stringify({
+						workflow_runs: [
+							{
+								id: 700,
+								path: '.github/workflows/gui-capture.yml',
+								created_at: '2099-01-01T00:00:01.000Z',
+							},
+							{
+								id: 701,
+								path: '.github/workflows/gui-capture.yml',
+								created_at: '2099-01-01T00:00:02.000Z',
+							},
+						],
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/runs/700') {
+				return new Response(
+					JSON.stringify({
+						id: 700,
+						status: 'completed',
+						conclusion: 'success',
+						html_url: 'https://github.example/runs/700',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/runs/700/artifacts') {
+				return new Response(
+					JSON.stringify({
+						artifacts: [{ id: 800, name: 'gui-capture-700' }],
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/artifacts/800/zip') {
+				return new Response(
+					buildStoredZip([
+						{
+							name: 'summary.json',
+							text: JSON.stringify({
+								request_id: 'req-other',
+								request: { request_id: 'req-other' },
+								result: { overall_status: 'pass' },
+								logs: {
+									console_count: 0,
+									page_error_count: 0,
+									network_error_count: 0,
+								},
+							}),
+						},
+					]),
+					{ status: 200, headers: { 'content-type': 'application/zip' } },
+				);
+			}
+			if (parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/runs/701') {
+				return new Response(
+					JSON.stringify({
+						id: 701,
+						status: 'completed',
+						conclusion: 'success',
+						html_url: 'https://github.example/runs/701',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/runs/701/artifacts') {
+				return new Response(
+					JSON.stringify({
+						artifacts: [{ id: 801, name: 'gui-capture-701' }],
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (parsed.pathname === '/repos/iusung111/opengpt-github-mcp-worker/actions/artifacts/801/zip') {
+				return new Response(
+					buildStoredZip([
+						{
+							name: 'summary.json',
+							text: JSON.stringify({
+								request_id: dispatchedRequestId,
+								request: { request_id: dispatchedRequestId },
+								result: { overall_status: 'pass' },
+								logs: {
+									console_count: 0,
+									page_error_count: 0,
+									network_error_count: 0,
+								},
+							}),
+						},
+						{ name: 'report.md', text: '# ok' },
+					]),
+					{ status: 200, headers: { 'content-type': 'application/zip' } },
+				);
+			}
+			return new Response(JSON.stringify({ message: `unexpected url: ${url}` }), {
+				status: 404,
+				headers: { 'content-type': 'application/json' },
+			});
+		});
+
+		const client = await createMcpClient();
+		const inlineHtml = '<!doctype html><html><body><button id="go">go</button></body></html>';
+		const browserSessionResult = await client.callTool({
+			name: 'browser_session_start',
+			arguments: {
+				file_name: 'inline.html',
+				file_text: inlineHtml,
+				viewport: 'desktop',
+			},
+		});
+		const browserSessionText =
+			'text' in browserSessionResult.content[0] ? browserSessionResult.content[0].text : '';
+		const browserSessionJson = JSON.parse(browserSessionText);
+
+		const actionResult = await client.callTool({
+			name: 'browser_action_batch',
+			arguments: {
+				session_token: browserSessionJson.data.session_token,
+				actions: [{ action: 'assert_visible', selector: '#go' }],
+				include_image_base64: false,
+			},
+		});
+		const actionText = 'text' in actionResult.content[0] ? actionResult.content[0].text : '';
+		expect(JSON.parse(actionText)).toMatchObject({
+			ok: true,
+			data: {
+				run_id: 701,
+				summary: {
+					request_id: expect.any(String),
+				},
+				session: {
+					file_name: 'inline.html',
+					file_text: inlineHtml,
+				},
+				browser_result_token: expect.stringMatching(/^v1\./),
+			},
+		});
+		expect(dispatchedRequestId).toBeTruthy();
+		expect(dispatchedFileText).toBe(inlineHtml);
+		await client.close();
+	}, 15_000);
+
+	it('issues signed db reset confirm tokens, rejects legacy literals, and guards non-agent refs', async () => {
+		const resetRef = 'agent/db-reset-prepare';
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+			const url = input instanceof Request ? input.url : String(input);
+			const parsed = new URL(url);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (
+				parsed.pathname === '/repos/iusung111/OpenGPT/contents/.opengpt/project-capabilities.json' &&
+				parsed.searchParams.get('ref') === resetRef
+			) {
+				return new Response(
+					JSON.stringify({
+						path: '.opengpt/project-capabilities.json',
+						type: 'file',
+						content: btoa(
+							JSON.stringify({
+								workflow_ids: {
+									db: 'opengpt-exec.yml',
+								},
+								db_mode: 'preview',
+								db: {
+									reset_commands: ['npm run db:reset'],
+								},
+							}),
+						),
+						encoding: 'base64',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (
+				parsed.pathname === '/repos/iusung111/OpenGPT/contents/package.json' &&
+				parsed.searchParams.get('ref') === resetRef
+			) {
+				return new Response(JSON.stringify({ message: 'not found' }), {
+					status: 404,
+					headers: { 'content-type': 'application/json' },
+				});
+			}
+			return new Response(JSON.stringify({ message: `unexpected url: ${url}` }), {
+				status: 404,
+				headers: { 'content-type': 'application/json' },
+			});
+		});
+
+		const client = await createMcpClient();
+		const blockedPrepareResult = await client.callTool({
+			name: 'db_reset_prepare',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				ref: 'feature/not-allowed',
+			},
+		});
+		const blockedPrepareText =
+			'text' in blockedPrepareResult.content[0] ? blockedPrepareResult.content[0].text : '';
+		expect(JSON.parse(blockedPrepareText)).toMatchObject({
+			ok: false,
+			code: 'db_reset_prepare_failed',
+			error: expect.stringContaining('branch must start with agent/'),
+		});
+
+		const prepareResult = await client.callTool({
+			name: 'db_reset_prepare',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				ref: resetRef,
+				ttl_minutes: 5,
+			},
+		});
+		const prepareText = 'text' in prepareResult.content[0] ? prepareResult.content[0].text : '';
+		const prepareJson = JSON.parse(prepareText);
+		expect(prepareJson).toMatchObject({
+			ok: true,
+			data: {
+				repo: 'iusung111/OpenGPT',
+				ref: resetRef,
+				confirm_token: expect.stringMatching(/^v1\./),
+				confirm: {
+					action: 'db_reset',
+					repo: 'iusung111/OpenGPT',
+					ref: resetRef,
+				},
+			},
+		});
+		expect(prepareJson.data.confirm_token).not.toBe(`db-reset:iusung111/OpenGPT:${resetRef}`);
+
+		const resetResult = await client.callTool({
+			name: 'db_reset',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				ref: resetRef,
+				confirm_token: `db-reset:iusung111/OpenGPT:${resetRef}`,
+			},
+		});
+		const resetText = 'text' in resetResult.content[0] ? resetResult.content[0].text : '';
+		expect(JSON.parse(resetText)).toMatchObject({
+			ok: false,
+			code: 'db_reset_failed',
+			error: expect.stringContaining('invalid token'),
 		});
 		await client.close();
 	});
@@ -1235,6 +1704,137 @@ describe('runtime mcp surface', () => {
 					approved_tools: expect.arrayContaining(['repo_create_branch', 'workflow_dispatch', 'job_append_note']),
 				},
 			},
+		});
+		await client.close();
+	});
+
+	it('links permission approval requests into the job event feed', async () => {
+		const client = await createMcpClient();
+		await client.callTool({
+			name: 'job_create',
+			arguments: {
+				job_id: 'job-approval-1',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+			},
+		});
+
+		const permissionResult = await client.callTool({
+			name: 'request_permission_bundle',
+			arguments: {
+				repos: ['iusung111/OpenGPT'],
+				preset: 'implementation_with_workflow',
+				reason: 'Need approval to continue workflow execution',
+				job_id: 'job-approval-1',
+				blocked_action: 'workflow_dispatch',
+			},
+		});
+		const permissionText = 'text' in permissionResult.content[0] ? permissionResult.content[0].text : '';
+		expect(JSON.parse(permissionText)).toMatchObject({
+			ok: true,
+			data: {
+				notification: {
+					job_id: 'job-approval-1',
+					status: 'pending_approval',
+					blocked_action: 'workflow_dispatch',
+				},
+			},
+		});
+		expect((permissionResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.permission_bundle',
+			notification: {
+				job_id: 'job-approval-1',
+			},
+		});
+
+		const progressResult = await client.callTool({
+			name: 'job_progress',
+			arguments: { job_id: 'job-approval-1' },
+		});
+		const progressText = 'text' in progressResult.content[0] ? progressResult.content[0].text : '';
+		expect(JSON.parse(progressText)).toMatchObject({
+			ok: true,
+			data: {
+				progress: {
+					run_summary: {
+						status: 'pending_approval',
+						approval_reason: 'Need approval to continue workflow execution',
+					},
+					blocking_state: {
+						kind: 'approval',
+						blocked_action: 'workflow_dispatch',
+					},
+				},
+			},
+		});
+
+		const feedResult = await client.callTool({
+			name: 'job_event_feed',
+			arguments: {
+				job_id: 'job-approval-1',
+				status: 'pending_approval',
+				limit: 10,
+			},
+		});
+		const feedText = 'text' in feedResult.content[0] ? feedResult.content[0].text : '';
+		const feedJson = JSON.parse(feedText);
+		expect(feedJson.ok).toBe(true);
+		expect(
+			feedJson.data.items.some(
+				(item: { source_layer: string; linked_refs?: { blocked_action?: string } }) =>
+					item.source_layer === 'gpt' && item.linked_refs?.blocked_action === 'workflow_dispatch',
+			),
+		).toBe(true);
+		await client.close();
+	});
+
+	it('builds repo-scoped incident bundles across all active jobs', async () => {
+		const client = await createMcpClient();
+		await client.callTool({
+			name: 'job_create',
+			arguments: {
+				job_id: 'job-incident-1',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+			},
+		});
+		await client.callTool({
+			name: 'request_permission_bundle',
+			arguments: {
+				repos: ['iusung111/OpenGPT'],
+				reason: 'Need approval before preview deploy',
+				job_id: 'job-incident-1',
+				blocked_action: 'preview_env_create',
+			},
+		});
+
+		const bundleResult = await client.callTool({
+			name: 'incident_bundle_create',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				scope: 'all_active',
+				include_layer_logs: true,
+			},
+		});
+		const bundleText = 'text' in bundleResult.content[0] ? bundleResult.content[0].text : '';
+		expect(JSON.parse(bundleText)).toMatchObject({
+			ok: true,
+			data: {
+				repo: 'iusung111/OpenGPT',
+				scope: 'all_active',
+				runs: expect.arrayContaining([
+					expect.objectContaining({
+						job_id: 'job-incident-1',
+					}),
+				]),
+				layer_logs: expect.any(Array),
+				error_logs: expect.any(Array),
+			},
+		});
+		expect((bundleResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.incident_bundle',
+			scope: 'all_active',
 		});
 		await client.close();
 	});

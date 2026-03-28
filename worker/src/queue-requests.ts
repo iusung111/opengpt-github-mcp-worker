@@ -1,5 +1,6 @@
 import {
 	AuditRecord,
+	JobEventFeed,
 	JobProgressSnapshot,
 	JobRecord,
 	JobStatus,
@@ -9,6 +10,7 @@ import {
 	WorkspaceRecord,
 } from './types';
 import { mergeWorkerManifest } from './job-manifest';
+import { buildBlockingState, buildJobEventFeed, buildRunSummary, computeRunAttentionStatus } from './queue-projections';
 import { jsonResponse, fail, ok, nowIso } from './utils';
 import { buildWorkspaceRecord } from './queue-workspaces';
 import { ensureSafeWorkspacePath } from './queue-helpers';
@@ -80,7 +82,7 @@ export async function handleQueueAction(
 			}
 			return handleLoadedJob(context, payload.job_id, true);
 		case 'jobs_list':
-			return jsonResponse(ok({ jobs: await context.listJobs(payload.status, payload.next_actor) }));
+			return handleJobsList(context, payload);
 		case 'job_update_status':
 			if (!payload.job_id || !payload.status || !payload.next_actor) {
 				return null;
@@ -101,6 +103,8 @@ export async function handleQueueAction(
 				return null;
 			}
 			return handleJobProgress(context, payload.job_id);
+		case 'job_event_feed':
+			return handleJobEventFeed(context, payload);
 		case 'workspace_register':
 			if (!payload.workspace) {
 				return null;
@@ -131,6 +135,12 @@ export async function handleQueueAction(
 					audits: await context.listAuditRecords(payload.event_type, payload.job_id, payload.limit),
 				}),
 			);
+		case 'audit_write':
+			if (!payload.event_type || !payload.payload || typeof payload.payload !== 'object') {
+				return null;
+			}
+			await context.writeAudit(payload.event_type, payload.payload);
+			return jsonResponse(ok({ written: true, event_type: payload.event_type }));
 		case 'github_event':
 			if (!payload.payload || typeof payload.payload !== 'object') {
 				return null;
@@ -181,6 +191,15 @@ async function handleJobStatusUpdate(context: QueueRequestContext, payload: Queu
 	}
 	job.updated_at = nowIso();
 	await context.persistJob(job, previous);
+	await context.writeAudit(
+		'job_update_status',
+		context.buildJobAudit(job, {
+			previous_status: previous.status,
+			previous_next_actor: previous.next_actor,
+			source_layer: 'system',
+			attention_status: computeRunAttentionStatus(job),
+		}),
+	);
 	return jsonResponse(ok({ job }));
 }
 
@@ -230,6 +249,9 @@ async function handleJobSubmitReview(context: QueueRequestContext, payload: Queu
 		job_id: job.job_id,
 		verdict: payload.review_verdict,
 		findings: payload.findings,
+		next_action: payload.next_action ?? null,
+		source_layer: 'repo',
+		attention_status: computeRunAttentionStatus(job),
 	});
 	return jsonResponse(ok({ job }));
 }
@@ -239,8 +261,89 @@ async function handleJobProgress(context: QueueRequestContext, jobId: string): P
 	if (!job) {
 		return jobNotFound(jobId);
 	}
-	const audits = await context.listAuditRecords(undefined, jobId, 5);
+	const audits = await context.listAuditRecords(undefined, jobId, 10);
 	return jsonResponse(ok({ progress: context.buildJobProgressSnapshot(job, audits) }));
+}
+
+async function handleJobsList(context: QueueRequestContext, payload: QueueEnvelope): Promise<QueueResponse> {
+	const jobs = await context.listJobs(payload.status, payload.next_actor);
+	const enrichedJobs = await Promise.all(
+		jobs.map(async (job) => {
+			const audits = await context.listAuditRecords(undefined, job.job_id, 10);
+			const feed = buildJobEventFeed(job, audits);
+			return {
+				...job,
+				run_summary: buildRunSummary(job, audits),
+				blocking_state: buildBlockingState(job),
+				latest_notification: feed.items[0] ?? null,
+				notification_counts: feed.counts,
+			};
+		}),
+	);
+	return jsonResponse(ok({ jobs: enrichedJobs }));
+}
+
+function filterEventFeed(
+	feed: JobEventFeed,
+	payload: QueueEnvelope,
+): JobEventFeed {
+	const since = payload.since ? payload.since.trim() : '';
+	const limit = typeof payload.limit === 'number' && Number.isFinite(payload.limit) ? payload.limit : 50;
+	const items = feed.items
+		.filter((item) => !payload.attention_status || item.status === payload.attention_status)
+		.filter((item) => !payload.source_layer || item.source_layer === payload.source_layer)
+		.filter((item) => !since || item.created_at >= since)
+		.slice(0, Math.max(1, Math.min(limit, 200)));
+	const logs = feed.logs
+		.filter((log) => !payload.source_layer || log.source_layer === payload.source_layer)
+		.filter((log) => !since || log.created_at >= since)
+		.slice(0, Math.max(1, Math.min(limit, 200)));
+	return {
+		items,
+		logs,
+		counts: {
+			idle: items.filter((item) => item.status === 'idle').length,
+			pending_approval: items.filter((item) => item.status === 'pending_approval').length,
+			running: items.filter((item) => item.status === 'running').length,
+			completed: items.filter((item) => item.status === 'completed').length,
+			failed: items.filter((item) => item.status === 'failed').length,
+		},
+	};
+}
+
+async function handleJobEventFeed(context: QueueRequestContext, payload: QueueEnvelope): Promise<QueueResponse> {
+	const jobs = payload.job_id
+		? [await context.getJob(payload.job_id)].filter((job): job is JobRecord => Boolean(job))
+		: await context.listJobs();
+	if (payload.job_id && jobs.length === 0) {
+		return jobNotFound(payload.job_id);
+	}
+	const itemAccumulator = [];
+	const logAccumulator = [];
+	for (const job of jobs) {
+		const audits = await context.listAuditRecords(undefined, job.job_id, payload.limit ?? 50);
+		const filtered = filterEventFeed(buildJobEventFeed(job, audits), payload);
+		itemAccumulator.push(...filtered.items);
+		logAccumulator.push(...filtered.logs);
+	}
+	itemAccumulator.sort((left, right) => right.created_at.localeCompare(left.created_at));
+	logAccumulator.sort((left, right) => right.created_at.localeCompare(left.created_at));
+	const limit = typeof payload.limit === 'number' && Number.isFinite(payload.limit) ? Math.max(1, Math.min(payload.limit, 200)) : 50;
+	const items = itemAccumulator.slice(0, limit);
+	const logs = logAccumulator.slice(0, limit);
+	return jsonResponse(
+		ok({
+			items,
+			logs,
+			counts: {
+				idle: items.filter((item) => item.status === 'idle').length,
+				pending_approval: items.filter((item) => item.status === 'pending_approval').length,
+				running: items.filter((item) => item.status === 'running').length,
+				completed: items.filter((item) => item.status === 'completed').length,
+				failed: items.filter((item) => item.status === 'failed').length,
+			},
+		}),
+	);
 }
 
 async function handleWorkspaceRegister(

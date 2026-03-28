@@ -10,18 +10,66 @@ import { ensureRepoAllowed, ensureWorkflowAllowed, errorCodeFor, fail, getDefaul
 export const GUI_CAPTURE_WORKFLOW_ID = 'gui-capture.yml';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function waitForRun(env: AppEnv, owner: string, repo: string, ref: string, startedAt: string, timeoutMs: number) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function waitForRun(
+	env: AppEnv,
+	owner: string,
+	repo: string,
+	ref: string,
+	startedAt: string,
+	timeoutMs: number,
+	requestId?: string,
+) {
 	const deadline = Date.now() + timeoutMs;
-	let runId = 0;
+	const candidateRunIds = new Set<number>();
+	const mismatchedRunIds = new Set<number>();
 	while (Date.now() < deadline) {
-		if (!runId) {
-			const runs = (await githubGet(env, `/repos/${owner}/${repo}/actions/runs`, { params: { branch: ref, event: 'workflow_dispatch', per_page: 10 } })) as { workflow_runs?: Array<Record<string, unknown>> };
-			const run = (runs.workflow_runs ?? []).find((x) => String(x.path ?? '').endsWith(`/${GUI_CAPTURE_WORKFLOW_ID}`) && String(x.created_at ?? '') >= startedAt);
-			if (run) runId = Number(run.id);
+		const runs = (await githubGet(env, `/repos/${owner}/${repo}/actions/runs`, {
+			params: { branch: ref, event: 'workflow_dispatch', per_page: 10 },
+		})) as { workflow_runs?: Array<Record<string, unknown>> };
+		for (const item of runs.workflow_runs ?? []) {
+			if (
+				String(item.path ?? '').endsWith(`/${GUI_CAPTURE_WORKFLOW_ID}`) &&
+				String(item.created_at ?? '') >= startedAt
+			) {
+				const runId = Number(item.id);
+				if (Number.isFinite(runId) && runId > 0 && !mismatchedRunIds.has(runId)) {
+					candidateRunIds.add(runId);
+				}
+			}
 		}
-		if (runId) {
+		for (const runId of Array.from(candidateRunIds).sort((left, right) => left - right)) {
 			const run = (await githubGet(env, `/repos/${owner}/${repo}/actions/runs/${runId}`)) as Record<string, unknown>;
-			if (String(run.status ?? '') === 'completed') return { runId, run };
+			if (String(run.status ?? '') === 'completed') {
+				let artifact = null;
+				if (requestId) {
+					try {
+						artifact = await readArtifact(env, owner, repo, runId);
+						const requestFromSummary =
+							typeof artifact.summary.request_id === 'string'
+								? artifact.summary.request_id
+								: isRecord(artifact.summary.request) && typeof artifact.summary.request.request_id === 'string'
+									? artifact.summary.request.request_id
+									: '';
+						if (requestFromSummary && requestFromSummary !== requestId) {
+							mismatchedRunIds.add(runId);
+							candidateRunIds.delete(runId);
+							continue;
+						}
+						if (!requestFromSummary && candidateRunIds.size > 1) {
+							continue;
+						}
+					} catch {
+						if (candidateRunIds.size > 1) {
+							continue;
+						}
+					}
+				}
+				return { runId, run, artifact };
+			}
 		}
 		await sleep(3000);
 	}
@@ -74,8 +122,16 @@ export async function runGuiCaptureWorkflow(
 		scenario: input.scenario as Parameters<typeof normalizeGuiCaptureInstructions>[1]['scenario'],
 		report: input.report as Parameters<typeof normalizeGuiCaptureInstructions>[1]['report'],
 	});
+	const requestId = crypto.randomUUID();
 	const workflowRef = input.ref?.trim() || getDefaultBaseBranch(env);
-	const instructionsB64 = encodeBase64(new TextEncoder().encode(JSON.stringify(instructions)));
+	const instructionsB64 = encodeBase64(
+		new TextEncoder().encode(
+			JSON.stringify({
+				...instructions,
+				request_id: requestId,
+			}),
+		),
+	);
 	const inputs: Record<string, unknown> = { request_kind: 'gui_capture', instructions_b64: instructionsB64 };
 	validateWorkflowInputs(inputs);
 	const startedAt = new Date().toISOString();
@@ -83,16 +139,17 @@ export async function runGuiCaptureWorkflow(
 		ref: workflowRef,
 		inputs,
 	});
-	const { runId, run } = await waitForRun(
+	const { runId, run, artifact } = await waitForRun(
 		env,
 		owner,
 		repo,
 		workflowRef,
 		startedAt,
 		(input.wait_timeout_seconds ?? 120) * 1000,
+		requestId,
 	);
 	const conclusion = String(run.conclusion ?? '');
-	const artifact = await readArtifact(env, owner, repo, runId);
+	const resolvedArtifact = artifact ?? (await readArtifact(env, owner, repo, runId));
 	return {
 		repo: repoKey,
 		workflow_id: GUI_CAPTURE_WORKFLOW_ID,
@@ -101,12 +158,12 @@ export async function runGuiCaptureWorkflow(
 		run_html_url: run.html_url ?? null,
 		conclusion,
 		mode: instructions.mode,
-		summary: artifact.summary,
-		report_file_name: artifact.report_file_name,
-		artifact_files: artifact.artifact_files,
-		step_image_files: artifact.step_image_files,
-		image_file_name: artifact.image_file_name,
-		image_base64: input.include_image_base64 ? artifact.image_base64 : null,
+		summary: resolvedArtifact.summary,
+		report_file_name: resolvedArtifact.report_file_name,
+		artifact_files: resolvedArtifact.artifact_files,
+		step_image_files: resolvedArtifact.step_image_files,
+		image_file_name: resolvedArtifact.image_file_name,
+		image_base64: input.include_image_base64 ? resolvedArtifact.image_base64 : null,
 	};
 }
 

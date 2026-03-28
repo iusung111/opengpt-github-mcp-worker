@@ -23,8 +23,10 @@ describe('tool catalog permission bundles', () => {
 		expect(bundle.tools).toContain('desktop_build_run');
 		expect(bundle.tools).toContain('api_contract_list');
 		expect(bundle.tools).toContain('db_schema_inspect');
+		expect(bundle.tools).toContain('db_reset_prepare');
 		expect(bundle.tools).toContain('runtime_log_query');
 		expect(bundle.tools).toContain('deploy_promote');
+		expect(bundle.tools).toContain('job_event_feed');
 	});
 
 	it('builds a user-facing approval request for batch approval', () => {

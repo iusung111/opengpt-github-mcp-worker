@@ -128,6 +128,7 @@ Schema inspection plus workflow-backed migration, seed, reset, and safe query op
 - `db_schema_inspect`
 - `db_migration_apply`
 - `db_seed_run`
+- `db_reset_prepare`
 - `db_reset`
 - `db_query_safe`
 
@@ -156,6 +157,7 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - `job_get`
 - `job_progress`
 - `jobs_list`
+- `job_event_feed`
 - `audit_list`
 - `job_update_status`
 - `job_append_note`

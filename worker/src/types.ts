@@ -3,6 +3,9 @@ import { DurableObject } from 'cloudflare:workers';
 export type JobStatus = 'queued' | 'working' | 'review_pending' | 'rework_pending' | 'done' | 'failed';
 export type NextActor = 'worker' | 'reviewer' | 'system';
 export type ReviewVerdict = 'approved' | 'changes_requested' | 'blocked';
+export type RunAttentionStatus = 'idle' | 'pending_approval' | 'running' | 'completed' | 'failed';
+export type NotificationSourceLayer = 'gpt' | 'mcp' | 'cloudflare' | 'repo' | 'system';
+export type NotificationSeverity = 'info' | 'warning' | 'error';
 
 export type AppEnv = Env & {
 	JOB_QUEUE: DurableObjectNamespace<import('./index').JobQueueDurableObject>;
@@ -148,6 +151,18 @@ export interface JobRuntimeManifest {
 	updated_at?: string;
 }
 
+export interface JobApprovalManifest {
+	pending?: boolean;
+	reason?: string | null;
+	blocked_action?: string | null;
+	requested_at?: string;
+	cleared_at?: string | null;
+}
+
+export interface JobAttentionManifest {
+	approval?: JobApprovalManifest;
+}
+
 export interface JobWorkerManifest {
 	schema_version?: 1;
 	execution?: JobExecutionManifest;
@@ -156,6 +171,7 @@ export interface JobWorkerManifest {
 	browser?: JobBrowserManifest;
 	desktop?: JobDesktopManifest;
 	runtime?: JobRuntimeManifest;
+	attention?: JobAttentionManifest;
 	dispatch_request?: DispatchRequestRecord | null;
 	last_workflow_run?: JobWorkflowRunRecord | null;
 	[key: string]: unknown;
@@ -196,14 +212,76 @@ export interface ToolResultEnvelope {
 	meta?: Record<string, unknown> | null;
 }
 
+export interface RunSummary {
+	run_id: string;
+	job_id: string;
+	title: string;
+	status: RunAttentionStatus;
+	progress_percent: number;
+	last_event: string | null;
+	approval_reason: string | null;
+	updated_at: string;
+	workflow_run_id: number | null;
+	pr_number: number | null;
+	preview_id: string | null;
+}
+
+export interface NotificationItem {
+	id: string;
+	job_id: string;
+	run_id: string;
+	status: RunAttentionStatus;
+	title: string;
+	body: string;
+	source_layer: NotificationSourceLayer;
+	severity: NotificationSeverity;
+	created_at: string;
+	linked_refs: Record<string, unknown>;
+	dedupe_key: string;
+}
+
+export interface LayerLogEntry {
+	id: string;
+	job_id: string;
+	run_id: string;
+	source_layer: NotificationSourceLayer;
+	level: 'info' | 'warning' | 'error';
+	message: string;
+	created_at: string;
+	workflow_run_id: number | null;
+}
+
+export interface BlockingState {
+	kind: 'none' | 'approval' | 'review' | 'failure';
+	reason: string | null;
+	blocked_action: string | null;
+	resume_hint: string | null;
+}
+
+export interface NotificationCounts {
+	idle: number;
+	pending_approval: number;
+	running: number;
+	completed: number;
+	failed: number;
+}
+
+export interface JobEventFeed {
+	items: NotificationItem[];
+	logs: LayerLogEntry[];
+	counts: NotificationCounts;
+}
+
 export interface QueueEnvelope {
 	action:
 		| 'job_create'
 		| 'job_upsert'
 		| 'job_get'
 		| 'job_progress'
+		| 'job_event_feed'
 		| 'jobs_list'
 		| 'audit_list'
+		| 'audit_write'
 		| 'job_update_status'
 		| 'job_append_note'
 		| 'job_submit_review'
@@ -229,6 +307,10 @@ export interface QueueEnvelope {
 	delivery_id?: string;
 	event_type?: string;
 	limit?: number;
+	blocked_action?: string;
+	attention_status?: RunAttentionStatus;
+	source_layer?: NotificationSourceLayer;
+	since?: string;
 }
 
 export interface AuditRecord {
@@ -254,6 +336,10 @@ export interface JobProgressSnapshot {
 	latest_note: string | null;
 	recent_notes: string[];
 	recent_audits: AuditRecord[];
+	run_summary: RunSummary;
+	blocking_state: BlockingState;
+	latest_notification: NotificationItem | null;
+	notification_counts: NotificationCounts;
 	last_transition_at: string;
 	last_reconciled_at: string | null;
 	last_webhook_event_at: string | null;
