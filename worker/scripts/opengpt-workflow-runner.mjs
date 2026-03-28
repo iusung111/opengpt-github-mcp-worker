@@ -138,6 +138,7 @@ export function executeWorkflowRequest(input) {
 		ok: overallStatus !== 'failed',
 		kind: String(request.kind ?? input.defaultKind),
 		request: {
+			request_id: request.request_id ?? null,
 			profile_id: request.profile_id ?? null,
 			label: request.label ?? null,
 			deploy_target: request.deploy_target ?? null,

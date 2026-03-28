@@ -67,9 +67,70 @@ export function errorCodeFor(error: unknown, fallback: string): string {
 	return fallback;
 }
 
-export function toolText(result: ToolResultEnvelope): { content: [{ type: 'text'; text: string }] } {
+function hasRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, unknown> | undefined {
+	if (!result.ok || !hasRecord(result.data)) {
+		return undefined;
+	}
+	const data = result.data;
+	if (hasRecord(data.progress) && hasRecord(data.progress.run_summary)) {
+		return {
+			kind: 'opengpt.notification_contract.job_progress',
+			progress: data.progress,
+			run_summary: data.progress.run_summary,
+			blocking_state: data.progress.blocking_state ?? null,
+			latest_notification: data.progress.latest_notification ?? null,
+			notification_counts: data.progress.notification_counts ?? null,
+		};
+	}
+	if (Array.isArray(data.jobs) && data.jobs.some((item) => hasRecord(item) && hasRecord(item.run_summary))) {
+		return {
+			kind: 'opengpt.notification_contract.jobs_list',
+			jobs: data.jobs,
+		};
+	}
+	if (Array.isArray(data.items) && Array.isArray(data.logs) && hasRecord(data.counts)) {
+		return {
+			kind: 'opengpt.notification_contract.job_event_feed',
+			items: data.items,
+			logs: data.logs,
+			counts: data.counts,
+		};
+	}
+	if (hasRecord(data.notification) && hasRecord(data.bundle)) {
+		return {
+			kind: 'opengpt.notification_contract.permission_bundle',
+			notification: data.notification,
+			bundle: data.bundle,
+			status: data.status ?? null,
+		};
+	}
+	if (typeof data.bundle_id === 'string' && (Array.isArray(data.runs) || Array.isArray(data.layer_logs) || data.scope)) {
+		return {
+			kind: 'opengpt.notification_contract.incident_bundle',
+			bundle_id: data.bundle_id,
+			scope: data.scope ?? 'job',
+			runs: data.runs ?? null,
+			layer_logs: data.layer_logs ?? null,
+			error_logs: data.error_logs ?? null,
+		};
+	}
+	return undefined;
+}
+
+export function toolText(result: ToolResultEnvelope): {
+	content: [{ type: 'text'; text: string }];
+	structuredContent?: Record<string, unknown>;
+	isError?: boolean;
+} {
+	const structuredContent = buildStructuredToolResult(result);
 	return {
 		content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+		structuredContent,
+		isError: result.ok ? undefined : true,
 	};
 }
 

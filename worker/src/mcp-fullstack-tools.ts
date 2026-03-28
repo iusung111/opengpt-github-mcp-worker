@@ -3,6 +3,8 @@ import * as z from 'zod/v4';
 
 import { GUI_CAPTURE_WORKFLOW_ID, runGuiCaptureWorkflow } from './mcp-gui-tools';
 import { ToolAnnotations } from './mcp-overview-tools';
+import { mergeWorkerManifest } from './job-manifest';
+import { computeRunAttentionStatus } from './queue-projections';
 import {
 	ProjectCapabilities,
 	renderPreviewUrlTemplate,
@@ -14,9 +16,11 @@ import {
 	buildStablePreviewId,
 	BrowserResultTokenPayload,
 	BrowserSessionTokenPayload,
+	buildConfirmToken,
 	decodeToken,
 	encodeToken,
 	PreviewTokenPayload,
+	validateConfirmToken,
 } from './state-tokens';
 import { AppEnv, JobRecord, JobVerificationStepRecord, JobWorkerManifest } from './types';
 import {
@@ -163,6 +167,34 @@ async function getJobRecord(env: AppEnv, jobId: string): Promise<JobRecord | nul
 	return (result.data?.job as JobRecord | undefined) ?? null;
 }
 
+async function queueJsonOrThrow(
+	env: AppEnv,
+	payload: Parameters<typeof queueJson>[1],
+	fallbackMessage: string,
+) {
+	const result = await queueJson(env, payload);
+	if (!result.ok) {
+		throw new Error(result.error ?? result.code ?? fallbackMessage);
+	}
+	return result;
+}
+
+function sourceLayerForManifestSection(section: keyof JobWorkerManifest): 'mcp' | 'cloudflare' {
+	return section === 'preview' ? 'cloudflare' : 'mcp';
+}
+
+function sectionStatusForAudit(manifest: Partial<JobWorkerManifest> | undefined, section: keyof JobWorkerManifest): string | null {
+	const sectionValue = manifest?.[section];
+	return isRecord(sectionValue) && typeof sectionValue.status === 'string' ? sectionValue.status : null;
+}
+
+function sectionMessageForAudit(section: keyof JobWorkerManifest, sectionStatus: string | null): string | null {
+	if (!sectionStatus) {
+		return null;
+	}
+	return `${section} is ${sectionStatus}.`;
+}
+
 async function updateJobState(
 	env: AppEnv,
 	input: {
@@ -178,7 +210,23 @@ async function updateJobState(
 	if (!input.jobId) {
 		return;
 	}
-	await queueJson(env, {
+	const currentJob = await getJobRecord(env, input.jobId);
+	const approvalPending = currentJob?.worker_manifest?.attention?.approval?.pending === true;
+	const shouldClearApproval =
+		approvalPending &&
+		(input.status === 'working' || input.status === 'done' || input.status === 'failed');
+	const mergedManifest = mergeWorkerManifest(currentJob?.worker_manifest ?? {}, input.workerManifest ?? {});
+	if (shouldClearApproval) {
+		mergedManifest.attention = {
+			...(mergedManifest.attention ?? {}),
+			approval: {
+				...(mergedManifest.attention?.approval ?? {}),
+				pending: false,
+				cleared_at: nowIso(),
+			},
+		};
+	}
+	await queueJsonOrThrow(env, {
 		action: 'job_upsert',
 		job: {
 			job_id: input.jobId,
@@ -187,9 +235,72 @@ async function updateJobState(
 			next_actor: input.nextActor,
 			workflow_run_id: input.workflowRunId ?? undefined,
 			last_error: input.lastError,
-			worker_manifest: input.workerManifest,
+			worker_manifest: mergedManifest,
 		},
-	});
+	}, `failed to update job state for ${input.jobId}`);
+	if (currentJob) {
+		const projectedJob: JobRecord = {
+			...currentJob,
+			status: input.status ?? currentJob.status,
+			next_actor: input.nextActor ?? currentJob.next_actor,
+			workflow_run_id: input.workflowRunId === undefined ? currentJob.workflow_run_id : input.workflowRunId ?? undefined,
+			last_error: input.lastError === undefined ? currentJob.last_error : input.lastError,
+			worker_manifest: mergedManifest,
+			updated_at: nowIso(),
+		};
+		if (input.status || input.nextActor || input.workflowRunId !== undefined || input.lastError !== undefined) {
+			await queueJsonOrThrow(env, {
+				action: 'audit_write',
+				event_type: 'job_update_status',
+				payload: {
+					job_id: input.jobId,
+					repo: input.repoKey,
+					status: projectedJob.status,
+					next_actor: projectedJob.next_actor,
+					workflow_run_id: projectedJob.workflow_run_id ?? null,
+					last_error: projectedJob.last_error ?? null,
+					source_layer: 'system',
+					attention_status: computeRunAttentionStatus(projectedJob),
+				},
+			}, `failed to write status audit for ${input.jobId}`);
+		}
+		for (const section of ['verification', 'preview', 'browser', 'desktop', 'runtime'] as Array<keyof JobWorkerManifest>) {
+			const sectionStatus = sectionStatusForAudit(input.workerManifest, section);
+			if (!sectionStatus) {
+				continue;
+			}
+			await queueJsonOrThrow(env, {
+				action: 'audit_write',
+				event_type: 'job_manifest_notification',
+				payload: {
+					job_id: input.jobId,
+					repo: input.repoKey,
+					section,
+					section_status: sectionStatus,
+					workflow_run_id: projectedJob.workflow_run_id ?? null,
+					preview_id: section === 'preview' ? projectedJob.worker_manifest.preview?.preview_id ?? null : null,
+					source_layer: sourceLayerForManifestSection(section),
+					attention_status: computeRunAttentionStatus(projectedJob),
+					message: sectionMessageForAudit(section, sectionStatus),
+					dedupe_key: `${input.jobId}:${section}:${sectionStatus}:${projectedJob.workflow_run_id ?? 'none'}`,
+				},
+			}, `failed to write ${section} audit for ${input.jobId}`);
+		}
+		if (shouldClearApproval) {
+			await queueJsonOrThrow(env, {
+				action: 'audit_write',
+				event_type: 'job_attention_approval_cleared',
+				payload: {
+					job_id: input.jobId,
+					repo: input.repoKey,
+					source_layer: 'gpt',
+					attention_status: computeRunAttentionStatus(projectedJob),
+					message: 'Approval requirement cleared and work resumed.',
+					dedupe_key: `approval_cleared:${input.jobId}:${projectedJob.updated_at}`,
+				},
+			}, `failed to write approval cleared audit for ${input.jobId}`);
+		}
+	}
 }
 
 async function resolveRunIdFromInput(
@@ -528,20 +639,14 @@ function normalizeContractValidation(path: string, text: string): Record<string,
 	};
 }
 
-function validateDbResetConfirmToken(owner: string, repo: string, ref: string, confirmToken: string): void {
-	const expected = `db-reset:${owner}/${repo}:${ref}`;
-	if (confirmToken !== expected) {
-		throw new Error(`confirm_token must equal ${expected}`);
-	}
-}
-
-function resolveApiTargetUrl(
+async function resolveApiTargetUrl(
+	env: AppEnv,
 	previewToken: string | undefined,
 	appUrl: string | undefined,
 	requestPath: string | undefined,
-): string {
+): Promise<string> {
 	if (previewToken) {
-		const preview = decodeToken<PreviewTokenPayload>(previewToken, 'preview');
+		const preview = await decodeToken<PreviewTokenPayload>(env, previewToken, 'preview');
 		const baseUrl = firstObjectUrl(preview.urls);
 		if (!baseUrl) {
 			throw new Error('preview token does not include a target URL');
@@ -860,6 +965,9 @@ export function registerFullstackTools(
 			try {
 				ensureRepoAllowed(env, repoKey);
 				await activateRepoWorkspace(env, repoKey);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				if (
 					!capabilities.web_preview.enabled &&
@@ -931,7 +1039,7 @@ export function registerFullstackTools(
 							repo: repoKey,
 							ref: effectiveRef,
 							preview: payload,
-							preview_token: encodeToken(payload),
+							preview_token: await encodeToken(env, payload),
 							workflow: workflowResult
 								? summarizeRun(repoKey, effectiveRef, capabilities.workflow_ids.preview, workflowResult)
 								: null,
@@ -973,7 +1081,7 @@ export function registerFullstackTools(
 		},
 		async ({ preview_token, probe_health }) => {
 			try {
-				const preview = decodeToken<PreviewTokenPayload>(preview_token, 'preview');
+				const preview = await decodeToken<PreviewTokenPayload>(env, preview_token, 'preview');
 				const health = probe_health
 					? await Promise.all(
 							Object.entries(preview.urls).map(async ([service, url]) => ({
@@ -1009,10 +1117,13 @@ export function registerFullstackTools(
 			annotations: writeAnnotations,
 		},
 		async ({ preview_token, job_id, wait_timeout_seconds }) => {
-			const preview = decodeToken<PreviewTokenPayload>(preview_token, 'preview');
-			const [owner, repo] = preview.repo.split('/');
 			try {
+				const preview = await decodeToken<PreviewTokenPayload>(env, preview_token, 'preview');
+				const [owner, repo] = preview.repo.split('/');
 				ensureRepoAllowed(env, preview.repo);
+				if (preview.ref !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, preview.ref);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, preview.ref);
 				let workflowResult: Awaited<ReturnType<typeof dispatchStandardWorkflow>> | null = null;
 				if ((capabilities.web_preview.destroy_commands?.length ?? 0) > 0) {
@@ -1055,7 +1166,7 @@ export function registerFullstackTools(
 					ok(
 						{
 							preview: destroyed,
-							preview_token: encodeToken(destroyed),
+							preview_token: await encodeToken(env, destroyed),
 							workflow: workflowResult
 								? summarizeRun(preview.repo, preview.ref, capabilities.workflow_ids.preview, workflowResult)
 								: null,
@@ -1110,7 +1221,7 @@ export function registerFullstackTools(
 				let target: BrowserSessionTokenPayload['target'];
 				let resolvedUrl: string;
 				if (preview_token) {
-					const preview = decodeToken<PreviewTokenPayload>(preview_token, 'preview');
+					const preview = await decodeToken<PreviewTokenPayload>(env, preview_token, 'preview');
 					const url = firstObjectUrl(preview.urls);
 					if (!url) {
 						throw new Error('preview token does not include a target URL');
@@ -1135,7 +1246,10 @@ export function registerFullstackTools(
 					viewport,
 					locale,
 					color_scheme,
+					file_name: file_name?.trim() || null,
+					file_text: target?.type === 'static_file' ? file_text ?? null : null,
 					created_at: nowIso(),
+					expires_at: toIsoTimestamp(Date.now() + 30 * 60_000),
 				};
 				if (job_id) {
 					const job = await getJobRecord(env, job_id);
@@ -1154,7 +1268,7 @@ export function registerFullstackTools(
 						},
 					});
 				}
-				return toolText(ok({ session: payload, session_token: encodeToken(payload) }, writeAnnotations));
+				return toolText(ok({ session: payload, session_token: await encodeToken(env, payload) }, writeAnnotations));
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'browser_session_start_failed'), error, writeAnnotations));
 			}
@@ -1179,7 +1293,7 @@ export function registerFullstackTools(
 		},
 		async ({ session_token, actions, job_id, stop_on_failure, wait_timeout_seconds, include_image_base64, file_name, file_text }) => {
 			try {
-				const session = decodeToken<BrowserSessionTokenPayload>(session_token, 'browser_session');
+				const session = await decodeToken<BrowserSessionTokenPayload>(env, session_token, 'browser_session');
 				const mappedSteps = actions.map((action, index) => ({
 					id: `browser-${index + 1}`,
 					name: `${action.action}-${index + 1}`,
@@ -1202,8 +1316,10 @@ export function registerFullstackTools(
 						session.target.type === 'preview' || session.target.type === 'url'
 							? session.resolved_url
 							: undefined,
-					file_name: file_name ?? (session.target.type === 'static_file' ? session.target.value : undefined),
-					file_text,
+					file_name:
+						file_name ??
+						(session.target.type === 'static_file' ? (session.file_name ?? session.target.value) : undefined),
+					file_text: file_text ?? session.file_text ?? undefined,
 					scenario: {
 						name: `browser-session-${session.session_id}`,
 						viewport,
@@ -1230,6 +1346,7 @@ export function registerFullstackTools(
 					summary: summary ?? {},
 					diagnostics,
 					created_at: nowIso(),
+					expires_at: toIsoTimestamp(Date.now() + 24 * 60 * 60_000),
 					workflow: {
 						owner: workflowOwner,
 						repo: workflowRepo,
@@ -1264,7 +1381,7 @@ export function registerFullstackTools(
 							...result,
 							session,
 							diagnostics,
-							browser_result_token: encodeToken(resultPayload),
+							browser_result_token: await encodeToken(env, resultPayload),
 						},
 						writeAnnotations,
 					),
@@ -1286,7 +1403,7 @@ export function registerFullstackTools(
 		},
 		async ({ browser_result_token }) => {
 			try {
-				const payload = decodeToken<BrowserResultTokenPayload>(browser_result_token, 'browser_result');
+				const payload = await decodeToken<BrowserResultTokenPayload>(env, browser_result_token, 'browser_result');
 				const logs =
 					payload.run_id && payload.workflow?.workflow_id === GUI_CAPTURE_WORKFLOW_ID
 						? await readGuiCaptureDiagnosticFiles(env, payload.run_id)
@@ -1316,6 +1433,9 @@ export function registerFullstackTools(
 			const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
 			try {
 				ensureRepoAllowed(env, repoKey);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				const commands =
 					capabilities.desktop.build_commands.length > 0
@@ -1385,6 +1505,9 @@ export function registerFullstackTools(
 			const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
 			try {
 				ensureRepoAllowed(env, repoKey);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				const commands =
 					capabilities.desktop.smoke_commands.length > 0
@@ -1545,7 +1668,7 @@ export function registerFullstackTools(
 		},
 		async ({ preview_token, app_url, path, method, headers, body_text }) => {
 			try {
-				const url = resolveApiTargetUrl(preview_token, app_url, path);
+				const url = await resolveApiTargetUrl(env, preview_token, app_url, path);
 				const response = await fetch(url, {
 					method,
 					headers: {
@@ -1672,6 +1795,9 @@ export function registerFullstackTools(
 			try {
 				const repoKey = `${owner}/${repo}`;
 				const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				if (capabilities.db.migration_commands.length === 0) {
 					throw new Error('db migration commands are not configured');
@@ -1719,6 +1845,9 @@ export function registerFullstackTools(
 			try {
 				const repoKey = `${owner}/${repo}`;
 				const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				if (capabilities.db.seed_commands.length === 0) {
 					throw new Error('db seed commands are not configured');
@@ -1743,9 +1872,56 @@ export function registerFullstackTools(
 	);
 
 	server.registerTool(
+		'db_reset_prepare',
+		{
+			description: 'Issue a short-lived signed confirm token for db_reset on an allowlisted repository/ref.',
+			inputSchema: {
+				owner: z.string(),
+				repo: z.string(),
+				ref: z.string().optional(),
+				ttl_minutes: z.number().int().positive().max(30).default(10),
+			},
+			annotations: writeAnnotations,
+		},
+		async ({ owner, repo, ref, ttl_minutes }) => {
+			try {
+				const repoKey = `${owner}/${repo}`;
+				const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
+				ensureRepoAllowed(env, repoKey);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
+				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
+				if (capabilities.db.reset_commands.length === 0) {
+					throw new Error('db reset commands are not configured');
+				}
+				const issued = await buildConfirmToken(env, {
+					action: 'db_reset',
+					repo: repoKey,
+					ref: effectiveRef,
+					ttl_minutes,
+				});
+				return toolText(
+					ok(
+						{
+							repo: repoKey,
+							ref: effectiveRef,
+							confirm_token: issued.token,
+							confirm: issued.payload,
+						},
+						writeAnnotations,
+					),
+				);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'db_reset_prepare_failed'), error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
 		'db_reset',
 		{
-			description: 'Run destructive DB reset commands only when the confirm token matches the repo/ref guard.',
+			description: 'Run destructive DB reset commands only when the confirm token was minted by db_reset_prepare for the same repo/ref.',
 			inputSchema: {
 				...dbMutationSchema,
 				confirm_token: z.string(),
@@ -1756,7 +1932,16 @@ export function registerFullstackTools(
 			try {
 				const repoKey = `${owner}/${repo}`;
 				const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
-				validateDbResetConfirmToken(owner, repo, effectiveRef, confirm_token);
+				ensureRepoAllowed(env, repoKey);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
+				await validateConfirmToken(env, {
+					token: confirm_token,
+					action: 'db_reset',
+					repo: repoKey,
+					ref: effectiveRef,
+				});
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				if (capabilities.db.reset_commands.length === 0) {
 					throw new Error('db reset commands are not configured');
@@ -1804,6 +1989,9 @@ export function registerFullstackTools(
 			try {
 				const repoKey = `${owner}/${repo}`;
 				const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				if (!capabilities.db.query_command) {
 					throw new Error('db query command is not configured');
@@ -1914,18 +2102,82 @@ export function registerFullstackTools(
 				job_id: z.string().optional(),
 				preview_token: z.string().optional(),
 				browser_result_token: z.string().optional(),
+				scope: z.enum(['job', 'all_active']).default('job'),
+				include_layer_logs: z.boolean().default(false),
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, run_id, job_id, preview_token, browser_result_token }) => {
+		async ({ owner, repo, run_id, job_id, preview_token, browser_result_token, scope, include_layer_logs }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
+				if (scope === 'all_active') {
+					const jobsResult = await queueJson(env, { action: 'jobs_list' });
+					if (!jobsResult.ok) {
+						throw new Error(jobsResult.error ?? 'failed to list jobs');
+					}
+					const repoJobs = (((jobsResult.data?.jobs as unknown[]) ?? []).filter((item) => {
+						const job = item as Record<string, unknown>;
+						const runSummary = (job.run_summary ?? null) as Record<string, unknown> | null;
+						return (
+							job.repo === repoKey &&
+							runSummary?.status !== 'completed' &&
+							runSummary?.status !== 'failed'
+						);
+					}) as Array<Record<string, unknown>>);
+					const runs = [];
+					const layerLogs = [];
+					for (const job of repoJobs) {
+						const jobId = typeof job.job_id === 'string' ? job.job_id : null;
+						if (!jobId) {
+							continue;
+						}
+						runs.push({
+							job_id: jobId,
+							run_id: jobId,
+							repo: repoKey,
+							run_summary: job.run_summary ?? null,
+							blocking_state: job.blocking_state ?? null,
+							latest_notification: job.latest_notification ?? null,
+						});
+						if (include_layer_logs) {
+							const feedResult = await queueJson(env, { action: 'job_event_feed', job_id: jobId, limit: 50 });
+							if (feedResult.ok) {
+								layerLogs.push(
+									...(((feedResult.data?.logs as unknown[]) ?? []).map((entry) => ({
+										job_id: jobId,
+										...((entry as Record<string, unknown>) ?? {}),
+									})) as Array<Record<string, unknown>>),
+								);
+							}
+						}
+					}
+					return toolText(
+						ok(
+							{
+								bundle_id: `inc_repo_${Date.now()}`,
+								repo: repoKey,
+								scope,
+								exported_at: nowIso(),
+								runs,
+								layer_logs: include_layer_logs ? layerLogs : [],
+								error_logs: include_layer_logs
+									? layerLogs.filter((entry) => entry.level === 'error')
+									: [],
+							},
+							writeAnnotations,
+						),
+					);
+				}
 				const resolvedRunId = await resolveRunIdFromInput(env, job_id, run_id, 'runtime');
 				const summary = await fetchRunSummary(env, owner, repo, resolvedRunId);
-				const preview = preview_token ? decodeToken<PreviewTokenPayload>(preview_token, 'preview') : null;
+				const preview = preview_token ? await decodeToken<PreviewTokenPayload>(env, preview_token, 'preview') : null;
 				const browser = browser_result_token
-					? decodeToken<BrowserResultTokenPayload>(browser_result_token, 'browser_result')
+					? await decodeToken<BrowserResultTokenPayload>(env, browser_result_token, 'browser_result')
 					: null;
+				const eventFeed =
+					include_layer_logs && job_id
+						? await queueJson(env, { action: 'job_event_feed', job_id, limit: 50 })
+						: null;
 				const bundleId = `inc_${(
 					await sha256Hex(
 						JSON.stringify({
@@ -1959,6 +2211,8 @@ export function registerFullstackTools(
 							artifacts: summary.artifacts,
 							preview,
 							browser,
+							scope,
+							layer_logs: include_layer_logs ? (eventFeed?.data?.logs ?? []) : [],
 						},
 						writeAnnotations,
 					),
@@ -1988,6 +2242,9 @@ export function registerFullstackTools(
 			try {
 				const repoKey = `${owner}/${repo}`;
 				const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				ensureWorkflowAllowed(env, repoKey, capabilities.workflow_ids.release);
 				const result = await dispatchStandardWorkflow(env, {
@@ -2034,6 +2291,9 @@ export function registerFullstackTools(
 			try {
 				const repoKey = `${owner}/${repo}`;
 				const effectiveRef = ref?.trim() || getDefaultBaseBranch(env);
+				if (effectiveRef !== getDefaultBaseBranch(env)) {
+					ensureBranchAllowed(env, effectiveRef);
+				}
 				const capabilities = await resolveProjectCapabilities(env, owner, repo, effectiveRef);
 				ensureWorkflowAllowed(env, repoKey, capabilities.workflow_ids.release);
 				const result = await dispatchStandardWorkflow(env, {
@@ -2075,9 +2335,9 @@ export function registerFullstackTools(
 		},
 		async ({ preview_token, verify_status, browser_result_token, desktop_status }) => {
 			try {
-				const preview = preview_token ? decodeToken<PreviewTokenPayload>(preview_token, 'preview') : null;
+				const preview = preview_token ? await decodeToken<PreviewTokenPayload>(env, preview_token, 'preview') : null;
 				const browser = browser_result_token
-					? decodeToken<BrowserResultTokenPayload>(browser_result_token, 'browser_result')
+					? await decodeToken<BrowserResultTokenPayload>(env, browser_result_token, 'browser_result')
 					: null;
 				const previewStatus = preview?.status ?? null;
 				const browserStatus =
@@ -2123,9 +2383,9 @@ export function registerFullstackTools(
 		},
 		async ({ preview_token, verify_status, browser_result_token, desktop_status }) => {
 			try {
-				const preview = preview_token ? decodeToken<PreviewTokenPayload>(preview_token, 'preview') : null;
+				const preview = preview_token ? await decodeToken<PreviewTokenPayload>(env, preview_token, 'preview') : null;
 				const browser = browser_result_token
-					? decodeToken<BrowserResultTokenPayload>(browser_result_token, 'browser_result')
+					? await decodeToken<BrowserResultTokenPayload>(env, browser_result_token, 'browser_result')
 					: null;
 				const browserStatus =
 					getSummaryOverallStatus(browser?.summary ?? null) === 'pass'

@@ -14,16 +14,27 @@ export interface WorkflowDispatchRequest {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 export async function dispatchStandardWorkflow(
 	env: AppEnv,
 	input: WorkflowDispatchRequest,
 ): Promise<{ run_id: number | null; run_html_url: string | null; status: string; conclusion: string | null; summary: Record<string, unknown> | null; artifacts: Array<Record<string, unknown>> }> {
 	const startedAt = nowIso();
+	const requestPayload: Record<string, unknown> & { request_id: string } = {
+		...input.request,
+		request_id:
+			typeof input.request.request_id === 'string' && input.request.request_id.trim()
+				? input.request.request_id.trim()
+				: crypto.randomUUID(),
+	};
 	await githubPost(env, `/repos/${input.owner}/${input.repo}/actions/workflows/${input.workflow_id}/dispatches`, {
 		ref: input.ref,
 		inputs: {
-			request_b64: encodeBase64Text(JSON.stringify(input.request)),
-			request_kind: String(input.request.kind ?? 'generic'),
+			request_b64: encodeBase64Text(JSON.stringify(requestPayload)),
+			request_kind: String(requestPayload.kind ?? 'generic'),
 		},
 	});
 
@@ -33,6 +44,7 @@ export async function dispatchStandardWorkflow(
 		workflow_id: input.workflow_id,
 		ref: input.ref,
 		started_at: startedAt,
+		request_id: String(requestPayload.request_id),
 		timeout_ms: input.wait_timeout_ms ?? 180_000,
 	});
 	if (!run) {
@@ -65,29 +77,52 @@ export async function waitForWorkflowRun(
 		workflow_id: string;
 		ref: string;
 		started_at: string;
+		request_id?: string;
 		timeout_ms: number;
 	},
 ): Promise<{ run_id: number; status: string; conclusion: string | null; run_html_url: string | null } | null> {
 	const deadline = Date.now() + input.timeout_ms;
-	let runId = 0;
+	const candidateRunIds = new Set<number>();
+	const mismatchedRunIds = new Set<number>();
 	while (Date.now() < deadline) {
-		if (!runId) {
-			const runs = (await githubGet(env, `/repos/${input.owner}/${input.repo}/actions/runs`, {
-				params: { branch: input.ref, event: 'workflow_dispatch', per_page: 20 },
-			})) as { workflow_runs?: Array<Record<string, unknown>> };
-			const run = (runs.workflow_runs ?? []).find(
-				(item) =>
-					String(item.path ?? '').endsWith(`/${input.workflow_id}`) &&
-					String(item.created_at ?? '') >= input.started_at,
-			);
-			if (run) {
-				runId = Number(run.id);
+		const runs = (await githubGet(env, `/repos/${input.owner}/${input.repo}/actions/runs`, {
+			params: { branch: input.ref, event: 'workflow_dispatch', per_page: 20 },
+		})) as { workflow_runs?: Array<Record<string, unknown>> };
+		for (const item of runs.workflow_runs ?? []) {
+			if (
+				String(item.path ?? '').endsWith(`/${input.workflow_id}`) &&
+				String(item.created_at ?? '') >= input.started_at
+			) {
+				const runId = Number(item.id);
+				if (Number.isFinite(runId) && runId > 0 && !mismatchedRunIds.has(runId)) {
+					candidateRunIds.add(runId);
+				}
 			}
 		}
-		if (runId) {
+		for (const runId of Array.from(candidateRunIds).sort((left, right) => left - right)) {
 			const run = (await githubGet(env, `/repos/${input.owner}/${input.repo}/actions/runs/${runId}`)) as Record<string, unknown>;
 			const status = String(run.status ?? '');
 			if (status === 'completed') {
+				if (input.request_id) {
+					try {
+						const summary = await readSummaryArtifact(env, input.owner, input.repo, runId);
+						const summaryRequest = isRecord(summary?.request) ? summary.request : null;
+						const summaryRequestId =
+							typeof summaryRequest?.request_id === 'string' ? summaryRequest.request_id.trim() : '';
+						if (summaryRequestId && summaryRequestId !== input.request_id) {
+							mismatchedRunIds.add(runId);
+							candidateRunIds.delete(runId);
+							continue;
+						}
+						if (!summaryRequestId && candidateRunIds.size > 1) {
+							continue;
+						}
+					} catch {
+						if (candidateRunIds.size > 1) {
+							continue;
+						}
+					}
+				}
 				return {
 					run_id: runId,
 					status,

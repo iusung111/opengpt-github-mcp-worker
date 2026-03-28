@@ -20,6 +20,7 @@ import {
 	githubPost,
 	githubPut,
 	ok,
+	nowIso,
 	queueJson,
 	selfRequiresMirrorForLive,
 	toolText,
@@ -40,6 +41,18 @@ function queueActionResult(
 		return toolText({ ...result, meta });
 	}
 	return toolText(fail('queue_action_failed', result.error ?? result.code ?? 'queue action failed', meta));
+}
+
+async function queueJsonOrThrow(
+	env: AppEnv,
+	payload: Parameters<typeof queueJson>[1],
+	fallbackMessage: string,
+) {
+	const result = await queueJson(env, payload);
+	if (!result.ok) {
+		throw new Error(result.error ?? result.code ?? fallbackMessage);
+	}
+	return result;
 }
 
 async function fetchHealthSnapshot(
@@ -265,8 +278,64 @@ export function registerOverviewTools(
 	server.registerTool('help', { description: 'Explain what kinds of GitHub work this MCP server can do and return example request templates. Use this when the user asks what work is possible or how to phrase a request.', inputSchema: { query: z.string().optional() }, annotations: readAnnotations }, async ({ query }) => {
 		try { return toolText(ok(buildHelpPayload(query), readAnnotations)); } catch (error) { return toolText(fail(errorCodeFor(error, 'help_failed'), error, readAnnotations)); }
 	});
-	server.registerTool('request_permission_bundle', { description: 'Build a batch approval bundle for one or more repositories so the user can approve the smallest useful set of MCP actions in one step.', inputSchema: { repos: z.array(z.string()).min(1).describe('List of owner/repo'), preset: z.enum(listPermissionPresets().map((preset) => preset.id) as [string, ...string[]]).optional(), capabilities: z.array(z.enum(['read', 'write', 'workflow', 'review', 'workspace', 'queue', 'self_host'])).default([]), extra_tools: z.array(z.string()).default([]).describe('Optional extra tools to include explicitly'), reason: z.string().describe('Why are these permissions needed?') }, annotations: readAnnotations }, async ({ repos, preset, capabilities, extra_tools, reason }) => {
+	server.registerTool('request_permission_bundle', { description: 'Build a batch approval bundle for one or more repositories so the user can approve the smallest useful set of MCP actions in one step.', inputSchema: { repos: z.array(z.string()).min(1).describe('List of owner/repo'), preset: z.enum(listPermissionPresets().map((preset) => preset.id) as [string, ...string[]]).optional(), capabilities: z.array(z.enum(['read', 'write', 'workflow', 'review', 'workspace', 'queue', 'self_host'])).default([]), extra_tools: z.array(z.string()).default([]).describe('Optional extra tools to include explicitly'), reason: z.string().describe('Why are these permissions needed?'), job_id: z.string().optional(), blocked_action: z.string().optional() }, annotations: readAnnotations }, async ({ repos, preset, capabilities, extra_tools, reason, job_id, blocked_action }) => {
 		try {
+			let notification: Record<string, unknown> | null = null;
+			if (job_id) {
+				const jobResult = await queueJsonOrThrow(env, { action: 'job_get', job_id }, `failed to load job ${job_id}`);
+				const job = (jobResult.data?.job ?? null) as Record<string, unknown> | null;
+				const jobRepo = typeof job?.repo === 'string' ? job.repo : null;
+				if (!jobRepo) {
+					throw new Error(`job repo missing for ${job_id}`);
+				}
+				if (!repos.includes(jobRepo)) {
+					throw new Error(`job repo ${jobRepo} must be included in repos`);
+				}
+				const requestedAt = nowIso();
+				await queueJsonOrThrow(env, {
+					action: 'job_upsert',
+					job: {
+						job_id,
+						repo: jobRepo,
+						worker_manifest: {
+							attention: {
+								approval: {
+									pending: true,
+									reason,
+									blocked_action: blocked_action ?? null,
+									requested_at: requestedAt,
+									cleared_at: null,
+								},
+							},
+						},
+					},
+				}, `failed to update approval state for ${job_id}`);
+				await queueJsonOrThrow(env, {
+					action: 'audit_write',
+					event_type: 'job_attention_approval_requested',
+					payload: {
+						job_id,
+						repo: jobRepo,
+						reason,
+						blocked_action: blocked_action ?? null,
+						source_layer: 'gpt',
+						attention_status: 'pending_approval',
+						title: 'Approval requested',
+						message: reason,
+						dedupe_key: `approval_requested:${job_id}:${blocked_action ?? 'generic'}`,
+						requested_at: requestedAt,
+					},
+				}, `failed to write approval audit for ${job_id}`);
+				notification = {
+					job_id,
+					run_id: job_id,
+					status: 'pending_approval',
+					source_layer: 'gpt',
+					blocked_action: blocked_action ?? null,
+					reason,
+					requested_at: requestedAt,
+				};
+			}
 			return toolText(
 				ok(
 					{
@@ -284,6 +353,7 @@ export function registerOverviewTools(
 							capabilities,
 							extraTools: extra_tools,
 						}),
+						notification,
 					},
 					readAnnotations,
 				),
