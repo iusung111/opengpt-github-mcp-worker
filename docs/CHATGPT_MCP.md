@@ -57,6 +57,7 @@ Instead, the interactive web UI is the shared queue widget resource:
 
 The widget is attached through `openai/outputTemplate` metadata on queue and overview tools such as:
 
+- `run_console_open`
 - `jobs_list`
 - `job_progress`
 - `job_event_feed`
@@ -68,8 +69,9 @@ The widget is attached through `openai/outputTemplate` metadata on queue and ove
 
 Practical implication for ChatGPT web:
 
+- `run_console_open` is the direct discoverability tool for opening the widget
 - the widget appears when ChatGPT calls one of the tools above
-- there is no standalone "open alarm UI" tool on main right now
+- there is still no alarm-specific UI tool on main
 - if the model never chooses one of those tools, the widget will not render even though the exposure metadata is present
 
 ## Required Config

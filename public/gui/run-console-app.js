@@ -1822,6 +1822,12 @@ function renderOverview(job, host) {
 				</div>
 				<div class="hero-side">${renderCountsGrid(aggregateRunCounts())}</div>
 			</section>
+			<section class="panel info-panel">
+				<div class="split-grid">
+					${renderHostFacts(host)}
+					${renderLatestToolSession(null)}
+				</div>
+			</section>
 			${renderKnownRuns()}
 		`;
 	}

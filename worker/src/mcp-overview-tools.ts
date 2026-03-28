@@ -71,6 +71,20 @@ const selfHostStatusStructuredSchema = z
 	})
 	.passthrough();
 
+const jobsListStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.jobs_list'),
+		jobs: z.array(
+			z
+				.object({
+					job_id: z.string(),
+					run_summary: z.object({}).passthrough().optional(),
+				})
+				.passthrough(),
+		),
+	})
+	.passthrough();
+
 function queueActionResult(
 	result: { ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null },
 	meta: Record<string, unknown>,
@@ -139,6 +153,72 @@ async function captureResult<T>(task: Promise<T>): Promise<{ value: T | null; er
 			error: error instanceof Error ? error.message : String(error),
 		};
 	}
+}
+
+async function buildSelfHostStatusPayload(env: AppEnv, include_healthz: boolean): Promise<Record<string, unknown>> {
+	const selfRepoKey = getSelfRepoKey(env);
+	const [owner, repo] = selfRepoKey.split('/');
+	const liveUrl = getSelfLiveUrl(env);
+	const mirrorUrl = getSelfMirrorUrl(env);
+	const currentUrl = getSelfCurrentUrl(env);
+	const [workspaceResult, repoSnapshot, workflowRunsSnapshot, liveHealth, mirrorHealth] = await Promise.all([
+		queueJson(env, { action: 'workspace_get', repo_key: selfRepoKey }),
+		captureResult(githubGet(env, `/repos/${owner}/${repo}`) as Promise<Record<string, unknown>>),
+		captureResult(
+			githubGet(env, `/repos/${owner}/${repo}/actions/runs`, { params: { per_page: 5 } }) as Promise<{
+				workflow_runs?: Array<Record<string, unknown>>;
+			}>,
+		),
+		include_healthz ? fetchHealthSnapshot(liveUrl, currentUrl) : Promise.resolve(null),
+		include_healthz ? fetchHealthSnapshot(mirrorUrl, currentUrl) : Promise.resolve(null),
+	]);
+	const warnings = [repoSnapshot.error, workflowRunsSnapshot.error].filter((value): value is string => Boolean(value));
+	const repoResult = repoSnapshot.value ?? {};
+	const workflowRuns = workflowRunsSnapshot.value?.workflow_runs ?? [];
+	return {
+		kind: 'opengpt.notification_contract.self_host_status',
+		self_repo_key: selfRepoKey,
+		github: {
+			html_url: repoResult.html_url ?? null,
+			default_branch: repoResult.default_branch ?? null,
+			pushed_at: repoResult.pushed_at ?? null,
+			open_issues_count: repoResult.open_issues_count ?? null,
+		},
+		workspace: workspaceResult.ok ? workspaceResult.data?.workspace ?? null : null,
+		live: { url: liveUrl, healthz: liveHealth },
+		mirror: { url: mirrorUrl, healthz: mirrorHealth },
+		deploy_strategy: {
+			default_target: getSelfDefaultDeployTarget(env),
+			require_mirror_for_live: selfRequiresMirrorForLive(env),
+			mirror_distinct_from_live: mirrorConfigured(env),
+		},
+		current_deploy: {
+			environment: getSelfDeployEnv(env),
+			current_url: currentUrl,
+			release_commit_sha: getSelfReleaseCommitSha(env),
+		},
+		workflow_allowlist: {
+			global: getAllowedWorkflows(env),
+			self_repo: getAllowedWorkflowsForRepo(env, selfRepoKey),
+			by_repo: getAllowedWorkflowsByRepo(env),
+		},
+		read_observability: getReadObservabilitySnapshot(),
+		self_deploy_workflow: getSelfDeployWorkflow(env),
+		recent_self_deploy_runs: workflowRuns
+			.filter((run) => run.path === `.github/workflows/${getSelfDeployWorkflow(env)}`)
+			.slice(0, 5)
+			.map((run) => ({
+				id: run.id,
+				name: run.name,
+				status: run.status,
+				conclusion: run.conclusion,
+				html_url: run.html_url,
+				created_at: run.created_at,
+				head_branch: run.head_branch,
+				event: run.event,
+			})),
+		warnings,
+	};
 }
 
 function mirrorConfigured(env: AppEnv): boolean {
@@ -443,6 +523,54 @@ export function registerOverviewTools(
 			return toolText(result);
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'permission_request_resolve_failed'), error, writeAnnotations)); }
 	});
+	server.registerTool('run_console_open', {
+		description:
+			'Open the Run Console widget directly and preload current queue jobs plus self-host status. Use this when ChatGPT should expose the widget before it has chosen a more specific queue tool.',
+		inputSchema: {
+			include_healthz: z.boolean().default(true),
+		},
+		outputSchema: jobsListStructuredSchema,
+		annotations: readAnnotations,
+		_meta: notificationWidgetToolMeta({
+			'openai/toolInvocation/invoking': 'Opening run console',
+			'openai/toolInvocation/invoked': 'Run console ready',
+		}),
+	}, async ({ include_healthz }) => {
+		try {
+			const [jobsResult, hostStatus] = await Promise.all([
+				queueJsonOrThrow(env, { action: 'jobs_list' }, 'failed to load queue jobs'),
+				buildSelfHostStatusPayload(env, include_healthz),
+			]);
+			const jobs = Array.isArray(jobsResult.data?.jobs) ? jobsResult.data.jobs : [];
+			const response = ok(
+				{
+					jobs,
+					host_status: hostStatus,
+					selected_job_id:
+						jobs.length > 0 && jobs[0] && typeof (jobs[0] as Record<string, unknown>).job_id === 'string'
+							? (jobs[0] as Record<string, unknown>).job_id
+							: null,
+				},
+				readAnnotations,
+			);
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }],
+				structuredContent: {
+					kind: 'opengpt.notification_contract.jobs_list' as const,
+					jobs,
+				},
+				_meta: {
+					'opengpt/widget': {
+						version: 1,
+						kind: 'opengpt.notification_contract.self_host_status',
+						data: hostStatus,
+					},
+				},
+			};
+		} catch (error) {
+			return toolText(fail(errorCodeFor(error, 'run_console_open_failed'), error, readAnnotations));
+		}
+	});
 	server.registerTool('repo_work_context', { description: 'Use the GitHub repository itself as the primary working context instead of a local folder. Returns open agent PRs, active queue jobs, and recent workflow runs so chat can continue work in stages.', inputSchema: { owner: z.string(), repo: z.string(), include_completed_jobs: z.boolean().default(false) }, annotations: readAnnotations }, async ({ owner, repo, include_completed_jobs }) => {
 		const repoKey = `${owner}/${repo}`;
 		try {
@@ -479,26 +607,7 @@ export function registerOverviewTools(
 	server.registerTool('workspace_list', { description: 'List registered GitHub workspace folders known to this MCP server.', annotations: readAnnotations }, async () => { try { return toolText(await queueJson(env, { action: 'workspace_list' })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_list_failed'), error, readAnnotations)); } });
 	server.registerTool('self_host_status', { description: 'Inspect the GitHub self-repo plus configured Cloudflare live and mirror health endpoints for maintenance and self-improvement checks.', inputSchema: { include_healthz: z.boolean().default(true) }, outputSchema: selfHostStatusStructuredSchema, annotations: readAnnotations, _meta: notificationWidgetToolMeta({ 'openai/toolInvocation/invoking': 'Loading self host status', 'openai/toolInvocation/invoked': 'Self host status ready' }) }, async ({ include_healthz }) => {
 		try {
-			const selfRepoKey = getSelfRepoKey(env);
-			const [owner, repo] = selfRepoKey.split('/');
-			const liveUrl = getSelfLiveUrl(env);
-			const mirrorUrl = getSelfMirrorUrl(env);
-			const currentUrl = getSelfCurrentUrl(env);
-			const [workspaceResult, repoSnapshot, workflowRunsSnapshot, liveHealth, mirrorHealth] = await Promise.all([
-				queueJson(env, { action: 'workspace_get', repo_key: selfRepoKey }),
-				captureResult(githubGet(env, `/repos/${owner}/${repo}`) as Promise<Record<string, unknown>>),
-				captureResult(
-					githubGet(env, `/repos/${owner}/${repo}/actions/runs`, { params: { per_page: 5 } }) as Promise<{
-						workflow_runs?: Array<Record<string, unknown>>;
-					}>,
-				),
-				include_healthz ? fetchHealthSnapshot(liveUrl, currentUrl) : Promise.resolve(null),
-				include_healthz ? fetchHealthSnapshot(mirrorUrl, currentUrl) : Promise.resolve(null),
-			]);
-			const warnings = [repoSnapshot.error, workflowRunsSnapshot.error].filter((value): value is string => Boolean(value));
-			const repoResult = repoSnapshot.value ?? {};
-			const workflowRuns = workflowRunsSnapshot.value?.workflow_runs ?? [];
-			return toolText(ok({ self_repo_key: selfRepoKey, github: { html_url: repoResult.html_url ?? null, default_branch: repoResult.default_branch ?? null, pushed_at: repoResult.pushed_at ?? null, open_issues_count: repoResult.open_issues_count ?? null }, workspace: workspaceResult.ok ? workspaceResult.data?.workspace ?? null : null, live: { url: liveUrl, healthz: liveHealth }, mirror: { url: mirrorUrl, healthz: mirrorHealth }, deploy_strategy: { default_target: getSelfDefaultDeployTarget(env), require_mirror_for_live: selfRequiresMirrorForLive(env), mirror_distinct_from_live: mirrorConfigured(env) }, current_deploy: { environment: getSelfDeployEnv(env), current_url: currentUrl, release_commit_sha: getSelfReleaseCommitSha(env) }, workflow_allowlist: { global: getAllowedWorkflows(env), self_repo: getAllowedWorkflowsForRepo(env, selfRepoKey), by_repo: getAllowedWorkflowsByRepo(env) }, read_observability: getReadObservabilitySnapshot(), self_deploy_workflow: getSelfDeployWorkflow(env), recent_self_deploy_runs: workflowRuns.filter((run) => run.path === `.github/workflows/${getSelfDeployWorkflow(env)}`).slice(0, 5).map((run) => ({ id: run.id, name: run.name, status: run.status, conclusion: run.conclusion, html_url: run.html_url, created_at: run.created_at, head_branch: run.head_branch, event: run.event })), warnings }, readAnnotations));
+			return toolText(ok(await buildSelfHostStatusPayload(env, include_healthz), readAnnotations));
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'self_host_status_failed'), error, readAnnotations)); }
 	});
 	server.registerTool('self_deploy', { description: 'Deploy the self repo through the self-deploy workflow with mirror-first guardrails. Use mirror for self-improvement validation, then explicitly promote to live.', inputSchema: { deploy_target: z.enum(['mirror', 'live']).default(getSelfDefaultDeployTarget(env)), reason: z.string().optional(), expected_commit_sha: z.string().optional(), verify_mirror_first: z.boolean().default(true) }, annotations: writeAnnotations }, async ({ deploy_target, reason, expected_commit_sha, verify_mirror_first }) => {

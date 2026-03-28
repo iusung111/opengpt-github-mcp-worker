@@ -9,6 +9,7 @@ Generated from `worker/src/tool-catalog.json`.
 Guidance, self-host inspection, live-only control-plane actions, and permission planning.
 
 - `help`
+- `run_console_open`
 - `request_permission_bundle`
 - `permission_request_resolve`
 - `repo_work_context`

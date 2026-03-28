@@ -191,6 +191,7 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'audit_list')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_candidates')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_execute')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'run_console_open')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_progress')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_event_feed')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_control')).toBe(true);
@@ -228,6 +229,12 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'workspace_resolve')).toBe(true);
 		expect(
+			tools.tools.find((tool) => tool.name === 'run_console_open')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Opening run console',
+			'openai/toolInvocation/invoked': 'Run console ready',
+		});
+		expect(
 			tools.tools.find((tool) => tool.name === 'job_event_feed')?._meta,
 		).toMatchObject({
 			'openai/toolInvocation/invoking': 'Loading run events',
@@ -264,6 +271,7 @@ describe('runtime mcp surface', () => {
 			'openai/toolInvocation/invoked': 'Self host status ready',
 		});
 		expect(tools.tools.find((tool) => tool.name === 'job_progress')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'run_console_open')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'jobs_list')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'job_event_feed')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'job_control')?.outputSchema).toBeTruthy();
@@ -272,6 +280,13 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.find((tool) => tool.name === 'incident_bundle_create')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'self_host_status')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'job_progress')?._meta).toMatchObject({
+			ui: {
+				resourceUri: widgetUri,
+			},
+			'openai/outputTemplate': widgetUri,
+			'openai/widgetAccessible': true,
+		});
+		expect(tools.tools.find((tool) => tool.name === 'run_console_open')?._meta).toMatchObject({
 			ui: {
 				resourceUri: widgetUri,
 			},
@@ -333,6 +348,35 @@ describe('runtime mcp surface', () => {
 			data: {
 				job: {
 					work_branch: 'agent/job-mcp-1',
+				},
+			},
+		});
+
+		const openResult = await client.callTool({
+			name: 'run_console_open',
+			arguments: {
+				include_healthz: true,
+			},
+		});
+		const openText = 'text' in openResult.content[0] ? openResult.content[0].text : '';
+		expect(JSON.parse(openText)).toMatchObject({
+			ok: true,
+			data: {
+				jobs: expect.any(Array),
+				host_status: {
+					kind: 'opengpt.notification_contract.self_host_status',
+				},
+			},
+		});
+		expect((openResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.jobs_list',
+			jobs: expect.any(Array),
+		});
+		expect((openResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
+			'opengpt/widget': {
+				kind: 'opengpt.notification_contract.self_host_status',
+				data: {
+					kind: 'opengpt.notification_contract.self_host_status',
 				},
 			},
 		});
