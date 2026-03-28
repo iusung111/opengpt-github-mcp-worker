@@ -2314,22 +2314,35 @@ function openChatUi() {
 async function sendChatDraft() {
 	const host = currentHostApi();
 	const text = currentChatDraft();
-	if (!host.canSendMessage()) {
-		state.error = 'Direct ChatGPT message sending is only available when the run console is embedded in a compatible host.';
+	if (host.canSendMessage()) {
+		state.error = '';
+		state.message = 'Sending the draft to the host conversation...';
+		render();
+		try {
+			await syncModelContext(true);
+			await host.sendMessage(text);
+			state.message = 'The draft was sent to the host conversation.';
+		} catch (error) {
+			state.error = error instanceof Error ? error.message : String(error);
+			state.message = '';
+		}
 		render();
 		return;
 	}
-	state.error = '';
-	state.message = 'Sending the draft to the host conversation...';
-	render();
+	let copied = false;
 	try {
-		await syncModelContext(true);
-		await host.sendMessage(text);
-		state.message = 'The draft was sent to the host conversation.';
+		if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+			await navigator.clipboard.writeText(text);
+			copied = true;
+		}
 	} catch (error) {
-		state.error = error instanceof Error ? error.message : String(error);
-		state.message = '';
+		console.warn(error);
 	}
+	openChatUi();
+	state.error = '';
+	state.message = copied
+		? 'The prompt was copied and ChatGPT was opened in a new tab. Paste the draft into the conversation.'
+		: 'ChatGPT was opened in a new tab. Copy the draft manually if the clipboard permission was denied.';
 	render();
 }
 
@@ -3229,19 +3242,20 @@ function renderDetailOverview(job) {
 
 function renderChat(job, host) {
 	const draft = currentChatDraft(job);
+	const primaryActionLabel = host.canSendMessage() ? 'Send to ChatGPT' : 'Copy + Open ChatGPT';
 	return `
 		<section class="panel action-panel" id="section-chat" data-section="chat">
 			<div class="stack-header">
 				<p class="panel-kicker">Chat</p>
 				<h2>Prepare the next ChatGPT instruction</h2>
-				<p class="supporting-copy">Outside the embedded host, this page can compose and copy the next operator prompt. Direct message sending stays available only when the run console is opened inside a compatible ChatGPT host bridge.</p>
+				<p class="supporting-copy">Inside a compatible host this page can send the next instruction directly. In the standalone web view it falls back to copying the draft and opening ChatGPT in a new tab.</p>
 			</div>
 			<div class="field-stack">
 				<label for="chat-draft">Chat draft</label>
 				<textarea id="chat-draft" class="command-textarea" name="chat-draft" placeholder="Describe the next coding action for ChatGPT.">${escapeHtml(draft)}</textarea>
 			</div>
 			<div class="action-row">
-				<button type="button" class="action-button" data-action="send-chat-draft"${buttonDisabledAttr(!host.canSendMessage())}>Send to ChatGPT</button>
+				<button type="button" class="action-button" data-action="send-chat-draft">${escapeHtml(primaryActionLabel)}</button>
 				<button type="button" class="action-button secondary" data-action="copy-chat-draft">Copy prompt</button>
 				<button type="button" class="mini-button" data-action="open-chat-ui">Open ChatGPT</button>
 			</div>

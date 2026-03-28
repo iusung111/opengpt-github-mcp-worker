@@ -36,7 +36,11 @@ interface JwtClaims {
 
 const JWKS_CACHE_MS = 5 * 60 * 1000;
 const JWT_CLOCK_SKEW_SECONDS = 60;
+const USERINFO_CACHE_MS = 10 * 60 * 1000;
+const USERINFO_CACHE_LIMIT = 256;
 const jwksCache = new Map<string, { expiresAt: number; keys: JsonWebKey[] }>();
+const userinfoEmailCache = new Map<string, { email: string; expiresAt: number }>();
+const userinfoInflight = new Map<string, Promise<string>>();
 
 export function getQueueAuthToken(env: AppEnv): string | null {
 	const queueToken = env.QUEUE_API_TOKEN?.trim();
@@ -97,6 +101,41 @@ function decodeBase64Url(value: string): Uint8Array {
 
 function decodeJwtJson<T>(segment: string): T {
 	return JSON.parse(new TextDecoder().decode(decodeBase64Url(segment))) as T;
+}
+
+function getCachedUserinfoEmail(token: string): string | null {
+	const cached = userinfoEmailCache.get(token);
+	if (!cached) {
+		return null;
+	}
+	if (cached.expiresAt <= Date.now()) {
+		userinfoEmailCache.delete(token);
+		return null;
+	}
+	return cached.email;
+}
+
+function cacheUserinfoEmail(token: string, email: string): void {
+	let expiresAt = Date.now() + USERINFO_CACHE_MS;
+	try {
+		const { claims } = parseJwt(token);
+		if (typeof claims.exp === 'number' && Number.isFinite(claims.exp)) {
+			expiresAt = Math.min(expiresAt, claims.exp * 1000);
+		}
+	} catch {
+		// Opaque tokens do not expose a JWT expiry segment.
+	}
+	if (expiresAt <= Date.now()) {
+		expiresAt = Date.now() + 30_000;
+	}
+	userinfoEmailCache.set(token, { email, expiresAt });
+	while (userinfoEmailCache.size > USERINFO_CACHE_LIMIT) {
+		const oldestKey = userinfoEmailCache.keys().next().value;
+		if (!oldestKey) {
+			break;
+		}
+		userinfoEmailCache.delete(oldestKey);
+	}
 }
 
 function parseJwt(token: string): { header: JwtHeader; claims: JwtClaims; signingInput: string; signature: Uint8Array } {
@@ -233,6 +272,24 @@ async function verifyJwtSignature(token: string, env: AppEnv): Promise<string> {
 }
 
 async function fetchUserinfoEmail(token: string, env: AppEnv): Promise<string> {
+	const cachedEmail = getCachedUserinfoEmail(token);
+	if (cachedEmail) {
+		return cachedEmail;
+	}
+	const inflight = userinfoInflight.get(token);
+	if (inflight) {
+		return inflight;
+	}
+	const requestPromise = fetchUserinfoEmailUncached(token, env);
+	userinfoInflight.set(token, requestPromise);
+	try {
+		return await requestPromise;
+	} finally {
+		userinfoInflight.delete(token);
+	}
+}
+
+async function fetchUserinfoEmailUncached(token: string, env: AppEnv): Promise<string> {
 	const issuer = getChatgptMcpIssuer(env);
 	if (!issuer) {
 		throw new Error('ChatGPT MCP issuer is not configured');
@@ -252,6 +309,7 @@ async function fetchUserinfoEmail(token: string, env: AppEnv): Promise<string> {
 	if (!email) {
 		throw new Error('token email claim missing');
 	}
+	cacheUserinfoEmail(token, email);
 	return email;
 }
 
