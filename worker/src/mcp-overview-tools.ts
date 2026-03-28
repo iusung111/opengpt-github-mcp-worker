@@ -525,7 +525,7 @@ export function registerOverviewTools(
 	});
 	server.registerTool('run_console_open', {
 		description:
-			'Open the Run Console widget directly and preload current queue jobs plus self-host status. Use this when ChatGPT should expose the widget before it has chosen a more specific queue tool.',
+			'Open the Run Console widget directly and preload current queue jobs. Use this when ChatGPT should expose the widget before it has chosen a more specific queue tool.',
 		inputSchema: {
 			include_healthz: z.boolean().default(true),
 		},
@@ -537,15 +537,12 @@ export function registerOverviewTools(
 		}),
 	}, async ({ include_healthz }) => {
 		try {
-			const [jobsResult, hostStatus] = await Promise.all([
-				queueJsonOrThrow(env, { action: 'jobs_list' }, 'failed to load queue jobs'),
-				buildSelfHostStatusPayload(env, include_healthz),
-			]);
+			const jobsResult = await queueJsonOrThrow(env, { action: 'jobs_list' }, 'failed to load queue jobs');
 			const jobs = Array.isArray(jobsResult.data?.jobs) ? jobsResult.data.jobs : [];
 			const response = ok(
 				{
 					jobs,
-					host_status: hostStatus,
+					include_healthz,
 					selected_job_id:
 						jobs.length > 0 && jobs[0] && typeof (jobs[0] as Record<string, unknown>).job_id === 'string'
 							? (jobs[0] as Record<string, unknown>).job_id
@@ -558,13 +555,6 @@ export function registerOverviewTools(
 				structuredContent: {
 					kind: 'opengpt.notification_contract.jobs_list' as const,
 					jobs,
-				},
-				_meta: {
-					'opengpt/widget': {
-						version: 1,
-						kind: 'opengpt.notification_contract.self_host_status',
-						data: hostStatus,
-					},
 				},
 			};
 		} catch (error) {

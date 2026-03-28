@@ -285,6 +285,7 @@ const state = {
 	lastPayloadKind: '',
 	localSessionCounter: 1,
 	lastModelContextKey: '',
+	hostStatusAutoloaded: false,
 };
 
 function createStore() {
@@ -1444,6 +1445,14 @@ async function loadHostStatus() {
 	await runTool('self_host_status', { include_healthz: true }, 'overview');
 }
 
+async function autoloadHostStatus() {
+	if (state.hostStatusAutoloaded || state.store.host.status) {
+		return;
+	}
+	state.hostStatusAutoloaded = true;
+	await loadHostStatus();
+}
+
 async function prepareApprovalBundle() {
 	const job = currentJob();
 	if (!job || !job.repo) return;
@@ -2411,6 +2420,7 @@ async function connectStandardBridge() {
 		state.message = 'Connected to the MCP Apps host.';
 		render();
 		await syncModelContext(true);
+		void autoloadHostStatus().catch((error) => console.warn(error));
 	} catch (error) {
 		state.error = error instanceof Error ? error.message : String(error);
 		state.store.host.source = openaiBridge() ? 'window.openai fallback' : 'standalone';

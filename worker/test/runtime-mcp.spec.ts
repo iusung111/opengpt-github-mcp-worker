@@ -363,23 +363,15 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				jobs: expect.any(Array),
-				host_status: {
-					kind: 'opengpt.notification_contract.self_host_status',
-				},
+				include_healthz: true,
+				selected_job_id: expect.anything(),
 			},
 		});
 		expect((openResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.jobs_list',
 			jobs: expect.any(Array),
 		});
-		expect((openResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
-			'opengpt/widget': {
-				kind: 'opengpt.notification_contract.self_host_status',
-				data: {
-					kind: 'opengpt.notification_contract.self_host_status',
-				},
-			},
-		});
+		expect((openResult as { _meta?: Record<string, unknown> })._meta ?? {}).not.toHaveProperty('opengpt/widget');
 		expect(
 			(
 				(openResult as { structuredContent?: { jobs?: Array<{ job_id?: string }> } }).structuredContent?.jobs ?? []
