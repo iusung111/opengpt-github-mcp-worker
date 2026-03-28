@@ -14,15 +14,18 @@ export type GuiScenarioAction =
 	| 'open'
 	| 'click'
 	| 'type'
+	| 'press'
 	| 'select'
 	| 'hover'
 	| 'scroll'
 	| 'wait_for'
 	| 'assert_visible'
 	| 'assert_text'
+	| 'assert_url'
 	| 'assert_count'
 	| 'assert_attribute'
-	| 'screenshot';
+	| 'screenshot'
+	| 'snapshot';
 
 export interface GuiCaptureScenarioStep {
 	id?: string;

@@ -222,6 +222,8 @@ function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 			'pick the workflow that matches the user intent',
 			'fill repo, request, target_paths, dry_run, and done_when explicitly',
 			'request a single permission bundle early if the run will need multiple write actions',
+			'start repository exploration with repo_navigation_manifest or repo_context_snapshot before reading full files',
+			'prefer repo_get_file_summary and repo_get_file_chunk over repo_get_file for large docs, workflows, and tool files',
 			'prefer job_progress for concise status and audit_list only for full timeline review',
 		],
 		reviewer_workflow: [

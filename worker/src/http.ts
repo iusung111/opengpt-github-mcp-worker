@@ -7,6 +7,7 @@ import {
 	usingMirrorGitHubCredentials,
 } from './github';
 import { buildMcpServer } from './mcp-tools';
+import { getReadObservabilitySnapshot } from './read-observability';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
 import {
 	getChatgptMcpAllowedEmails,
@@ -152,6 +153,7 @@ export function handleHealth(env: AppEnv): Response {
 		direct_mcp_auth_mode: getMcpAccessMode(env),
 		chatgpt_mcp_auth_mode: getChatgptMcpAuthMode(env),
 		chatgpt_allowed_emails_count: getChatgptMcpAllowedEmails(env).length,
+		read_observability: getReadObservabilitySnapshot(),
 	});
 }
 

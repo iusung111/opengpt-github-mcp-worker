@@ -81,6 +81,86 @@ export interface DispatchRequestRecord {
 	dispatched_at: string;
 }
 
+export interface JobWorkflowRunRecord {
+	name?: string;
+	status?: string;
+	conclusion?: string | null;
+	html_url?: string | null;
+	run_id?: number | null;
+	updated_at?: string;
+}
+
+export interface JobExecutionManifest {
+	dispatch_request?: DispatchRequestRecord | null;
+	last_workflow_run?: JobWorkflowRunRecord | null;
+	profile?: string | null;
+	run_id?: string | null;
+	artifacts?: string[];
+	updated_at?: string;
+}
+
+export interface JobVerificationStepRecord {
+	name: string;
+	status: 'queued' | 'running' | 'passed' | 'failed' | 'skipped' | 'partial';
+	duration_ms?: number | null;
+	artifact_ids?: string[];
+	log_excerpt?: string | null;
+}
+
+export interface JobVerificationManifest {
+	status?: 'queued' | 'running' | 'passed' | 'failed' | 'partial' | null;
+	profile?: string | null;
+	suite?: string | null;
+	run_id?: string | null;
+	steps?: JobVerificationStepRecord[];
+	artifacts?: string[];
+	updated_at?: string;
+}
+
+export interface JobPreviewManifest {
+	status?: 'idle' | 'creating' | 'ready' | 'destroying' | 'destroyed' | 'failed' | null;
+	preview_id?: string | null;
+	urls?: Record<string, string>;
+	expires_at?: string | null;
+	updated_at?: string;
+}
+
+export interface JobBrowserManifest {
+	status?: 'idle' | 'running' | 'passed' | 'failed' | null;
+	session_id?: string | null;
+	target?: string | null;
+	artifacts?: string[];
+	updated_at?: string;
+}
+
+export interface JobDesktopManifest {
+	status?: 'idle' | 'building' | 'packaged' | 'smoke_running' | 'passed' | 'failed' | null;
+	runtime?: 'electron' | 'tauri' | null;
+	package_targets?: string[];
+	artifacts?: string[];
+	updated_at?: string;
+}
+
+export interface JobRuntimeManifest {
+	status?: 'idle' | 'collecting' | 'ready' | 'failed' | null;
+	log_query?: string | null;
+	incident_bundle_id?: string | null;
+	updated_at?: string;
+}
+
+export interface JobWorkerManifest {
+	schema_version?: 1;
+	execution?: JobExecutionManifest;
+	verification?: JobVerificationManifest;
+	preview?: JobPreviewManifest;
+	browser?: JobBrowserManifest;
+	desktop?: JobDesktopManifest;
+	runtime?: JobRuntimeManifest;
+	dispatch_request?: DispatchRequestRecord | null;
+	last_workflow_run?: JobWorkflowRunRecord | null;
+	[key: string]: unknown;
+}
+
 export interface JobRecord {
 	job_id: string;
 	repo: string;
@@ -95,7 +175,7 @@ export interface JobRecord {
 	auto_improve_enabled: boolean;
 	auto_improve_max_cycles: number;
 	auto_improve_cycle: number;
-	worker_manifest: Record<string, unknown>;
+	worker_manifest: JobWorkerManifest;
 	review_verdict?: ReviewVerdict;
 	review_findings: ReviewFinding[];
 	last_error?: string;

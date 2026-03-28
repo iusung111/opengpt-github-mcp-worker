@@ -28,6 +28,9 @@ jobs:
       - name: Generate Cloudflare types
         run: npm run cf-typegen
 
+      - name: Verify generated tool surface docs
+        run: npm run docs:tool-surface:check
+
       - name: Typecheck
         run: npm run typecheck
 

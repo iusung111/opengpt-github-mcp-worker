@@ -11,8 +11,20 @@ describe('tool catalog permission bundles', () => {
 		expect(bundle.tools).toContain('workflow_dispatch');
 		expect(bundle.tools).toContain('gui_capture_run');
 		expect(bundle.tools).toContain('repo_create_branch');
+		expect(bundle.tools).toContain('repo_create_file');
+		expect(bundle.tools).toContain('repo_upsert_file');
 		expect(bundle.tools).toContain('repo_upload_start');
 		expect(bundle.tools).toContain('repo_upload_commit');
+		expect(bundle.tools).toContain('repo_batch_write');
+		expect(bundle.tools).toContain('repo_apply_patchset');
+		expect(bundle.tools).toContain('verify_run');
+		expect(bundle.tools).toContain('preview_env_create');
+		expect(bundle.tools).toContain('browser_action_batch');
+		expect(bundle.tools).toContain('desktop_build_run');
+		expect(bundle.tools).toContain('api_contract_list');
+		expect(bundle.tools).toContain('db_schema_inspect');
+		expect(bundle.tools).toContain('runtime_log_query');
+		expect(bundle.tools).toContain('deploy_promote');
 	});
 
 	it('builds a user-facing approval request for batch approval', () => {
@@ -37,5 +49,15 @@ describe('tool catalog permission bundles', () => {
 		expect(bundle.groups.some((group) => group.id === 'collaboration')).toBe(true);
 		expect(bundle.tools).toContain('review_prepare_context');
 		expect(bundle.tools).toContain('job_submit_review');
+	});
+
+	it('resolves the desktop fullstack preset into the extended workflow surface', () => {
+		const bundle = resolvePermissionBundle({
+			preset: 'desktop_fullstack',
+		});
+		expect(bundle.groups.some((group) => group.id === 'verification')).toBe(true);
+		expect(bundle.groups.some((group) => group.id === 'release')).toBe(true);
+		expect(bundle.tools).toContain('release_verify');
+		expect(bundle.tools).toContain('browser_collect_diagnostics');
 	});
 });

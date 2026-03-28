@@ -5,86 +5,73 @@ Remote GitHub MCP server for ChatGPT Developer mode, deployed on Cloudflare Work
 - Direct MCP endpoint: `/mcp`
 - ChatGPT connector endpoint: `/chatgpt/mcp`
 - Runtime: Cloudflare Workers + Durable Objects
-- Scope: GitHub repo read/write including workflow files, workflow dispatch, PR flow, queue state, self-host operations
-- Access model: Cloudflare Access for direct `/mcp`, OIDC bearer auth for `/chatgpt/mcp`
+- Access model:
+  - `/mcp` uses Cloudflare Access
+  - `/chatgpt/mcp` uses OAuth/OIDC bearer auth
 
-## Docs
+## Documentation
 
-- [MCP access and deployment](/d:/VScode/opengpt-github-mcp-worker/docs/MCP_ACCESS.md)
-- [ChatGPT connector auth](/d:/VScode/opengpt-github-mcp-worker/docs/CHATGPT_MCP.md)
-- [ChatGPT connector incident report 2026-03-22](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_CONNECTOR_INCIDENT_2026-03-22.md)
-- [Incident report index](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/README.md)
-- [MCP tool exposure incident 2026-03-24](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/MCP_TOOL_EXPOSURE_INCIDENT_2026-03-24.md)
-- [Tool surface](/d:/VScode/opengpt-github-mcp-worker/docs/TOOL_SURFACE.md)
-- [Release history](/d:/VScode/opengpt-github-mcp-worker/docs/releases/CHANGELOG.md)
-- [ChatGPT project instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS.md)
-- [Short instructions](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_PROJECT_INSTRUCTIONS_SHORT.md)
+Start with the docs hub: [docs/README.md](./docs/README.md)
+
+Primary entry points:
+
+- [Access and deployment](./docs/MCP_ACCESS.md)
+- [ChatGPT connector auth](./docs/CHATGPT_MCP.md)
+- [Tool surface](./docs/TOOL_SURFACE.md)
+- [Desktop-first fullstack roadmap](./docs/desktop-fullstack-mcp-roadmap.md)
+- [Project capability contract example](./docs/project-capabilities.example.json)
+- [Incident reports](./docs/incidents/README.md)
+- [Release history](./docs/releases/CHANGELOG.md)
 
 ## Repository Layout
 
 - `.github/`
 - `docs/`
+- `public/`
 - `worker/`
 - `README.md`
 - `package.json`
-- `package-lock.json`
-- `tsconfig.json`
-- `vitest.config.mts`
 - `wrangler.jsonc`
 
-The root keeps only runtime entrypoints and top-level config that GitHub Actions, npm, Wrangler, TypeScript, and Vitest resolve directly.
-
-## Current Production Model
+## Production Model
 
 - `push main` runs `cloudflare-ci`
 - successful CI auto-deploys `mirror`
 - `live` is promoted manually through `cloudflare-self-deploy`
-- `/mcp` is expected to sit behind Cloudflare Access
-- `/chatgpt/mcp` is expected to sit behind OAuth/OIDC-aware ChatGPT custom connector auth
-- deployed Workers require `MCP_REQUIRE_ACCESS_AUTH=true`
-- deployed Workers also enforce `MCP_ALLOWED_EMAILS` and/or `MCP_ALLOWED_EMAIL_DOMAINS` when configured
-- deployed Workers can separately enforce `CHATGPT_MCP_ALLOWED_EMAILS` on `/chatgpt/mcp`
+- `/mcp` stays behind Cloudflare Access
+- `/chatgpt/mcp` stays behind OAuth/OIDC-aware ChatGPT connector auth
 
-Deploying the Worker alone is not sufficient for production MCP exposure. Cloudflare Access policy protects `/mcp`, and an external OAuth/OIDC provider protects `/chatgpt/mcp`.
+Deploying the Worker alone is not the full production setup. The deployment also depends on the configured Cloudflare Access and OAuth/OIDC policy.
 
 ## Quick Start
 
 1. `npm install`
-2. Add Worker secrets:
+2. Copy `.dev.vars.example` to `.dev.vars`
+3. Add required Worker secrets:
    - `npx wrangler secret put GITHUB_APP_PRIVATE_KEY_PEM`
    - `npx wrangler secret put WEBHOOK_SECRET`
-3. Copy `.dev.vars.example` to `.dev.vars` for local work.
-4. Run `npm run check`.
-5. Use `npm run dev` for local development.
+4. Run `npm run check`
+5. Start local development with `npm run dev`
 
 ## Validation
 
-Preferred local validation:
+Preferred commands:
 
 ```bash
 npm run check
 ```
 
-Useful commands:
+Focused commands:
 
 ```bash
-npm run dev
-npm run cf-typegen
 npm run typecheck
 npm run test:unit
-npm run test:integration
 npm run test:integration:runtime
-npm run test:all
 npm run ops:status
 npm run docs:tool-surface
 ```
 
-Notes:
-
-- `cf-typegen`, `test:integration`, and `test:integration:runtime` pin `workerd` temporary paths to repo-local `.wrangler/state/local-workerd/` so runtime tooling does not depend on the host temp directory.
-- On Windows, runtime tests use ephemeral Durable Object storage instead of SQLite-backed local persistence to avoid `workerd` path-related `SQLITE_CANTOPEN` failures.
-- Linux/CI remains the source of truth for Durable Object runtime verification.
-- live and mirror `/healthz` checks are the source of truth for deployed behavior.
+Repo-specific validation guidance lives in [AGENTS.md](./AGENTS.md).
 
 ## Required Secrets
 
@@ -93,7 +80,7 @@ Worker secrets:
 - `GITHUB_APP_PRIVATE_KEY_PEM`
 - `WEBHOOK_SECRET`
 
-Optional worker secret:
+Optional Worker secret:
 
 - `QUEUE_API_TOKEN`
 
@@ -112,13 +99,13 @@ GitHub Actions secrets for self-deploy:
 - `CHATGPT_MCP_JWKS_JSON` optional
 - `CHATGPT_MCP_ALLOWED_EMAILS` optional
 
-`cloudflare-self-deploy` prefers the MCP and ChatGPT MCP auth vars from GitHub Actions secrets, then repository variables, then the defaults in `wrangler.jsonc`.
+`cloudflare-self-deploy` resolves MCP and ChatGPT MCP auth values from GitHub Actions secrets first, then repository variables, then `wrangler.jsonc`.
 
-## Non-Secret Config
+## Key Config
 
-Primary config lives in [`wrangler.jsonc`](/d:/VScode/opengpt-github-mcp-worker/wrangler.jsonc).
+Primary runtime config lives in [wrangler.jsonc](./wrangler.jsonc).
 
-Most important vars:
+Important vars:
 
 - `GITHUB_ALLOWED_REPOS`
 - `GITHUB_ALLOWED_WORKFLOWS`
@@ -137,44 +124,13 @@ Most important vars:
 - `SELF_DEFAULT_DEPLOY_TARGET`
 - `SELF_REQUIRE_MIRROR_FOR_LIVE`
 
-Current default allowlist includes:
+Workflow allowlist config lives in [worker/config/workflow-allowlist.json](./worker/config/workflow-allowlist.json).
 
-- `iusung111/OpenGPT`
-- `iusung111/opengpt-github-mcp-worker`
-- `iusung111/opengpt-github-mcp-worker-mirror-backup`
+Tool catalog source lives in [worker/src/tool-catalog.json](./worker/src/tool-catalog.json).
 
-For local development, copy `.dev.vars.example` to `.dev.vars` and fill real values there.
-
-## Workflow Allowlist Management
-
-Primary repo-managed workflow allowlist entries live in [`worker/config/workflow-allowlist.json`](/d:/VScode/opengpt-github-mcp-worker/worker/config/workflow-allowlist.json).
-
-Example:
-
-```json
-{
-  "iusung111/OpenGPT": ["build-todo-exe.yml"]
-}
-```
-
-Use this file when you want to allow a workflow for a specific repository through a normal repository change instead of editing runtime env config.
-
-Precedence rules:
-
-- `worker/config/workflow-allowlist.json` is loaded first.
-- `GITHUB_ALLOWED_WORKFLOWS_BY_REPO` is merged on top for the same repo and can add more workflow ids.
-- If any repo-specific entries exist after merging, that merged repo-specific list is the effective allowlist for that repo.
-- If no repo-specific entry exists for the repo, `GITHUB_ALLOWED_WORKFLOWS` is used as the fallback allowlist.
-
-Inspection paths:
-
-- MCP: call `workflow_allowlist_inspect(owner, repo)` to see file-based entries, env-based entries, the effective allowlist, and the precedence explanation.
-- HTTP: `GET /healthz` includes `allowed_workflows_file_by_repo`, `allowed_workflows_env_by_repo`, and merged `allowed_workflows_by_repo`.
-
-Malformed config behavior:
-
-- Invalid `GITHUB_ALLOWED_WORKFLOWS_BY_REPO` JSON now returns an actionable error instead of being silently ignored.
-- Invalid allowlist structure must be a JSON object mapping `owner/repo` to arrays of workflow ids.
+Target repos can opt into the desktop-first fullstack tool surface with
+`.opengpt/project-capabilities.json` plus the standard GitHub workflows
+`opengpt-exec.yml` and `opengpt-package.yml`.
 
 ## Runtime Endpoints
 
@@ -186,50 +142,20 @@ Malformed config behavior:
 - Health: `https://<worker-url>/healthz`
 - Queue API: `/queue/*`
 
-Queue routes are not public. Use one of:
+Queue routes are private. Authenticate with either:
 
 - `X-Queue-Token: <QUEUE_API_TOKEN>`
 - `Authorization: Bearer <QUEUE_API_TOKEN>`
 
 If `QUEUE_API_TOKEN` is unset, the worker falls back to `WEBHOOK_SECRET` for backward compatibility.
 
-## Tool Surface
-
-The server exposes grouped tool families rather than one flat surface:
-
-- overview and self-host guidance
-- workspace registry and active repo context
-- repository read and search
-- repository write including workflow-file edits, streamed file upload, PR, comment, and workflow dispatch
-- branch cleanup and collaboration helpers
-- queue, audit, and reviewer loop state
-
-Large file writes for web ChatGPT should prefer the streamed upload flow:
-
-- `repo_upload_start`
-- `repo_upload_append`
-- `repo_upload_commit`
-- `repo_upload_abort`
-
-Keep `repo_update_file` for smaller payloads and compatibility-only callers. The worker now rejects oversized `content_b64` payloads and returns a stream-upload error instead of attempting a fragile single-request write.
-
-Regenerate the generated tool doc after catalog changes:
-
-```bash
-npm run docs:tool-surface
-```
-
-The source catalog is [`worker/src/tool-catalog.json`](/d:/VScode/opengpt-github-mcp-worker/worker/src/tool-catalog.json).
-
 ## GitHub App Assumptions
-
-Phase 1 assumptions:
 
 - allowlisted repos only
 - direct writes only on `agent/*`
 - no force-push
-- workflow dispatch limited to the allowlisted workflow set, and the target workflow file must define `on.workflow_dispatch`
-- repo-specific workflow allowlists are merged from repo-managed config plus env overrides, then used ahead of the global env fallback
+- workflow dispatch limited to the allowlisted workflow set
+- repo-specific workflow allowlists override the global fallback
 
 Minimum GitHub App permissions:
 
@@ -239,38 +165,3 @@ Minimum GitHub App permissions:
 - Actions: Read and write
 - Workflows: Read and write
 - Metadata: Read only
-
-Recommended webhook events:
-
-- `workflow_run`
-- `pull_request`
-
-## Operations
-
-Recommended self-host flow:
-
-1. Push to `main`
-2. Let CI deploy `mirror`
-3. Verify mirror via `/healthz` or `npm run ops:status`
-4. Promote `live` manually
-
-Basic smoke checks after deploy:
-
-1. `GET /` returns a redirect to `/gui/`
-2. `GET /healthz`
-3. `GET /.well-known/oauth-protected-resource/chatgpt/mcp`
-4. `GET /github/app-installation`
-5. Connect a direct MCP client to `/mcp` and `listTools`
-6. Connect a ChatGPT custom connector to `/chatgpt/mcp`
-7. Create a queue job and verify webhook-driven state transitions
-
-Incident handling rule:
-
-1. read related files under `docs/incidents/` before repeating investigation
-2. if the failure is new, create or update an incident report in `docs/incidents/`
-3. keep exact verification commands and final deployment state in the report
-4. use MCP file tools against `iusung111/opengpt-github-mcp-worker` so the same history is readable from ChatGPT
-
-## Security Note
-
-If a private key or webhook secret was pasted into chat or otherwise exposed during setup, rotate it before production use.

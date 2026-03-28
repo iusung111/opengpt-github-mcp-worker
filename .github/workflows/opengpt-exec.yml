@@ -1,0 +1,53 @@
+name: opengpt-exec
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_kind:
+        description: Request type marker
+        required: false
+        default: generic
+        type: string
+      request_b64:
+        description: Base64 encoded JSON request envelope
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  exec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies when package-lock exists
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install --ignore-scripts
+          fi
+
+      - name: Run standard exec request
+        env:
+          OPENGPT_REQUEST_B64: ${{ inputs.request_b64 }}
+        run: node worker/scripts/run-opengpt-exec.mjs
+
+      - name: Upload exec artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opengpt-exec-${{ github.run_id }}
+          path: opengpt-exec-artifact/
+          if-no-files-found: error

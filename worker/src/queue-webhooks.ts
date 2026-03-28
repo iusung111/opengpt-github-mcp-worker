@@ -1,6 +1,6 @@
 import { JobRecord } from './types';
 import { branchMatchScore, parseJobIdFromPrBody } from './queue-helpers';
-import { JobIndexPointer, jobBranchIndexKey, jobRunIndexKey } from './queue-index';
+import { JobIndexPointer, jobBranchIndexKey, jobRepoIndexPrefix, jobRunIndexKey } from './queue-index';
 import { applyPullRequestEventToJob } from './queue-events';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
 import { recordWorkflowSnapshot, transitionJob } from './queue-state';
@@ -14,7 +14,7 @@ export interface QueueWebhookContext {
 		options?: { reconcile?: boolean },
 	): Promise<JobRecord | null>;
 	storageGetIndex<T>(key: string): Promise<T | null>;
-	storageListJobs(): Promise<JobRecord[]>;
+	listJobIndexPointers(prefix: string): Promise<JobIndexPointer[]>;
 	persistJob(job: JobRecord, previous?: JobRecord | null): Promise<void>;
 	autoRedispatchJob(job: JobRecord, reason: string): Promise<boolean>;
 }
@@ -46,10 +46,11 @@ export async function findByRepoAndBranch(
 			return indexedJob;
 		}
 	}
-	const jobs = await context.storageListJobs();
+	const repoPointers = await context.listJobIndexPointers(jobRepoIndexPrefix(repo));
 	let bestMatch: { job: JobRecord; score: number; matchedLength: number } | null = null;
-	for (const job of jobs) {
-		if (job.repo !== repo) {
+	for (const pointer of repoPointers) {
+		const job = await context.getJob(pointer.job_id);
+		if (!job || job.repo !== repo) {
 			continue;
 		}
 		const score = branchMatchScore(workBranch, job);

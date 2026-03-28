@@ -59,6 +59,7 @@ import {
 	jobIndexReadyKey,
 	JobIndexPointer,
 } from './queue-index';
+import { incrementReadCounter } from './read-observability';
 import {
 	handleWorkingTimeoutReconcile,
 	reconcileGitHubRunState,
@@ -89,14 +90,17 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async listStoredJobs(): Promise<JobRecord[]> {
+		incrementReadCounter('queue_storage_list_call');
 		return Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values());
 	}
 
 	private async listStoredAudits(): Promise<Map<string, AuditRecord>> {
+		incrementReadCounter('queue_storage_list_call');
 		return this.ctx.storage.list<AuditRecord>({ prefix: 'audit:' });
 	}
 
 	private async listStoredDeliveries(): Promise<Map<string, DeliveryRecord>> {
+		incrementReadCounter('queue_storage_list_call');
 		return this.ctx.storage.list<DeliveryRecord>({ prefix: 'delivery:' });
 	}
 
@@ -244,7 +248,6 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 				reconcileJob: this.reconcileJob.bind(this),
 				listJobIndexPointers: async (prefix) =>
 					Array.from((await this.ctx.storage.list<JobIndexPointer>({ prefix })).values()),
-				listStoredJobs: this.listStoredJobs.bind(this),
 			},
 			status,
 			nextActor,
@@ -317,7 +320,8 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 									getJob: this.getJob.bind(this),
 									findJob: this.findJob.bind(this),
 									storageGetIndex: this.getStorageValue.bind(this),
-									storageListJobs: this.listStoredJobs.bind(this),
+									listJobIndexPointers: async (prefix) =>
+										Array.from((await this.ctx.storage.list<JobIndexPointer>({ prefix })).values()),
 									persistJob: this.persistJob.bind(this),
 									autoRedispatchJob: this.autoRedispatchJob.bind(this),
 								},

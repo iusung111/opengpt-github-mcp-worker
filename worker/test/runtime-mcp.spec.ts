@@ -121,11 +121,31 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'repo_work_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'review_prepare_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'request_permission_bundle')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_navigation_manifest')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_context_snapshot')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_doc_index_lookup')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_tool_index_lookup')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_get_file_summary')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_get_file_chunk')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_get_diff')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_create_file')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_upsert_file')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_upload_start')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_upload_commit')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_batch_write')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_apply_patchset')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'verify_list_suites')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'verify_run')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'preview_env_create')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'browser_session_start')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'browser_action_batch')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'desktop_build_run')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'api_contract_list')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'db_schema_inspect')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'runtime_log_query')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'deploy_promote')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'release_verify')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'workflow_allowlist_inspect')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
@@ -265,11 +285,149 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				repo_key: 'iusung111/OpenGPT',
-				file_based_entries: ['build-todo-exe.yml'],
-				effective_allowlist: expect.arrayContaining(['build-todo-exe.yml']),
+				file_based_entries: ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
+				effective_allowlist: expect.arrayContaining(['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml']),
 				precedence: {
 					rules: expect.any(Array),
 				},
+			},
+		});
+		await client.close();
+	});
+
+	it('resolves project capabilities for verify and preview tools', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.opengpt/project-capabilities.json?ref=main') {
+				return new Response(
+					JSON.stringify({
+						path: '.opengpt/project-capabilities.json',
+						type: 'file',
+						content: btoa(
+							JSON.stringify({
+								runtime_kind: 'webview_desktop_shell',
+								desktop_shell: 'electron',
+								verify_profiles: [
+									{
+										id: 'frontend',
+										label: 'Frontend verify',
+										kind: 'verify',
+										commands: ['npm run typecheck'],
+									},
+								],
+								web_preview: {
+									enabled: true,
+									url_template: 'https://preview.example.com/{ref}',
+									services: ['web'],
+									ttl_minutes: 120,
+								},
+								workflow_ids: {
+									verify: 'opengpt-exec.yml',
+									package: 'opengpt-package.yml',
+									preview: 'opengpt-exec.yml',
+									release: 'opengpt-exec.yml',
+									db: 'opengpt-exec.yml',
+								},
+							}),
+						),
+						encoding: 'base64',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/package.json?ref=main') {
+				return new Response(
+					JSON.stringify({
+						path: 'package.json',
+						type: 'file',
+						content: btoa(
+							JSON.stringify({
+								scripts: {
+									typecheck: 'tsc --noEmit',
+								},
+							}),
+						),
+						encoding: 'base64',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createMcpClient();
+		const suitesResult = await client.callTool({
+			name: 'verify_list_suites',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				ref: 'main',
+			},
+		});
+		const suitesText = 'text' in suitesResult.content[0] ? suitesResult.content[0].text : '';
+		expect(JSON.parse(suitesText)).toMatchObject({
+			ok: true,
+			data: {
+				suites: [
+					{
+						id: 'frontend',
+						label: 'Frontend verify',
+					},
+				],
+			},
+		});
+
+		const previewCreateResult = await client.callTool({
+			name: 'preview_env_create',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				ref: 'main',
+			},
+		});
+		const previewCreateText =
+			'text' in previewCreateResult.content[0] ? previewCreateResult.content[0].text : '';
+		const previewCreateJson = JSON.parse(previewCreateText);
+		expect(previewCreateJson).toMatchObject({
+			ok: true,
+			data: {
+				preview: {
+					status: 'ready',
+					urls: {
+						web: 'https://preview.example.com/main',
+					},
+				},
+				preview_token: expect.any(String),
+			},
+		});
+
+		const browserSessionResult = await client.callTool({
+			name: 'browser_session_start',
+			arguments: {
+				preview_token: previewCreateJson.data.preview_token,
+			},
+		});
+		const browserSessionText =
+			'text' in browserSessionResult.content[0] ? browserSessionResult.content[0].text : '';
+		expect(JSON.parse(browserSessionText)).toMatchObject({
+			ok: true,
+			data: {
+				session: {
+					target: {
+						type: 'preview',
+					},
+				},
+				session_token: expect.any(String),
 			},
 		});
 		await client.close();
@@ -356,6 +514,26 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				path: 'README.md',
+				access_mode: 'summary_first',
+			},
+		});
+
+		const summaryResult = await client.callTool({
+			name: 'repo_get_file_summary',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				path: 'README.md',
+			},
+		});
+		const summaryText = 'text' in summaryResult.content[0] ? summaryResult.content[0].text : '';
+		expect(JSON.parse(summaryText)).toMatchObject({
+			ok: true,
+			data: {
+				path: 'README.md',
+				summary: {
+					classification: 'doc',
+				},
 			},
 		});
 		await client.close();
@@ -421,7 +599,8 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				path: '.github/workflows/test.yml',
-				decoded_text: 'name: test\non: workflow_dispatch\n',
+				decoded_text: null,
+				access_mode: 'summary_first',
 			},
 		});
 
@@ -985,7 +1164,8 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				path: 'README.md',
-				decoded_text: '# Backup Repo\n',
+				decoded_text: null,
+				access_mode: 'summary_first',
 			},
 		});
 

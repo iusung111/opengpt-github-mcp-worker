@@ -1,0 +1,58 @@
+{
+  "runtime_kind": "webview_desktop_shell",
+  "desktop_shell": "electron",
+  "verify_profiles": [
+    {
+      "id": "frontend",
+      "label": "Frontend verify",
+      "kind": "verify",
+      "commands": ["npm run typecheck", "npm run test"]
+    },
+    {
+      "id": "desktop-build",
+      "label": "Desktop build",
+      "kind": "desktop_build",
+      "commands": ["npm run build"]
+    },
+    {
+      "id": "desktop-smoke",
+      "label": "Desktop smoke",
+      "kind": "desktop_smoke",
+      "commands": ["npm run smoke"]
+    }
+  ],
+  "package_targets": ["win-x64", "mac-arm64"],
+  "web_preview": {
+    "enabled": true,
+    "url_template": "https://{service}-{repo}.preview.example.com/{ref}",
+    "healthcheck_path": "/api/health",
+    "services": ["web"],
+    "ttl_minutes": 240,
+    "create_commands": ["npm run preview:create"],
+    "destroy_commands": ["npm run preview:destroy"]
+  },
+  "api_contract_sources": ["openapi/openapi.yaml", "contracts/api"],
+  "db_mode": "prisma",
+  "workflow_ids": {
+    "verify": "opengpt-exec.yml",
+    "package": "opengpt-package.yml",
+    "preview": "opengpt-exec.yml",
+    "release": "opengpt-exec.yml",
+    "db": "opengpt-exec.yml"
+  },
+  "desktop": {
+    "build_commands": ["npm run build"],
+    "smoke_commands": ["npm run smoke"],
+    "artifact_paths": ["dist", "release"]
+  },
+  "db": {
+    "migration_commands": ["npm run db:migrate"],
+    "seed_commands": ["npm run db:seed"],
+    "reset_commands": ["npm run db:reset"],
+    "query_command": "npm run db:query",
+    "inspect_paths": ["prisma/schema.prisma", "migrations", "db"]
+  },
+  "runtime": {
+    "log_source": "workflow"
+  }
+}

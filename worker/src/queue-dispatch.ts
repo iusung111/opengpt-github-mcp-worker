@@ -1,4 +1,5 @@
 import { githubAuthConfigured } from './github';
+import { setManifestDispatchRequest, setManifestWorkflowRun } from './job-manifest';
 import { JobRecord } from './types';
 import { buildDispatchFingerprint, githubPost, nowIso } from './utils';
 import { getDispatchRequest, pushJobNote, transitionJob } from './queue-state';
@@ -37,18 +38,18 @@ export async function autoRedispatchJob(
 	job.last_error = undefined;
 	job.stale_reason = undefined;
 	pushJobNote(job, `auto redispatch triggered: ${reason}`);
-	job.worker_manifest = {
-		...job.worker_manifest,
-		dispatch_request: {
+	job.worker_manifest = setManifestWorkflowRun(
+		setManifestDispatchRequest(job.worker_manifest, {
 			...dispatchRequest,
 			fingerprint,
 			dispatched_at: nowIso(),
-		},
-		last_workflow_run: {
+		}),
+		{
 			status: 'queued',
 			conclusion: null,
 			html_url: null,
+			updated_at: nowIso(),
 		},
-	};
+	);
 	return true;
 }

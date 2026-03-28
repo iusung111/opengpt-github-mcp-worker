@@ -69,7 +69,11 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async deleteAllSessionState(): Promise<void> {
-		const keys = Array.from((await this.ctx.storage.list({ prefix: '' })).keys());
+		const session = await this.getSession();
+		const keys = [
+			metadataStorageKey(),
+			...Array.from({ length: session?.chunk_count ?? 0 }, (_, index) => chunkStorageKey(index)),
+		];
 		if (keys.length > 0) {
 			await this.ctx.storage.delete(keys);
 		}
@@ -153,14 +157,14 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 
 		session.state = 'committing';
 		await this.putSession(session);
-		const chunkEntries = await this.ctx.storage.list<Uint8Array>({ prefix: 'chunk:' });
-		const chunks = Array.from(chunkEntries.entries())
-			.sort(([left], [right]) => {
-				const leftIndex = parseInt(left.split(':')[1] ?? '0', 10);
-				const rightIndex = parseInt(right.split(':')[1] ?? '0', 10);
-				return leftIndex - rightIndex;
-			})
-			.map(([, value]) => value);
+		const chunks: Uint8Array[] = [];
+		for (let index = 0; index < session.chunk_count; index += 1) {
+			const chunk = await this.ctx.storage.get<Uint8Array>(chunkStorageKey(index));
+			if (!chunk) {
+				throw new Error(`upload chunk missing for ${session.upload_id}: ${index}`);
+			}
+			chunks.push(chunk);
+		}
 		if (chunks.length !== session.chunk_count) {
 			throw new Error(`upload chunk count mismatch for ${session.upload_id}`);
 		}
@@ -210,7 +214,8 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async deleteChunkData(): Promise<void> {
-		const keys = Array.from((await this.ctx.storage.list({ prefix: 'chunk:' })).keys());
+		const session = await this.getSession();
+		const keys = Array.from({ length: session?.chunk_count ?? 0 }, (_, index) => chunkStorageKey(index));
 		if (keys.length > 0) {
 			await this.ctx.storage.delete(keys);
 		}

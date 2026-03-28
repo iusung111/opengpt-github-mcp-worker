@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildGitHubAppJwt, githubAuthConfigured, githubGet, githubPut, resetGitHubAuthCache } from '../src/github';
+import { buildGitHubAppJwt, githubAuthConfigured, githubGet, githubPut, githubRequestRaw, resetGitHubAuthCache } from '../src/github';
 import { commitUploadedFile, inspectFileAtBranch } from '../src/github-file-commit';
 
 afterEach(() => {
@@ -111,6 +111,40 @@ describe('github auth helpers', () => {
 		const requestInit = fetchMock.mock.calls[1]?.[1];
 		expect(requestInit?.method).toBe('PUT');
 		expect(requestInit?.body).toBe(JSON.stringify({ merge_method: 'squash', commit_title: 'Merge PR #6' }));
+	});
+
+	it('preserves binary bodies for workflow artifact downloads', async () => {
+		const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+		const binaryPayload = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04]);
+		vi.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						token: 'token-1',
+						expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(binaryPayload, {
+					status: 200,
+					headers: { 'content-type': 'application/zip' },
+				}),
+			);
+
+		const response = await githubRequestRaw(
+			{
+				GITHUB_API_URL: 'https://api.github.test',
+				GITHUB_APP_ID: '123',
+				GITHUB_APP_INSTALLATION_ID: '456',
+				GITHUB_APP_PRIVATE_KEY_PEM: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+			} as Env,
+			'GET',
+			'/repos/iusung111/OpenGPT/actions/artifacts/1/zip',
+		);
+
+		expect(new Uint8Array(await response.arrayBuffer())).toEqual(binaryPayload);
 	});
 
 	it('inspects and commits uploaded files through git data APIs', async () => {

@@ -1,0 +1,53 @@
+name: opengpt-package
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_kind:
+        description: Request type marker
+        required: false
+        default: desktop_build
+        type: string
+      request_b64:
+        description: Base64 encoded JSON request envelope
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies when package-lock exists
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install --ignore-scripts
+          fi
+
+      - name: Run standard package request
+        env:
+          OPENGPT_REQUEST_B64: ${{ inputs.request_b64 }}
+        run: node worker/scripts/run-opengpt-package.mjs
+
+      - name: Upload package artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opengpt-package-${{ github.run_id }}
+          path: opengpt-package-artifact/
+          if-no-files-found: error

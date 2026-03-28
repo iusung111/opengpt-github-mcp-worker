@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import { AppEnv, DispatchRequestRecord } from './types';
+import { getManifestDispatchRequest, getManifestWorkflowRun, mergeWorkerManifest } from './job-manifest';
 import { ToolAnnotations } from './mcp-overview-tools';
 import {
 	activateRepoWorkspace,
@@ -97,7 +98,7 @@ export function registerWorkflowDispatchTools(
 							status?: string;
 							next_actor?: string;
 							auto_improve_cycle?: number;
-							worker_manifest?: Record<string, unknown>;
+							worker_manifest?: unknown;
 					  }
 					| null = null;
 				if (jobId) {
@@ -111,21 +112,15 @@ export function registerWorkflowDispatchTools(
 								status?: string;
 								next_actor?: string;
 								auto_improve_cycle?: number;
-								worker_manifest?: Record<string, unknown>;
+								worker_manifest?: unknown;
 						  }
 						| null);
 				}
 				const autoImproveCycle =
 					typeof existingJob?.auto_improve_cycle === 'number' ? existingJob.auto_improve_cycle : 0;
 				const fingerprint = await buildDispatchFingerprint(owner, repo, workflow_id, ref, inputs, autoImproveCycle);
-				const existingDispatch = (existingJob?.worker_manifest?.dispatch_request ?? null) as
-					| Partial<DispatchRequestRecord>
-					| null;
-				const workflowState = (existingJob?.worker_manifest?.last_workflow_run ?? null) as
-					| {
-							status?: string;
-					  }
-					| null;
+				const existingDispatch = getManifestDispatchRequest(existingJob?.worker_manifest) as Partial<DispatchRequestRecord> | null;
+				const workflowState = getManifestWorkflowRun(existingJob?.worker_manifest);
 				if (
 					jobId &&
 					existingJob?.status === 'working' &&
@@ -158,8 +153,7 @@ export function registerWorkflowDispatchTools(
 							job_id: jobId,
 							status: 'working',
 							next_actor: 'system',
-							worker_manifest: {
-								...(existingJob?.worker_manifest ?? {}),
+							worker_manifest: mergeWorkerManifest(existingJob?.worker_manifest, {
 								dispatch_request: {
 									owner,
 									repo,
@@ -169,7 +163,7 @@ export function registerWorkflowDispatchTools(
 									fingerprint,
 									dispatched_at: dispatchedAtIso,
 								},
-							},
+							}),
 							work_branch: existingWorkBranch,
 						},
 					});

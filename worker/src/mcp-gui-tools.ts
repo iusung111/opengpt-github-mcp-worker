@@ -7,7 +7,7 @@ import { ToolAnnotations } from './mcp-overview-tools';
 import { AppEnv } from './types';
 import { ensureRepoAllowed, ensureWorkflowAllowed, errorCodeFor, fail, getDefaultBaseBranch, getSelfRepoKey, githubGet, githubPost, ok, toolText, validateWorkflowInputs } from './utils';
 
-const GUI_CAPTURE_WORKFLOW_ID = 'gui-capture.yml';
+export const GUI_CAPTURE_WORKFLOW_ID = 'gui-capture.yml';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function waitForRun(env: AppEnv, owner: string, repo: string, ref: string, startedAt: string, timeoutMs: number) {
@@ -48,6 +48,68 @@ async function readArtifact(env: AppEnv, owner: string, repo: string, runId: num
 	};
 }
 
+export async function runGuiCaptureWorkflow(
+	env: AppEnv,
+	input: {
+		file_name?: string;
+		file_text?: string;
+		app_url?: string;
+		ref?: string;
+		analysis?: unknown;
+		scenario?: unknown;
+		report?: unknown;
+		include_image_base64?: boolean;
+		wait_timeout_seconds?: number;
+	},
+): Promise<Record<string, unknown>> {
+	const repoKey = getSelfRepoKey(env);
+	ensureRepoAllowed(env, repoKey);
+	ensureWorkflowAllowed(env, repoKey, GUI_CAPTURE_WORKFLOW_ID);
+	const [owner, repo] = repoKey.split('/');
+	const instructions = normalizeGuiCaptureInstructions(env, {
+		file_name: input.file_name,
+		file_text: input.file_text,
+		app_url: input.app_url,
+		analysis: input.analysis as Parameters<typeof normalizeGuiCaptureInstructions>[1]['analysis'],
+		scenario: input.scenario as Parameters<typeof normalizeGuiCaptureInstructions>[1]['scenario'],
+		report: input.report as Parameters<typeof normalizeGuiCaptureInstructions>[1]['report'],
+	});
+	const workflowRef = input.ref?.trim() || getDefaultBaseBranch(env);
+	const instructionsB64 = encodeBase64(new TextEncoder().encode(JSON.stringify(instructions)));
+	const inputs: Record<string, unknown> = { request_kind: 'gui_capture', instructions_b64: instructionsB64 };
+	validateWorkflowInputs(inputs);
+	const startedAt = new Date().toISOString();
+	await githubPost(env, `/repos/${owner}/${repo}/actions/workflows/${GUI_CAPTURE_WORKFLOW_ID}/dispatches`, {
+		ref: workflowRef,
+		inputs,
+	});
+	const { runId, run } = await waitForRun(
+		env,
+		owner,
+		repo,
+		workflowRef,
+		startedAt,
+		(input.wait_timeout_seconds ?? 120) * 1000,
+	);
+	const conclusion = String(run.conclusion ?? '');
+	const artifact = await readArtifact(env, owner, repo, runId);
+	return {
+		repo: repoKey,
+		workflow_id: GUI_CAPTURE_WORKFLOW_ID,
+		ref: workflowRef,
+		run_id: runId,
+		run_html_url: run.html_url ?? null,
+		conclusion,
+		mode: instructions.mode,
+		summary: artifact.summary,
+		report_file_name: artifact.report_file_name,
+		artifact_files: artifact.artifact_files,
+		step_image_files: artifact.step_image_files,
+		image_file_name: artifact.image_file_name,
+		image_base64: input.include_image_base64 ? artifact.image_base64 : null,
+	};
+}
+
 export function registerGuiTools(server: McpServer, env: AppEnv, writeAnnotations: ToolAnnotations): void {
 	server.registerTool('gui_capture_run', {
 		description: 'Run legacy /gui/ capture or scenario-based HTML/url GUI validation in a remote GitHub Actions browser session.',
@@ -65,38 +127,27 @@ export function registerGuiTools(server: McpServer, env: AppEnv, writeAnnotation
 		annotations: writeAnnotations,
 	}, async ({ file_name, file_text, app_url, ref, analysis, scenario, report, include_image_base64, wait_timeout_seconds }) => {
 		try {
-			const repoKey = getSelfRepoKey(env);
-			ensureRepoAllowed(env, repoKey);
-			ensureWorkflowAllowed(env, repoKey, GUI_CAPTURE_WORKFLOW_ID);
-			const [owner, repo] = repoKey.split('/');
-			const instructions = normalizeGuiCaptureInstructions(env, { file_name, file_text, app_url, analysis, scenario, report });
-			const workflowRef = ref?.trim() || getDefaultBaseBranch(env);
-			const instructionsB64 = encodeBase64(new TextEncoder().encode(JSON.stringify(instructions)));
-			const inputs: Record<string, unknown> = { request_kind: 'gui_capture', instructions_b64: instructionsB64 };
-			validateWorkflowInputs(inputs);
-			const startedAt = new Date().toISOString();
-			await githubPost(env, `/repos/${owner}/${repo}/actions/workflows/${GUI_CAPTURE_WORKFLOW_ID}/dispatches`, { ref: workflowRef, inputs });
-			const { runId, run } = await waitForRun(env, owner, repo, workflowRef, startedAt, wait_timeout_seconds * 1000);
-			const conclusion = String(run.conclusion ?? '');
-			const artifact = await readArtifact(env, owner, repo, runId);
-			if (conclusion !== 'success') {
-				return toolText(fail('gui_capture_run_failed', `workflow run ${runId} concluded with ${conclusion}`, { run_id: runId, run_html_url: run.html_url ?? null, summary: artifact.summary }));
+			const result = await runGuiCaptureWorkflow(env, {
+				file_name,
+				file_text,
+				app_url,
+				ref,
+				analysis,
+				scenario,
+				report,
+				include_image_base64,
+				wait_timeout_seconds,
+			});
+			if (result.conclusion !== 'success') {
+				return toolText(
+					fail('gui_capture_run_failed', `workflow run ${result.run_id} concluded with ${result.conclusion}`, {
+						run_id: result.run_id,
+						run_html_url: result.run_html_url,
+						summary: result.summary,
+					}),
+				);
 			}
-			return toolText(ok({
-				repo: repoKey,
-				workflow_id: GUI_CAPTURE_WORKFLOW_ID,
-				ref: workflowRef,
-				run_id: runId,
-				run_html_url: run.html_url ?? null,
-				conclusion,
-				mode: instructions.mode,
-				summary: artifact.summary,
-				report_file_name: artifact.report_file_name,
-				artifact_files: artifact.artifact_files,
-				step_image_files: artifact.step_image_files,
-				image_file_name: artifact.image_file_name,
-				image_base64: include_image_base64 ? artifact.image_base64 : null,
-			}, writeAnnotations));
+			return toolText(ok(result, writeAnnotations));
 		} catch (error) {
 			return toolText(fail(errorCodeFor(error, 'gui_capture_run_failed'), error, writeAnnotations));
 		}

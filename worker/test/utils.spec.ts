@@ -76,17 +76,23 @@ describe('normalizeWorkflowInputs', () => {
 
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/OpenGPT')).toEqual([
 			'build-todo-exe.yml',
+			'opengpt-exec.yml',
+			'opengpt-package.yml',
 			'agent-run.yml',
 			'pr-merge.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker')).toEqual([
 			'gui-capture.yml',
 			'cloudflare-ci.yml',
+			'opengpt-exec.yml',
+			'opengpt-package.yml',
 			'cloudflare-self-deploy.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/opengpt-github-mcp-worker-mirror-backup')).toEqual([
 			'gui-capture.yml',
 			'cloudflare-ci.yml',
+			'opengpt-exec.yml',
+			'opengpt-package.yml',
 			'cloudflare-self-deploy.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/other')).toEqual(['agent-run.yml', 'pr-merge.yml']);
@@ -94,9 +100,9 @@ describe('normalizeWorkflowInputs', () => {
 
 	it('loads the repo-managed workflow allowlist config', () => {
 		expect(getFileAllowedWorkflowsByRepo()).toMatchObject({
-			'iusung111/OpenGPT': ['build-todo-exe.yml'],
-			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml', 'cloudflare-ci.yml'],
-			'iusung111/opengpt-github-mcp-worker-mirror-backup': ['gui-capture.yml', 'cloudflare-ci.yml'],
+			'iusung111/OpenGPT': ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
+			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml', 'cloudflare-ci.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
+			'iusung111/opengpt-github-mcp-worker-mirror-backup': ['gui-capture.yml', 'cloudflare-ci.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
 		});
 	});
 
@@ -121,10 +127,14 @@ describe('normalizeWorkflowInputs', () => {
 
 		expect(getAllowedWorkflowsByRepo(env)['iusung111/OpenGPT']).toEqual([
 			'build-todo-exe.yml',
+			'opengpt-exec.yml',
+			'opengpt-package.yml',
 			'agent-run.yml',
 		]);
 		expect(getAllowedWorkflowsForRepo(env, 'iusung111/OpenGPT')).toEqual([
 			'build-todo-exe.yml',
+			'opengpt-exec.yml',
+			'opengpt-package.yml',
 			'agent-run.yml',
 		]);
 	});
@@ -147,10 +157,10 @@ describe('normalizeWorkflowInputs', () => {
 
 		expect(inspectAllowedWorkflowsForRepo(env, 'iusung111/OpenGPT')).toMatchObject({
 			repo_key: 'iusung111/OpenGPT',
-			file_based_entries: ['build-todo-exe.yml'],
+			file_based_entries: ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
 			env_based_entries: ['cloudflare-live-deploy.yml'],
 			env_global_fallback: ['agent-run.yml', 'pr-merge.yml'],
-			effective_allowlist: ['build-todo-exe.yml', 'cloudflare-live-deploy.yml'],
+			effective_allowlist: ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml', 'cloudflare-live-deploy.yml'],
 			repo_specific_match_found: true,
 		});
 	});

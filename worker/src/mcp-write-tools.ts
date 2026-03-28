@@ -6,6 +6,12 @@ import {
 	shouldProbeExistingFile,
 	type Phase2FileWriteMode,
 } from './file-write-phase2';
+import {
+	commitBatchWriteChanges,
+	prepareBatchWriteChanges,
+	preparePatchsetChanges,
+	type RepoBatchWriteOperation,
+} from './repo-batch-write';
 import { AppEnv } from './types';
 import { ToolAnnotations } from './mcp-overview-tools';
 import { abortUploadSession, appendUploadChunk, commitUploadSession, createUploadSession } from './upload-session-client';
@@ -44,6 +50,29 @@ function isGitHubNotFoundError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
 	return message.includes('github request failed: 404');
 }
+
+const batchWriteOperationSchema = z.object({
+	type: z.enum(['create_file', 'update_file', 'delete_file', 'rename_path', 'mkdir_scaffold']),
+	path: z.string().optional(),
+	from_path: z.string().optional(),
+	to_path: z.string().optional(),
+	content_b64: z.string().optional(),
+	expected_blob_sha: z.string().optional(),
+	entries: z
+		.array(
+			z.object({
+				path: z.string(),
+				content_b64: z.string().optional(),
+			}),
+		)
+		.optional(),
+});
+
+const patchsetEntrySchema = z.object({
+	path: z.string(),
+	expected_blob_sha: z.string().optional(),
+	patch_unified: z.string(),
+});
 
 async function probeExistingBlobSha(
 	env: AppEnv,
@@ -342,6 +371,140 @@ export function registerWriteTools(
 				return toolText(ok(data, writeAnnotations));
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'repo_upload_abort_failed'), error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
+		'repo_batch_write',
+		{
+			description:
+				'Preview or atomically apply multiple file operations on an agent branch, including create, update, delete, rename, and scaffold writes.',
+			inputSchema: {
+				owner: z.string(),
+				repo: z.string(),
+				branch: z.string(),
+				message: z.string(),
+				mode: z.enum(['preview', 'apply']).default('preview'),
+				operations: z.array(batchWriteOperationSchema).min(1),
+			},
+			annotations: writeAnnotations,
+		},
+		async ({ owner, repo, branch, message, mode, operations }) => {
+			try {
+				const repoKey = `${owner}/${repo}`;
+				ensureRepoAllowed(env, repoKey);
+				ensureBranchAllowed(env, branch);
+				ensureNotDefaultBranch(env, branch);
+				await activateRepoWorkspace(env, repoKey);
+				const prepared = await prepareBatchWriteChanges(env, {
+					owner,
+					repo,
+					branch,
+					operations: operations as RepoBatchWriteOperation[],
+				});
+				if (mode === 'preview') {
+					return toolText(
+						ok(
+							{
+								repo_key: repoKey,
+								branch,
+								mode,
+								message,
+								base_ref_sha: prepared.base_ref_sha,
+								can_apply: true,
+								changed_files: prepared.changes.map((change) => ({
+									path: change.path,
+									action: change.action,
+									previous_path: change.previous_path ?? null,
+									previous_blob_sha: change.previous_blob_sha ?? null,
+								})),
+							},
+							writeAnnotations,
+						),
+					);
+				}
+				return toolText(
+					ok(
+						await commitBatchWriteChanges(env, {
+							owner,
+							repo,
+							branch,
+							message,
+							base_ref_sha: prepared.base_ref_sha,
+							changes: prepared.changes,
+						}),
+						writeAnnotations,
+					),
+				);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'repo_batch_write_failed'), error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
+		'repo_apply_patchset',
+		{
+			description:
+				'Preview or atomically apply a multi-file unified patchset on an agent branch after validating each target blob.',
+			inputSchema: {
+				owner: z.string(),
+				repo: z.string(),
+				branch: z.string(),
+				message: z.string(),
+				mode: z.enum(['preview', 'apply']).default('preview'),
+				patches: z.array(patchsetEntrySchema).min(1),
+			},
+			annotations: writeAnnotations,
+		},
+		async ({ owner, repo, branch, message, mode, patches }) => {
+			try {
+				const repoKey = `${owner}/${repo}`;
+				ensureRepoAllowed(env, repoKey);
+				ensureBranchAllowed(env, branch);
+				ensureNotDefaultBranch(env, branch);
+				await activateRepoWorkspace(env, repoKey);
+				const prepared = await preparePatchsetChanges(env, {
+					owner,
+					repo,
+					branch,
+					patches,
+				});
+				if (mode === 'preview') {
+					return toolText(
+						ok(
+							{
+								repo_key: repoKey,
+								branch,
+								mode,
+								message,
+								base_ref_sha: prepared.base_ref_sha,
+								can_apply: true,
+								changed_files: prepared.preview,
+							},
+							writeAnnotations,
+						),
+					);
+				}
+				return toolText(
+					ok(
+						{
+							preview: prepared.preview,
+							...(await commitBatchWriteChanges(env, {
+								owner,
+								repo,
+								branch,
+								message,
+								base_ref_sha: prepared.base_ref_sha,
+								changes: prepared.changes,
+							})),
+						},
+						writeAnnotations,
+					),
+				);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'repo_apply_patchset_failed'), error, writeAnnotations));
 			}
 		},
 	);

@@ -8,6 +8,7 @@ import {
 	ToolResultEnvelope,
 	WorkspaceRecord,
 } from './types';
+import { mergeWorkerManifest } from './job-manifest';
 import { jsonResponse, fail, ok, nowIso } from './utils';
 import { buildWorkspaceRecord } from './queue-workspaces';
 import { ensureSafeWorkspacePath } from './queue-helpers';
@@ -174,7 +175,7 @@ async function handleJobStatusUpdate(context: QueueRequestContext, payload: Queu
 		if (payload.job.pr_number !== undefined) job.pr_number = payload.job.pr_number;
 		if (payload.job.last_error !== undefined) job.last_error = payload.job.last_error;
 		if (payload.job.worker_manifest !== undefined) {
-			job.worker_manifest = { ...job.worker_manifest, ...payload.job.worker_manifest };
+			job.worker_manifest = mergeWorkerManifest(job.worker_manifest, payload.job.worker_manifest);
 		}
 		if (payload.job.auto_improve_cycle !== undefined) job.auto_improve_cycle = payload.job.auto_improve_cycle;
 	}

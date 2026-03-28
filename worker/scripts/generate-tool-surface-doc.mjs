@@ -5,6 +5,7 @@ const root = process.cwd();
 const catalogPath = path.join(root, 'worker', 'src', 'tool-catalog.json');
 const outputDir = path.join(root, 'docs');
 const outputPath = path.join(outputDir, 'TOOL_SURFACE.md');
+const checkOnly = process.argv.includes('--check');
 
 const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 
@@ -42,5 +43,16 @@ for (const preset of catalog.permissionPresets) {
 }
 
 fs.mkdirSync(outputDir, { recursive: true });
-fs.writeFileSync(outputPath, `${lines.join('\n')}\n`);
+const nextContent = `${lines.join('\n')}\n`;
+if (checkOnly) {
+	const currentContent = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '';
+	if (currentContent !== nextContent) {
+		console.error(`docs/TOOL_SURFACE.md is out of date. Run: npm run docs:tool-surface`);
+		process.exit(1);
+	}
+	console.log(`Verified ${path.relative(root, outputPath)}`);
+	process.exit(0);
+}
+
+fs.writeFileSync(outputPath, nextContent);
 console.log(`Wrote ${path.relative(root, outputPath)}`);

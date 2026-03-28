@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import { AppEnv } from './types';
+import { getManifestDispatchRequest } from './job-manifest';
 import { ToolAnnotations } from './mcp-overview-tools';
 import {
 	activateRepoWorkspace,
@@ -51,9 +52,7 @@ export function registerCollabTools(
 				const [owner, repo] = repoKey.split('/');
 				const prNumber = typeof job.pr_number === 'number' ? job.pr_number : null;
 				const workBranch = typeof job.work_branch === 'string' ? job.work_branch : null;
-				const dispatchRequest = (job.worker_manifest as Record<string, unknown> | undefined)?.dispatch_request as
-					| Record<string, unknown>
-					| undefined;
+				const dispatchRequest = getManifestDispatchRequest(job.worker_manifest);
 
 				const [progressResult, auditResult, prResult, prFilesResult, workflowRunsResult] = await Promise.all([
 					queueJson(env, { action: 'job_progress', job_id }),

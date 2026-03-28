@@ -1,4 +1,5 @@
 import { DispatchRequestRecord, JobRecord, JobStatus, NextActor } from './types';
+import { getManifestDispatchRequest, setManifestWorkflowRun } from './job-manifest';
 
 export interface WorkflowRunSnapshot {
 	name?: string;
@@ -25,19 +26,7 @@ export function pushJobNote(job: JobRecord, note: string): void {
 }
 
 export function getDispatchRequest(job: JobRecord): DispatchRequestRecord | null {
-	const raw = (job.worker_manifest.dispatch_request ?? null) as Partial<DispatchRequestRecord> | null;
-	if (!raw?.owner || !raw.repo || !raw.workflow_id || !raw.ref || !raw.dispatched_at) {
-		return null;
-	}
-	return {
-		owner: raw.owner,
-		repo: raw.repo,
-		workflow_id: raw.workflow_id,
-		ref: raw.ref,
-		inputs: raw.inputs ?? {},
-		fingerprint: raw.fingerprint,
-		dispatched_at: raw.dispatched_at,
-	};
+	return getManifestDispatchRequest(job.worker_manifest);
 }
 
 export function isDryRunJob(job: JobRecord): boolean {
@@ -47,13 +36,12 @@ export function isDryRunJob(job: JobRecord): boolean {
 }
 
 export function recordWorkflowSnapshot(job: JobRecord, run: WorkflowRunSnapshot): void {
-	job.worker_manifest = {
-		...job.worker_manifest,
-		last_workflow_run: {
-			name: run.name,
-			status: run.status,
-			conclusion: run.conclusion,
-			html_url: run.html_url,
-		},
-	};
+	job.worker_manifest = setManifestWorkflowRun(job.worker_manifest, {
+		name: run.name,
+		status: run.status,
+		conclusion: run.conclusion,
+		html_url: run.html_url,
+		run_id: job.workflow_run_id ?? null,
+		updated_at: new Date().toISOString(),
+	});
 }

@@ -110,6 +110,16 @@ async function executeStep(page, baseUrl, step, index) {
         result.message = `typed into ${step.selector}`;
         break;
       }
+      case 'press': {
+        if (locator) {
+          await locator.first().press(String(step.value ?? 'Enter'), { timeout });
+          result.message = `pressed ${step.value ?? 'Enter'} on ${step.selector}`;
+        } else {
+          await page.keyboard.press(String(step.value ?? 'Enter'));
+          result.message = `pressed ${step.value ?? 'Enter'}`;
+        }
+        break;
+      }
       case 'select': {
         if (!locator) throw new Error('select step requires selector');
         await locator.first().selectOption(String(step.value ?? ''));
@@ -159,6 +169,16 @@ async function executeStep(page, baseUrl, step, index) {
         result.message = `text matched ${step.selector}`;
         break;
       }
+      case 'assert_url': {
+        const actual = page.url();
+        const expected = String(step.expected_value ?? step.value ?? '');
+        if (!expected) throw new Error('assert_url step requires expected_value or value');
+        if (!actual.includes(expected)) {
+          throw new Error(`expected current URL to include "${expected}", actual "${actual}"`);
+        }
+        result.message = `url matched ${expected}`;
+        break;
+      }
       case 'assert_count': {
         if (!locator) throw new Error('assert_count step requires selector');
         const actual = await locator.count();
@@ -176,7 +196,8 @@ async function executeStep(page, baseUrl, step, index) {
         result.message = `attribute matched ${step.selector}`;
         break;
       }
-      case 'screenshot': {
+      case 'screenshot':
+      case 'snapshot': {
         result.message = 'captured screenshot';
         break;
       }
@@ -184,7 +205,12 @@ async function executeStep(page, baseUrl, step, index) {
         throw new Error(`unsupported action: ${step.action}`);
     }
 
-    if (captureMode === 'after' || captureMode === 'before_after' || step.action === 'screenshot') {
+    if (
+      captureMode === 'after' ||
+      captureMode === 'before_after' ||
+      step.action === 'screenshot' ||
+      step.action === 'snapshot'
+    ) {
       result.screenshot_after = await savePageShot(page, `${stepFileBase(index, step, '-after')}.png`);
     }
   } catch (error) {

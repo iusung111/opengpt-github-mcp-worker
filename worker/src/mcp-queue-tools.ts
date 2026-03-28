@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import { AppEnv } from './types';
+import { createEmptyWorkerManifest } from './job-manifest';
 import { ToolAnnotations } from './mcp-overview-tools';
 import {
 	activateRepoWorkspace,
@@ -60,7 +61,7 @@ export function registerQueueTools(
 						status: 'queued',
 						next_actor: input.next_actor,
 						auto_improve_cycle: 0,
-						worker_manifest: {},
+						worker_manifest: createEmptyWorkerManifest(),
 						review_findings: [],
 						notes: [],
 					},

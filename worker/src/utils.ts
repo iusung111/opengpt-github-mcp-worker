@@ -391,6 +391,7 @@ export function validateWorkflowInputs(inputs: Record<string, unknown>): void {
 		'auto_improve',
 		'runner_label',
 		'request_kind',
+		'request_b64',
 		'project_slug',
 		'create_project_scaffold',
 		'deploy_target',

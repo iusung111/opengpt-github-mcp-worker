@@ -365,9 +365,9 @@ The March 22, 2026 incident was not a single bug. The connector failed across mu
 
 Reference report:
 
-- [ChatGPT Connector Incident 2026-03-22](/d:/VScode/opengpt-github-mcp-worker/docs/chatgpt/CHATGPT_CONNECTOR_INCIDENT_2026-03-22.md)
-- [Incident report index](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/README.md)
-- [MCP Tool Exposure Incident 2026-03-24](/d:/VScode/opengpt-github-mcp-worker/docs/incidents/MCP_TOOL_EXPOSURE_INCIDENT_2026-03-24.md)
+- [ChatGPT Connector Incident 2026-03-22](./chatgpt/CHATGPT_CONNECTOR_INCIDENT_2026-03-22.md)
+- [Incident report index](./incidents/README.md)
+- [MCP Tool Exposure Incident 2026-03-24](./incidents/MCP_TOOL_EXPOSURE_INCIDENT_2026-03-24.md)
 
 ## Incident Memory Rule
 

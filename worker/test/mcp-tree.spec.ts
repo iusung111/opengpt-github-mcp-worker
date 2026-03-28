@@ -29,6 +29,12 @@ describe('repo_tree_snapshot tool', () => {
 		const client = await createMcpClient();
 		const tools = await client.listTools();
 		expect(tools.tools.some((tool) => tool.name === 'repo_tree_snapshot')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_navigation_manifest')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_get_file_summary')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_get_file_chunk')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_get_diff')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'verify_list_suites')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'preview_env_get')).toBe(true);
 		await client.close();
 	});
 });

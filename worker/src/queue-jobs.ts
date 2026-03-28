@@ -1,13 +1,13 @@
 import { JobRecord, JobStatus, NextActor } from './types';
+import { createEmptyWorkerManifest, mergeWorkerManifest, normalizeWorkerManifest } from './job-manifest';
 import { nowIso } from './utils';
-import { JobIndexPointer, jobStatusIndexPrefix } from './queue-index';
+import { JobIndexPointer, jobAllIndexPrefix, jobStatusIndexPrefix } from './queue-index';
 
 export interface QueueJobListContext {
 	ensureJobIndexes(): Promise<void>;
 	getJob(jobId: string): Promise<JobRecord | null>;
 	reconcileJob(job: JobRecord): Promise<JobRecord>;
 	listJobIndexPointers(prefix: string): Promise<JobIndexPointer[]>;
-	listStoredJobs(): Promise<JobRecord[]>;
 }
 
 export interface QueueJobUpsertContext {
@@ -31,7 +31,7 @@ export function normalizeJob(input: Partial<JobRecord> & { job_id: string }): Jo
 		auto_improve_enabled: input.auto_improve_enabled ?? false,
 		auto_improve_max_cycles: input.auto_improve_max_cycles ?? 3,
 		auto_improve_cycle: 0,
-		worker_manifest: input.worker_manifest ?? {},
+		worker_manifest: input.worker_manifest ? normalizeWorkerManifest(input.worker_manifest) : createEmptyWorkerManifest(),
 		review_findings: [],
 		notes: input.notes ?? [],
 		last_error: input.last_error,
@@ -50,7 +50,15 @@ export async function upsertJob(
 ): Promise<void> {
 	const existing = await context.getJob(job.job_id);
 	if (existing) {
-		const merged = { ...existing, ...job, updated_at: nowIso() };
+		const merged = {
+			...existing,
+			...job,
+			worker_manifest:
+				job.worker_manifest !== undefined
+					? mergeWorkerManifest(existing.worker_manifest, job.worker_manifest)
+					: normalizeWorkerManifest(existing.worker_manifest),
+			updated_at: nowIso(),
+		};
 		await context.persistJob(merged, existing);
 		return;
 	}
@@ -63,17 +71,13 @@ export async function listJobs(
 	nextActor?: NextActor,
 ): Promise<JobRecord[]> {
 	const jobs: JobRecord[] = [];
-	if (status || nextActor) {
-		await context.ensureJobIndexes();
-	}
-	const indexedPointers = status || nextActor ? await context.listJobIndexPointers(jobStatusIndexPrefix(status, nextActor)) : null;
+	await context.ensureJobIndexes();
+	const indexedPointers = await context.listJobIndexPointers(
+		status || nextActor ? jobStatusIndexPrefix(status, nextActor) : jobAllIndexPrefix(),
+	);
 	const records: Array<JobRecord | null> = [];
-	if (indexedPointers?.length) {
-		for (const pointer of indexedPointers) {
-			records.push(await context.getJob(pointer.job_id));
-		}
-	} else {
-		records.push(...(await context.listStoredJobs()));
+	for (const pointer of indexedPointers) {
+		records.push(await context.getJob(pointer.job_id));
 	}
 	for (const value of records) {
 		if (!value) {

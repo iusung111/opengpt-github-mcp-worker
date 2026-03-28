@@ -26,9 +26,9 @@ const groupsById = new Map(toolCatalog.groups.map((group) => [group.id, group]))
 const presetsById = new Map(toolCatalog.permissionPresets.map((preset) => [preset.id, preset]));
 
 const capabilityToGroupIds: Record<string, string[]> = {
-	read: ['overview', 'repo_read'],
-	write: ['repo_write', 'collaboration'],
-	workflow: ['repo_write'],
+	read: ['overview', 'repo_read', 'api_backend', 'observability'],
+	write: ['repo_write', 'collaboration', 'preview', 'browser', 'database', 'release'],
+	workflow: ['repo_write', 'verification', 'preview', 'browser', 'desktop', 'database', 'release'],
 	review: ['queue'],
 	workspace: ['workspace'],
 	queue: ['queue'],

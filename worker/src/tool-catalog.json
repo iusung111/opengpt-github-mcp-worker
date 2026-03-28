@@ -29,8 +29,16 @@
     {
       "id": "repo_read",
       "label": "Repository read",
-      "description": "Repository files, workflow files, trees, search, issues, PRs, and workflow run read APIs.",
+      "description": "Manifest-first repository navigation, summary/chunk file access, trees, search, issues, PRs, and workflow run read APIs.",
       "tools": [
+        "repo_navigation_manifest",
+        "repo_context_snapshot",
+        "repo_doc_index_lookup",
+        "repo_tool_index_lookup",
+        "repo_get_file_summary",
+        "repo_get_file_chunk",
+        "repo_get_diff",
+        "repo_read_budget_status",
         "repo_get_file",
         "repo_list_tree",
         "repo_tree_snapshot",
@@ -48,13 +56,17 @@
     {
       "id": "repo_write",
       "label": "Repository write",
-      "description": "Branch creation, file edits including .github/workflows, PR creation and merge, comments, and workflow dispatch.",
+      "description": "Branch creation, single-file and batch file edits including .github/workflows, PR creation and merge, comments, and workflow dispatch.",
       "tools": [
         "repo_create_branch",
+        "repo_create_file",
+        "repo_upsert_file",
         "repo_upload_start",
         "repo_upload_append",
         "repo_upload_commit",
         "repo_upload_abort",
+        "repo_batch_write",
+        "repo_apply_patchset",
         "repo_update_file",
         "pr_create",
         "pr_merge",
@@ -71,6 +83,91 @@
         "review_prepare_context",
         "branch_cleanup_candidates",
         "branch_cleanup_execute"
+      ]
+    },
+    {
+      "id": "verification",
+      "label": "Verification",
+      "description": "Standard capability-aware verification suites, run comparison, and workflow log access.",
+      "tools": [
+        "verify_list_suites",
+        "verify_run",
+        "verify_get_logs",
+        "verify_compare_runs"
+      ]
+    },
+    {
+      "id": "preview",
+      "label": "Preview environments",
+      "description": "Preview URL resolution, health probing, teardown, and queue-linked preview state.",
+      "tools": [
+        "preview_env_create",
+        "preview_env_get",
+        "preview_env_destroy"
+      ]
+    },
+    {
+      "id": "browser",
+      "label": "Browser automation",
+      "description": "Session-based browser validation layered on the existing gui capture workflow and diagnostics artifacts.",
+      "tools": [
+        "browser_session_start",
+        "browser_action_batch",
+        "browser_collect_diagnostics"
+      ]
+    },
+    {
+      "id": "desktop",
+      "label": "Desktop packaging",
+      "description": "Desktop build, smoke, and packaging artifact retrieval for Electron/Tauri style projects.",
+      "tools": [
+        "desktop_build_run",
+        "desktop_smoke_run",
+        "desktop_artifacts_get"
+      ]
+    },
+    {
+      "id": "api_backend",
+      "label": "API and backend",
+      "description": "API contract discovery, lightweight validation, and live request execution against previews or app URLs.",
+      "tools": [
+        "api_contract_list",
+        "api_contract_get",
+        "api_request_run",
+        "api_contract_validate"
+      ]
+    },
+    {
+      "id": "database",
+      "label": "Database",
+      "description": "Schema inspection plus workflow-backed migration, seed, reset, and safe query operations.",
+      "tools": [
+        "db_schema_inspect",
+        "db_migration_apply",
+        "db_seed_run",
+        "db_reset",
+        "db_query_safe"
+      ]
+    },
+    {
+      "id": "observability",
+      "label": "Runtime observability",
+      "description": "Workflow log querying, error clustering, and incident bundle assembly for debugging loops.",
+      "tools": [
+        "runtime_log_query",
+        "runtime_error_cluster",
+        "incident_bundle_create"
+      ]
+    },
+    {
+      "id": "release",
+      "label": "Release and deploy",
+      "description": "Promotion, rollback, release readiness, and deploy health evaluation.",
+      "tools": [
+        "deploy_promote",
+        "deploy_rollback",
+        "deploy_health_matrix",
+        "release_verify"
       ]
     },
     {
@@ -111,7 +208,14 @@
       "label": "Implementation with workflow dispatch",
       "description": "Implementation, workflow-file edits, allowlisted workflow dispatch, and queue tracking.",
       "capabilities": ["read", "write", "workflow", "workspace", "queue"],
-      "groupIds": ["overview", "workspace", "repo_read", "repo_write", "queue"]
+      "groupIds": ["overview", "workspace", "repo_read", "repo_write", "verification", "preview", "browser", "desktop", "api_backend", "database", "observability", "release", "queue"]
+    },
+    {
+      "id": "desktop_fullstack",
+      "label": "Desktop fullstack control plane",
+      "description": "End-to-end GUI implementation with verification, preview, browser, desktop, backend, database, observability, and release controls.",
+      "capabilities": ["read", "write", "workflow", "workspace", "queue"],
+      "groupIds": ["overview", "workspace", "repo_read", "repo_write", "verification", "preview", "browser", "desktop", "api_backend", "database", "observability", "release", "queue"]
     },
     {
       "id": "review_followup",

@@ -1,4 +1,5 @@
 import { createSign } from 'node:crypto';
+import { incrementReadCounter } from './read-observability';
 
 export interface InstallationToken {
 	token: string;
@@ -33,6 +34,25 @@ interface ResolvedGitHubCredentials {
 }
 
 const cachedInstallationTokens = new Map<string, InstallationToken>();
+const cachedGetResponses = new Map<
+	string,
+	{
+		expiresAt: number;
+		status: number;
+		headers: Array<[string, string]>;
+		bodyText: string;
+	}
+>();
+const cachedGetErrors = new Map<string, { expiresAt: number; message: string }>();
+const inflightGetRequests = new Map<
+	string,
+	Promise<{
+		expiresAt: number;
+		status: number;
+		headers: Array<[string, string]>;
+		bodyText: string;
+	}>
+>();
 
 export function resetGitHubAuthCache(): void {
 	cachedInstallationTokens.clear();
@@ -46,6 +66,100 @@ async function fetchWithTimeout(input: string, init: RequestInit): Promise<Respo
 	} finally {
 		clearTimeout(timeoutId);
 	}
+}
+
+async function sha256Hex(text: string): Promise<string> {
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+	return Array.from(new Uint8Array(digest))
+		.map((byte) => byte.toString(16).padStart(2, '0'))
+		.join('');
+}
+
+function stableStringify(value: unknown): string {
+	if (Array.isArray(value)) {
+		return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+	}
+	if (value && typeof value === 'object') {
+		const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+			left.localeCompare(right),
+		);
+		return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(',')}}`;
+	}
+	return JSON.stringify(value);
+}
+
+function buildReadCacheKey(method: string, path: string, options: GitHubRequestOptions): string {
+	return stableStringify({
+		method: method.toUpperCase(),
+		path,
+		params: options.params ?? {},
+		headers: options.headers ?? {},
+	});
+}
+
+function readCacheTtlMs(path: string): number {
+	if (path.includes('/git/trees/')) return 20_000;
+	if (path.includes('/contents/')) return 20_000;
+	if (path.includes('/actions/runs')) return 12_000;
+	if (path.includes('/pulls/') && path.endsWith('/files')) return 12_000;
+	return 30_000;
+}
+
+function errorCacheTtlMs(path: string): number {
+	if (path.includes('/contents/')) return 5_000;
+	return 3_000;
+}
+
+function isBinaryGithubResponsePath(path: string): boolean {
+	return path.endsWith('/zip') || path.endsWith('/logs');
+}
+
+function cloneCachedResponse(entry: {
+	status: number;
+	headers: Array<[string, string]>;
+	bodyText: string;
+}): Response {
+	return new Response(entry.bodyText, {
+		status: entry.status,
+		headers: new Headers(entry.headers),
+	});
+}
+
+async function cacheApiRequest(cacheKey: string): Promise<Request> {
+	return new Request(`https://github-cache.internal/${await sha256Hex(cacheKey)}`);
+}
+
+function getDefaultCache(): Cache | null {
+	const maybeCaches = (globalThis as typeof globalThis & { caches?: CacheStorage }).caches;
+	return maybeCaches?.default ?? null;
+}
+
+async function getCacheApiResponse(cacheKey: string): Promise<Response | null> {
+	const cache = getDefaultCache();
+	if (!cache) {
+		return null;
+	}
+	return (await cache.match(await cacheApiRequest(cacheKey))) ?? null;
+}
+
+async function putCacheApiResponse(
+	cacheKey: string,
+	entry: { status: number; headers: Array<[string, string]>; bodyText: string },
+	ttlMs: number,
+): Promise<void> {
+	const cache = getDefaultCache();
+	if (!cache) {
+		return;
+	}
+	const headers = new Headers(entry.headers);
+	headers.set('cache-control', `max-age=${Math.max(1, Math.floor(ttlMs / 1000))}`);
+	await cache.put(
+		await cacheApiRequest(cacheKey),
+		new Response(entry.bodyText, {
+			status: entry.status,
+			headers,
+		}),
+	);
 }
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -218,38 +332,149 @@ export async function githubRequestRaw(
 	path: string,
 	options: GitHubRequestOptions = {}
 ): Promise<Response> {
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		const installationToken = await getInstallationToken(env);
-		const url = new URL(path, env.GITHUB_API_URL ?? 'https://api.github.com');
-		for (const [key, value] of Object.entries(options.params ?? {})) {
-			if (value === undefined) {
+	const normalizedMethod = method.toUpperCase();
+	const binaryResponse = isBinaryGithubResponsePath(path);
+	const cacheableGet = normalizedMethod === 'GET' && options.body === undefined && !binaryResponse;
+	const cacheKey = cacheableGet ? buildReadCacheKey(normalizedMethod, path, options) : null;
+	const now = Date.now();
+	if (cacheKey) {
+		const cachedError = cachedGetErrors.get(cacheKey);
+		if (cachedError && cachedError.expiresAt > now) {
+			incrementReadCounter('github_negative_cache_hit');
+			throw new Error(cachedError.message);
+		}
+		const cachedResponse = cachedGetResponses.get(cacheKey);
+		if (cachedResponse && cachedResponse.expiresAt > now) {
+			incrementReadCounter('github_cache_hit');
+			return cloneCachedResponse(cachedResponse);
+		}
+		const cacheApiResponse = await getCacheApiResponse(cacheKey);
+		if (cacheApiResponse) {
+			const bodyText = await cacheApiResponse.text();
+			const entry = {
+				expiresAt: Date.now() + readCacheTtlMs(path),
+				status: cacheApiResponse.status,
+				headers: Array.from(cacheApiResponse.headers.entries()),
+				bodyText,
+			};
+			cachedGetResponses.set(cacheKey, entry);
+			incrementReadCounter('github_cache_hit');
+			return cloneCachedResponse(entry);
+		}
+		incrementReadCounter('github_cache_miss');
+		const inflight = inflightGetRequests.get(cacheKey);
+		if (inflight) {
+			return cloneCachedResponse(await inflight);
+		}
+	}
+
+	if (binaryResponse) {
+		for (let attempt = 0; attempt < 2; attempt += 1) {
+			const installationToken = await getInstallationToken(env);
+			const url = new URL(path, env.GITHUB_API_URL ?? 'https://api.github.com');
+			for (const [key, value] of Object.entries(options.params ?? {})) {
+				if (value === undefined) {
+					continue;
+				}
+				url.searchParams.set(key, String(value));
+			}
+			const response = await fetchWithTimeout(url.toString(), {
+				method,
+				headers: {
+					Accept: 'application/vnd.github+json',
+					Authorization: `Bearer ${installationToken.token}`,
+					'User-Agent': USER_AGENT,
+					'X-GitHub-Api-Version': '2022-11-28',
+					...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
+					...options.headers,
+				},
+				body: options.body === undefined ? undefined : JSON.stringify(options.body),
+			});
+			incrementReadCounter('github_remote_call');
+			if (response.ok) {
+				return response;
+			}
+			if ((response.status === 401 || response.status === 403) && attempt === 0) {
+				clearInstallationTokenCache(env);
 				continue;
 			}
-			url.searchParams.set(key, String(value));
+			const message = await response.text();
+			throw new Error(`github request failed: ${response.status} ${message}`.trim());
 		}
-		const response = await fetchWithTimeout(url.toString(), {
-			method,
-			headers: {
-				Accept: 'application/vnd.github+json',
-				Authorization: `Bearer ${installationToken.token}`,
-				'User-Agent': USER_AGENT,
-				'X-GitHub-Api-Version': '2022-11-28',
-				...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
-				...options.headers,
-			},
-			body: options.body === undefined ? undefined : JSON.stringify(options.body),
-		});
-		if (response.ok) {
-			return response;
-		}
-		if ((response.status === 401 || response.status === 403) && attempt === 0) {
-			clearInstallationTokenCache(env);
-			continue;
-		}
-		const message = await response.text();
-		throw new Error(`github request failed: ${response.status} ${message}`.trim());
+		throw new Error('github request failed: exhausted retries');
 	}
-	throw new Error('github request failed: exhausted retries');
+
+	const fetchPromise = (async () => {
+		for (let attempt = 0; attempt < 2; attempt += 1) {
+			const installationToken = await getInstallationToken(env);
+			const url = new URL(path, env.GITHUB_API_URL ?? 'https://api.github.com');
+			for (const [key, value] of Object.entries(options.params ?? {})) {
+				if (value === undefined) {
+					continue;
+				}
+				url.searchParams.set(key, String(value));
+			}
+			const response = await fetchWithTimeout(url.toString(), {
+				method,
+				headers: {
+					Accept: 'application/vnd.github+json',
+					Authorization: `Bearer ${installationToken.token}`,
+					'User-Agent': USER_AGENT,
+					'X-GitHub-Api-Version': '2022-11-28',
+					...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
+					...options.headers,
+				},
+				body: options.body === undefined ? undefined : JSON.stringify(options.body),
+			});
+			incrementReadCounter('github_remote_call');
+			if (response.ok) {
+				const bodyText = await response.text();
+				const entry = {
+					expiresAt: Date.now() + readCacheTtlMs(path),
+					status: response.status,
+					headers: Array.from(response.headers.entries()),
+					bodyText,
+				};
+				if (cacheKey) {
+					cachedGetResponses.set(cacheKey, entry);
+					await putCacheApiResponse(cacheKey, entry, readCacheTtlMs(path));
+				}
+				return entry;
+			}
+			if ((response.status === 401 || response.status === 403) && attempt === 0) {
+				clearInstallationTokenCache(env);
+				continue;
+			}
+			const message = await response.text();
+			if (cacheKey && (response.status === 403 || response.status === 404)) {
+				cachedGetErrors.set(cacheKey, {
+					expiresAt: Date.now() + errorCacheTtlMs(path),
+					message: `github request failed: ${response.status} ${message}`.trim(),
+				});
+			}
+			throw new Error(`github request failed: ${response.status} ${message}`.trim());
+		}
+		throw new Error('github request failed: exhausted retries');
+	})();
+
+	if (cacheKey) {
+		inflightGetRequests.set(cacheKey, fetchPromise);
+	}
+	try {
+		return cloneCachedResponse(await fetchPromise);
+	} catch (error) {
+		if (cacheKey) {
+			cachedGetErrors.set(cacheKey, {
+				expiresAt: Date.now() + errorCacheTtlMs(path),
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+		throw error;
+	} finally {
+		if (cacheKey) {
+			inflightGetRequests.delete(cacheKey);
+		}
+	}
 }
 
 export async function githubGet(
