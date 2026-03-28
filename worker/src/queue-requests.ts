@@ -15,7 +15,14 @@ import { buildBlockingState, buildJobEventFeed, buildRunSummary, computeRunAtten
 import { jsonResponse, fail, ok, nowIso } from './utils';
 import { buildWorkspaceRecord } from './queue-workspaces';
 import { ensureSafeWorkspacePath } from './queue-helpers';
-import { getControlState, getDispatchRequest, hasExecutionRelatedInterrupt, pushJobNote, transitionJob } from './queue-state';
+import {
+	getControlState,
+	getDispatchRequest,
+	hasExecutionRelatedInterrupt,
+	isSmokeTraceJob,
+	pushJobNote,
+	transitionJob,
+} from './queue-state';
 
 type QueueResponse = Response;
 
@@ -568,7 +575,7 @@ async function handleJobProgress(context: QueueRequestContext, jobId: string): P
 }
 
 async function handleJobsList(context: QueueRequestContext, payload: QueueEnvelope): Promise<QueueResponse> {
-	const jobs = await context.listJobs(payload.status, payload.next_actor);
+	const jobs = (await context.listJobs(payload.status, payload.next_actor)).filter((job) => !isSmokeTraceJob(job));
 	const enrichedJobs = await Promise.all(
 		jobs.map(async (job) => {
 			const audits = await context.listAuditRecords(undefined, job.job_id, 10);
@@ -612,7 +619,7 @@ function filterEventFeed(
 async function handleJobEventFeed(context: QueueRequestContext, payload: QueueEnvelope): Promise<QueueResponse> {
 	const jobs = payload.job_id
 		? [await context.getJob(payload.job_id)].filter((job): job is JobRecord => Boolean(job))
-		: await context.listJobs();
+		: (await context.listJobs()).filter((job) => !isSmokeTraceJob(job));
 	if (payload.job_id && jobs.length === 0) {
 		return jobNotFound(payload.job_id);
 	}

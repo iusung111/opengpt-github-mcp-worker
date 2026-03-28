@@ -320,6 +320,7 @@ function createEmptyJob(jobId) {
 	return {
 		jobId,
 		repo: '',
+		targetPaths: [],
 		nextActor: '',
 		run: null,
 		blockingState: {
@@ -715,6 +716,9 @@ function mergeJobSnapshot(job, snapshot) {
 	if (typeof snapshot.repo === 'string') {
 		job.repo = snapshot.repo;
 	}
+	if (Array.isArray(snapshot.target_paths)) {
+		job.targetPaths = snapshot.target_paths.map((value) => String(value));
+	}
 	if (typeof snapshot.next_actor === 'string') {
 		job.nextActor = snapshot.next_actor;
 	}
@@ -958,19 +962,34 @@ function applyStructuredContent(structuredContent, meta = null, sessionId = null
 	}
 }
 
+function isHiddenSmokeJob(job) {
+	if (!job || !/^smoke-[A-Za-z0-9._-]+$/i.test(job.jobId || '')) {
+		return false;
+	}
+	if (!Array.isArray(job.targetPaths) || job.targetPaths.length === 0) {
+		return false;
+	}
+	return job.targetPaths.every((path) => /^notes\/smoke-[A-Za-z0-9._-]+\.txt$/i.test(String(path)));
+}
+
 function sortedJobs() {
-	return Object.values(state.store.jobs).sort((left, right) => {
+	return Object.values(state.store.jobs)
+		.filter((job) => !isHiddenSmokeJob(job))
+		.sort((left, right) => {
 		const leftTime = left.run?.updatedAt || left.updatedAt || '';
 		const rightTime = right.run?.updatedAt || right.updatedAt || '';
 		return String(rightTime).localeCompare(String(leftTime));
-	});
+		});
 }
 
 function currentJob() {
 	const jobs = sortedJobs();
 	if (!jobs.length) return null;
-	if (state.selectedJobId && state.store.jobs[state.selectedJobId]) {
-		return state.store.jobs[state.selectedJobId];
+	if (state.selectedJobId) {
+		const selected = jobs.find((job) => job.jobId === state.selectedJobId);
+		if (selected) {
+			return selected;
+		}
 	}
 	return jobs[0];
 }
@@ -1655,7 +1674,7 @@ function buttonDisabledAttr(disabled) {
 
 function aggregateRunCounts() {
 	const counts = createEmptyCounts();
-	for (const job of Object.values(state.store.jobs)) {
+	for (const job of sortedJobs()) {
 		const status = jobAttentionStatus(job);
 		counts[status] += 1;
 	}

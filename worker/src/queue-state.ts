@@ -62,6 +62,16 @@ export function isDryRunJob(job: JobRecord): boolean {
 	return rawDryRun === true || rawDryRun === 'true';
 }
 
+export function isSmokeTraceJob(job: JobRecord): boolean {
+	if (!/^smoke-[A-Za-z0-9._-]+$/i.test(job.job_id)) {
+		return false;
+	}
+	if (job.target_paths.length === 0) {
+		return false;
+	}
+	return job.target_paths.every((path) => /^notes\/smoke-[A-Za-z0-9._-]+\.txt$/i.test(String(path)));
+}
+
 export function recordWorkflowSnapshot(job: JobRecord, run: WorkflowRunSnapshot): void {
 	job.worker_manifest = setManifestWorkflowRun(job.worker_manifest, {
 		name: run.name,

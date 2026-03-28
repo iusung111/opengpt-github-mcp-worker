@@ -5,6 +5,7 @@ import {
 	getDispatchRequest,
 	hasExecutionRelatedInterrupt,
 	isDryRunJob,
+	isSmokeTraceJob,
 	pushJobNote,
 	recordWorkflowSnapshot,
 	transitionJob,
@@ -67,6 +68,22 @@ describe('queue-state helpers', () => {
 			workflow_id: 'agent-run.yml',
 		});
 		expect(isDryRunJob(job)).toBe(true);
+	});
+
+	it('detects self-test smoke trace jobs from the queue surface', () => {
+		const smokeJob = makeJob({
+			job_id: 'smoke-003',
+			operation_type: 'write_files',
+			target_paths: ['notes/smoke-003.txt'],
+		});
+		const normalJob = makeJob({
+			job_id: 'job-123',
+			operation_type: 'write_files',
+			target_paths: ['notes/todo.txt'],
+		});
+
+		expect(isSmokeTraceJob(smokeJob)).toBe(true);
+		expect(isSmokeTraceJob(normalJob)).toBe(false);
 	});
 
 	it('records workflow snapshot in the worker manifest', () => {

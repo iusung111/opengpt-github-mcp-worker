@@ -380,6 +380,11 @@ describe('runtime mcp surface', () => {
 				},
 			},
 		});
+		expect(
+			(
+				(openResult as { structuredContent?: { jobs?: Array<{ job_id?: string }> } }).structuredContent?.jobs ?? []
+			).some((job) => job.job_id === 'smoke-003'),
+		).toBe(false);
 
 		await client.callTool({
 			name: 'job_append_note',
