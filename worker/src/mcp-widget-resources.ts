@@ -25,7 +25,7 @@ function buildNotificationWidgetHtml(origin: string): string {
 <body>
 	<div id="notification-app" data-testid="notification-root"></div>
 	<script>window.__OPENGPT_GUI_CONFIG__ = ${config};</script>
-	<script src="${appUrl}" defer></script>
+	<script type="module" src="${appUrl}"></script>
 </body>
 </html>`;
 }

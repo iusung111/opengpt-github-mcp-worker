@@ -20,26 +20,46 @@
 	--idle-soft: #e6ebf0;
 	--shadow: 0 26px 60px rgba(75, 55, 35, 0.12);
 	--radius: 26px;
+	--safe-area-inset-top: 0px;
+	--safe-area-inset-right: 0px;
+	--safe-area-inset-bottom: 0px;
+	--safe-area-inset-left: 0px;
 }
 
 * {
 	box-sizing: border-box;
 }
 
+:root[data-theme='dark'] {
+	--bg: #101a1d;
+	--panel: rgba(18, 29, 33, 0.88);
+	--panel-strong: rgba(30, 43, 47, 0.94);
+	--panel-dark: #edf8f7;
+	--border: rgba(151, 173, 177, 0.18);
+	--text: #e8f2f1;
+	--muted: #a8babd;
+	--accent-soft: rgba(15, 118, 110, 0.2);
+	--shadow: 0 24px 48px rgba(0, 0, 0, 0.28);
+}
+
 body {
 	margin: 0;
-	color: var(--text);
-	font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+	color: var(--color-text-primary, var(--text));
+	font-family: var(--font-sans, "Segoe UI", "Noto Sans KR", sans-serif);
 	background:
 		radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 32%),
 		radial-gradient(circle at 90% 12%, rgba(180, 83, 9, 0.16), transparent 28%),
-		linear-gradient(180deg, #fbf6ef 0%, var(--bg) 100%);
+		linear-gradient(180deg, #fbf6ef 0%, var(--color-background-primary, var(--bg)) 100%);
 }
 
 #notification-app {
 	max-width: 1440px;
 	margin: 0 auto;
-	padding: 28px 18px 56px;
+	padding:
+		calc(28px + var(--safe-area-inset-top))
+		calc(18px + var(--safe-area-inset-right))
+		calc(56px + var(--safe-area-inset-bottom))
+		calc(18px + var(--safe-area-inset-left));
 }
 
 .app-shell {
@@ -49,9 +69,9 @@ body {
 
 .topbar,
 .panel {
-	border: 1px solid var(--border);
+	border: 1px solid var(--color-border-primary, var(--border));
 	border-radius: var(--radius);
-	background: var(--panel);
+	background: var(--color-background-secondary, var(--panel));
 	box-shadow: var(--shadow);
 	backdrop-filter: blur(14px);
 }
@@ -85,7 +105,7 @@ pre {
 
 h1 {
 	font-size: clamp(2.4rem, 4vw, 4.2rem);
-	font-family: Georgia, "Times New Roman", serif;
+	font-family: var(--font-display, Georgia, "Times New Roman", serif);
 	line-height: 0.94;
 }
 
@@ -99,7 +119,7 @@ h3 {
 
 .lede,
 .supporting-copy {
-	color: var(--muted);
+	color: var(--color-text-secondary, var(--muted));
 	line-height: 1.62;
 }
 
@@ -123,13 +143,18 @@ h3 {
 	min-width: min(100%, 460px);
 }
 
+.topbar-meta-wide {
+	grid-template-columns: repeat(4, minmax(140px, 1fr));
+	min-width: min(100%, 620px);
+}
+
 .topbar-card,
 .hero-metric,
 .count-card {
 	padding: 14px 16px;
 	border-radius: 18px;
-	background: rgba(255, 255, 255, 0.72);
-	border: 1px solid rgba(129, 92, 62, 0.12);
+	background: var(--color-background-primary, rgba(255, 255, 255, 0.72));
+	border: 1px solid var(--color-border-secondary, rgba(129, 92, 62, 0.12));
 }
 
 .topbar-card span,
@@ -140,7 +165,7 @@ h3 {
 .meta-row span {
 	display: block;
 	font-size: 0.84rem;
-	color: var(--muted);
+	color: var(--color-text-secondary, var(--muted));
 }
 
 .topbar-card strong,
@@ -186,8 +211,8 @@ input[type="number"] {
 .tab-button {
 	padding: 12px 18px;
 	border-radius: 999px;
-	background: rgba(255, 255, 255, 0.64);
-	color: var(--muted);
+	background: var(--color-background-primary, rgba(255, 255, 255, 0.64));
+	color: var(--color-text-secondary, var(--muted));
 	cursor: pointer;
 }
 
@@ -250,8 +275,8 @@ input[type="number"] {
 
 .metric-chip,
 .reference-pill {
-	background: var(--panel-strong);
-	color: var(--text);
+	background: var(--color-background-tertiary, var(--panel-strong));
+	color: var(--color-text-primary, var(--text));
 }
 
 .status-pill.running {
@@ -294,9 +319,9 @@ input[type="number"] {
 
 .action-button.secondary,
 .mini-button {
-	background: rgba(255, 255, 255, 0.7);
-	border-color: rgba(129, 92, 62, 0.14);
-	color: var(--text);
+	background: var(--color-background-primary, rgba(255, 255, 255, 0.7));
+	border-color: var(--color-border-secondary, rgba(129, 92, 62, 0.14));
+	color: var(--color-text-primary, var(--text));
 }
 
 .action-button:disabled,
@@ -313,9 +338,9 @@ select,
 input[type="number"] {
 	padding: 10px 12px;
 	border-radius: 16px;
-	border-color: rgba(129, 92, 62, 0.16);
-	background: rgba(255, 255, 255, 0.84);
-	color: var(--text);
+	border-color: var(--color-border-secondary, rgba(129, 92, 62, 0.16));
+	background: var(--color-background-primary, rgba(255, 255, 255, 0.84));
+	color: var(--color-text-primary, var(--text));
 }
 
 .table-shell {
@@ -355,8 +380,8 @@ input[type="number"] {
 .empty-card {
 	padding: 16px;
 	border-radius: 18px;
-	background: rgba(255, 255, 255, 0.68);
-	border: 1px solid rgba(129, 92, 62, 0.1);
+	background: var(--color-background-primary, rgba(255, 255, 255, 0.68));
+	border: 1px solid var(--color-border-secondary, rgba(129, 92, 62, 0.1));
 }
 
 .timeline-item {
@@ -396,7 +421,7 @@ input[type="number"] {
 }
 
 .empty-card {
-	color: var(--muted);
+	color: var(--color-text-secondary, var(--muted));
 }
 
 .capture-json {
@@ -422,7 +447,11 @@ input[type="number"] {
 
 @media (max-width: 720px) {
 	#notification-app {
-		padding-inline: 14px;
+		padding:
+			calc(24px + var(--safe-area-inset-top))
+			calc(14px + var(--safe-area-inset-right))
+			calc(48px + var(--safe-area-inset-bottom))
+			calc(14px + var(--safe-area-inset-left));
 	}
 
 	.topbar,
