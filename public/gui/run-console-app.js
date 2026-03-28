@@ -31,6 +31,7 @@ const STANDALONE_AUTH_STATE_STORAGE_KEY = 'opengpt.run-console.auth.pending';
 const ATTENTION_STATUSES = ['idle', 'pending_approval', 'running', 'paused', 'cancelled', 'interrupted', 'completed', 'failed'];
 const SOURCE_LAYERS = ['gpt', 'mcp', 'cloudflare', 'repo', 'system'];
 const POLL_INTERVAL_MS = 20000;
+const DASHBOARD_SORTS = ['recent', 'status', 'name'];
 
 const DEMO_ENVELOPES = [
 	{
@@ -284,6 +285,9 @@ const state = {
 		sourceLayer: '',
 		limit: 50,
 	},
+	dashboardSearch: '',
+	dashboardStatus: 'all',
+	dashboardSort: 'recent',
 	message: '',
 	error: '',
 	bridge: null,
@@ -291,6 +295,10 @@ const state = {
 	localSessionCounter: 1,
 	lastModelContextKey: '',
 	hostStatusAutoloaded: false,
+	notificationMenuOpen: false,
+	seenAlertKeys: {},
+	dismissedAlertKeys: {},
+	dismissedNotificationIds: {},
 	session: {
 		ready: false,
 		email: null,
@@ -408,6 +416,7 @@ function navigateToList() {
 	nextUrl.searchParams.delete('job');
 	nextUrl.searchParams.delete('tab');
 	window.history.pushState({}, '', nextUrl);
+	state.selectedJobId = '';
 	state.selectedNotificationId = '';
 	state.selectedLogId = '';
 	render();
@@ -944,6 +953,20 @@ function maybeEmitBrowserAlerts(jobs) {
 	state.alertSignatures = nextSignatures;
 }
 
+function primeBrowserAlertsBaseline(jobs = sortedJobs()) {
+	if (!Array.isArray(jobs) || !jobs.length) {
+		state.alertSignatures = {};
+		state.alertBaselineReady = false;
+		return;
+	}
+	const nextSignatures = {};
+	for (const job of jobs) {
+		nextSignatures[job.jobId] = jobAlertSignature(job);
+	}
+	state.alertSignatures = nextSignatures;
+	state.alertBaselineReady = true;
+}
+
 function openaiBridge() {
 	return window.openai && typeof window.openai === 'object' ? window.openai : null;
 }
@@ -969,6 +992,25 @@ function formatTime(value) {
 	}).format(date);
 }
 
+function formatRelativeTime(value) {
+	if (!value) return 'Unknown';
+	const date = new Date(value);
+	if (!Number.isFinite(date.getTime())) return String(value);
+	const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+	const absoluteSeconds = Math.abs(seconds);
+	if (absoluteSeconds < 60) {
+		return seconds >= 0 ? 'Soon' : 'Just now';
+	}
+	const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+	if (absoluteSeconds < 3600) {
+		return formatter.format(Math.round(seconds / 60), 'minute');
+	}
+	if (absoluteSeconds < 86400) {
+		return formatter.format(Math.round(seconds / 3600), 'hour');
+	}
+	return formatter.format(Math.round(seconds / 86400), 'day');
+}
+
 function selectedAttr(currentValue, optionValue) {
 	return currentValue === optionValue ? ' selected' : '';
 }
@@ -978,6 +1020,162 @@ function safeJson(value) {
 		return JSON.stringify(value, null, 2);
 	} catch {
 		return '{}';
+	}
+}
+
+function statusSortOrder(status) {
+	if (status === 'pending_approval') return 0;
+	if (status === 'interrupted') return 1;
+	if (status === 'failed') return 2;
+	if (status === 'running') return 3;
+	if (status === 'paused') return 4;
+	if (status === 'cancelled') return 5;
+	if (status === 'completed') return 6;
+	return 7;
+}
+
+function matchesDashboardSearch(job, query) {
+	if (!query) return true;
+	const candidate = [
+		job.jobId,
+		job.repo,
+		job.nextActor,
+		job.run && job.run.title,
+		job.run && job.run.lastEvent,
+		job.blockingState && job.blockingState.reason,
+	]
+		.filter(Boolean)
+		.join(' ')
+		.toLowerCase();
+	return candidate.includes(query.toLowerCase());
+}
+
+function dashboardJobs() {
+	const statusFilter = state.dashboardStatus;
+	const jobs = sortedJobs()
+		.filter((job) => matchesDashboardSearch(job, state.dashboardSearch))
+		.filter((job) => statusFilter === 'all' || jobAttentionStatus(job) === statusFilter);
+	if (state.dashboardSort === 'name') {
+		return jobs.sort((left, right) => {
+			const leftLabel = left.run && left.run.title ? left.run.title : left.jobId;
+			const rightLabel = right.run && right.run.title ? right.run.title : right.jobId;
+			return leftLabel.localeCompare(rightLabel);
+		});
+	}
+	if (state.dashboardSort === 'status') {
+		return jobs.sort((left, right) => {
+			const priority = statusSortOrder(jobAttentionStatus(left)) - statusSortOrder(jobAttentionStatus(right));
+			if (priority !== 0) return priority;
+			const leftTime = left.run?.updatedAt || left.updatedAt || '';
+			const rightTime = right.run?.updatedAt || right.updatedAt || '';
+			return String(rightTime).localeCompare(String(leftTime));
+		});
+	}
+	return jobs;
+}
+
+function iconSvg(path, className, viewBox = '0 0 24 24') {
+	return `<svg class="${className}" viewBox="${viewBox}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}" /></svg>`;
+}
+
+function bellIcon(className = 'icon') {
+	return iconSvg('M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5m6 0a3 3 0 0 1-6 0m6 0H9', className);
+}
+
+function searchIcon(className = 'icon') {
+	return iconSvg('m21 21-4.3-4.3M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z', className);
+}
+
+function closeIcon(className = 'icon') {
+	return iconSvg('M18 6 6 18M6 6l12 12', className);
+}
+
+function refreshIcon(className = 'icon') {
+	return iconSvg('M21 12a9 9 0 0 1-15.5 6.4M3 12A9 9 0 0 1 18.5 5.6M21 3v6h-6M3 21v-6h6', className);
+}
+
+function runIcon(className = 'icon') {
+	return `<svg class="${className}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m8 5 11 7-11 7Z"></path></svg>`;
+}
+
+function actionableStatus(status) {
+	return status === 'pending_approval' || status === 'interrupted' || status === 'failed';
+}
+
+function buildNotificationCenterItems() {
+	const items = [];
+	for (const job of sortedJobs()) {
+		const attention = jobAttentionStatus(job);
+		if (!actionableStatus(attention)) {
+			continue;
+		}
+		const notification = job.latestNotification;
+		const interrupt = currentInterrupt(job);
+		const approval = job.approval;
+		let title = notification && notification.title ? notification.title : job.run?.title || job.jobId;
+		let body = notification && notification.body ? notification.body : job.run?.lastEvent || 'Operator attention is required.';
+		let createdAt = notification && notification.createdAt ? notification.createdAt : job.run?.updatedAt || '';
+		let section = 'overview';
+		let key = `${attention}:${job.jobId}:${notification && notification.id ? notification.id : createdAt || 'state'}`;
+		if (attention === 'pending_approval') {
+			section = 'approval';
+			title = notification?.title || 'Approval requested';
+			body =
+				notification?.body ||
+				approval?.reason ||
+				job.blockingState?.reason ||
+				job.run?.approvalReason ||
+				job.run?.lastEvent ||
+				'Approval is required before the run can continue.';
+			createdAt = notification?.createdAt || approval?.requestedAt || job.run?.updatedAt || '';
+			key = `approval:${job.jobId}:${notification?.id || approval?.requestId || createdAt || 'pending'}`;
+		} else if (attention === 'interrupted') {
+			section = 'control';
+			title = notification?.title || interrupt?.kind || 'Run interrupted';
+			body =
+				notification?.body ||
+				interrupt?.message ||
+				job.blockingState?.reason ||
+				job.run?.lastEvent ||
+				'The run was interrupted and may need control action.';
+			createdAt = notification?.createdAt || interrupt?.recordedAt || job.run?.updatedAt || '';
+			key = `interrupted:${job.jobId}:${notification?.id || interrupt?.recordedAt || createdAt || 'interrupted'}`;
+		} else if (attention === 'failed') {
+			section = 'overview';
+			title = notification?.title || 'Run failed';
+			body = notification?.body || job.blockingState?.reason || job.run?.lastEvent || 'The run failed and needs operator attention.';
+			createdAt = notification?.createdAt || job.run?.updatedAt || '';
+			key = `failed:${job.jobId}:${notification?.id || createdAt || 'failed'}`;
+		}
+		const hidden =
+			Boolean(state.dismissedAlertKeys[key]) ||
+			(notification && notification.id ? Boolean(state.dismissedNotificationIds[notification.id]) : false);
+		if (hidden) {
+			continue;
+		}
+		items.push({
+			key,
+			jobId: job.jobId,
+			notificationId: notification?.id || '',
+			status: attention,
+			title,
+			body,
+			createdAt,
+			repo: job.repo || '',
+			runTitle: job.run?.title || job.jobId,
+			section,
+		});
+	}
+	return items.sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+}
+
+function unreadNotificationCount() {
+	return buildNotificationCenterItems().filter((item) => !state.seenAlertKeys[item.key]).length;
+}
+
+function markNotificationsSeen(items = buildNotificationCenterItems()) {
+	for (const item of items) {
+		state.seenAlertKeys[item.key] = true;
 	}
 }
 
@@ -2076,6 +2274,7 @@ async function runTool(name, args = {}, nextSection = state.focusSection, option
 			throw new Error(`${name} returned no widget payload`);
 		}
 		applyStructuredContent(envelope.structuredContent, envelope.meta, localSessionId);
+		maybeEmitBrowserAlerts(sortedJobs());
 		const derivedJobId = envelope.structuredContent ? deriveJobIdFromStructured(envelope.structuredContent) : '';
 		if (derivedJobId) {
 			state.selectedJobId = derivedJobId;
@@ -2115,7 +2314,6 @@ async function refreshCurrentRun(options = {}) {
 
 async function loadJobs(options = {}) {
 	await runTool('jobs_list', {}, 'overview', options);
-	maybeEmitBrowserAlerts(sortedJobs());
 }
 
 async function loadFeed(options = {}) {
@@ -2428,6 +2626,9 @@ function restoreViewState() {
 		if (typeof saved.approvalNote === 'string') state.approvalNote = saved.approvalNote;
 		if (typeof saved.controlNote === 'string') state.controlNote = saved.controlNote;
 		if (typeof saved.chatDraft === 'string') state.chatDraft = saved.chatDraft;
+		if (typeof saved.dashboardSearch === 'string') state.dashboardSearch = saved.dashboardSearch;
+		if (typeof saved.dashboardStatus === 'string') state.dashboardStatus = saved.dashboardStatus;
+		if (typeof saved.dashboardSort === 'string' && DASHBOARD_SORTS.includes(saved.dashboardSort)) state.dashboardSort = saved.dashboardSort;
 		if (hasRecord(saved.feedFilters)) {
 			state.feedFilters = {
 				status: typeof saved.feedFilters.status === 'string' ? saved.feedFilters.status : '',
@@ -2450,6 +2651,9 @@ function persistViewState() {
 				approvalNote: state.approvalNote,
 				controlNote: state.controlNote,
 				chatDraft: state.chatDraft,
+				dashboardSearch: state.dashboardSearch,
+				dashboardStatus: state.dashboardStatus,
+				dashboardSort: state.dashboardSort,
 				feedFilters: state.feedFilters,
 			}),
 		);
@@ -2459,7 +2663,7 @@ function persistViewState() {
 }
 
 function syncCapture() {
-	const job = currentJob();
+	const job = currentRouteJobId() ? currentJob() : null;
 	const latestSession = latestToolSession();
 	const summary = {
 		screen: job ? 'run-console-ready' : 'run-console-empty',
@@ -2513,6 +2717,7 @@ function aggregateRunCounts() {
 function filteredNotifications(job) {
 	if (!job) return [];
 	return job.feed.items
+		.filter((item) => !state.dismissedNotificationIds[item.id])
 		.filter((item) => !state.feedFilters.status || item.status === state.feedFilters.status)
 		.filter((item) => !state.feedFilters.sourceLayer || item.sourceLayer === state.feedFilters.sourceLayer)
 		.slice(0, state.feedFilters.limit);
@@ -3092,33 +3297,33 @@ function renderStandaloneAccessPanel() {
 		return '';
 	}
 	return `
-		<section class="panel action-panel auth-panel">
+		<section class="panel compact-panel utility-panel">
 			<div class="stack-header">
 				<p class="panel-kicker">Standalone Access</p>
 				<h2>Connect the web control API</h2>
-				<p class="supporting-copy">This page can drive queue status, approvals, and retry actions directly when Cloudflare Access is active in the browser, when you sign in with Auth0, or when you provide a bearer token manually.</p>
+				<p class="supporting-copy">Use browser login or a bearer token to keep queue control available outside the host bridge.</p>
 			</div>
-			<div class="split-grid">
-				<article class="detail-card">
+			<div class="utility-grid">
+				<article class="detail-card utility-card">
 					<div class="stack-header">
 						<p class="panel-kicker">Browser Login</p>
 						<h3>Auth0 sign-in</h3>
-						<p class="supporting-copy">Use the hosted login page to obtain a bearer token automatically in this browser.</p>
+						<p class="supporting-copy">Prefer browser login when OIDC is configured for the operator flow.</p>
 					</div>
 					<div class="action-row">
 						<button type="button" class="action-button" data-action="begin-browser-login"${buttonDisabledAttr(!state.auth.enabled || state.auth.loading)}>
-							${escapeHtml(state.auth.loading ? 'Loading login config...' : 'Sign in with Auth0')}
+							${escapeHtml(state.auth.loading ? 'Loading login config...' : 'Sign in')}
 						</button>
-						<button type="button" class="mini-button" data-action="retry-auth-config"${buttonDisabledAttr(state.auth.loading)}>Reload login config</button>
+						<button type="button" class="mini-button" data-action="retry-auth-config"${buttonDisabledAttr(state.auth.loading)}>Reload config</button>
 					</div>
 					${state.auth.error ? `<article class="empty-card">${escapeHtml(state.auth.error)}</article>` : ''}
-					${!state.auth.error && state.auth.missing.length ? `<article class="empty-card">Browser login is unavailable until ${escapeHtml(state.auth.missing.join(', '))} is configured.</article>` : ''}
+					${!state.auth.error && state.auth.missing.length ? `<article class="empty-card">Login is unavailable until ${escapeHtml(state.auth.missing.join(', '))} is configured.</article>` : ''}
 				</article>
-				<article class="detail-card">
+				<article class="detail-card utility-card">
 					<div class="stack-header">
 						<p class="panel-kicker">Manual Token</p>
 						<h3>Paste a bearer token</h3>
-						<p class="supporting-copy">Keep the manual path for environments where browser login is disabled or you want to use an existing ChatGPT MCP token.</p>
+						<p class="supporting-copy">Use this path when browser login is disabled or you already have an operator token.</p>
 					</div>
 					<div class="field-stack">
 						<label for="standalone-token">Bearer token</label>
@@ -3126,8 +3331,8 @@ function renderStandaloneAccessPanel() {
 					</div>
 					<div class="action-row">
 						<button type="button" class="action-button" data-action="save-standalone-token">Save token</button>
-						<button type="button" class="action-button secondary" data-action="retry-standalone-session">Retry connection</button>
-						<button type="button" class="mini-button" data-action="clear-standalone-token"${buttonDisabledAttr(!state.standaloneToken.trim())}>Clear token</button>
+						<button type="button" class="mini-button" data-action="retry-standalone-session">Retry</button>
+						<button type="button" class="mini-button" data-action="clear-standalone-token"${buttonDisabledAttr(!state.standaloneToken.trim())}>Clear</button>
 						<button type="button" class="mini-button" data-action="load-demo">Demo mode</button>
 					</div>
 				</article>
@@ -3138,11 +3343,12 @@ function renderStandaloneAccessPanel() {
 }
 
 function renderDashboardJobs() {
-	const jobs = sortedJobs();
+	const jobs = dashboardJobs();
+	const selectedJobId = currentRouteJobId();
 	if (!jobs.length) {
 		return `
 			<section class="panel info-panel">
-				<article class="empty-card">No tracked coding runs are available yet. Load queue jobs or open demo mode for a static preview.</article>
+				<article class="empty-card">No runs matched the current search or filter. Adjust the controls above or load demo data.</article>
 			</section>
 		`;
 	}
@@ -3150,32 +3356,35 @@ function renderDashboardJobs() {
 		<section class="panel info-panel">
 			<div class="stack-header">
 				<p class="panel-kicker">Coding Runs</p>
-				<h2>Project list</h2>
-				<p class="supporting-copy">The first screen stays compact: select a run or apply the one-click attention shortcut. Use the detail page for logs, approval history, and raw payloads.</p>
+				<h2>Run workspace</h2>
+				<p class="supporting-copy">Select a run card to open the operator panel, inspect logs, and execute the next control or approval action.</p>
 			</div>
 			<div class="job-grid">
 				${jobs
 					.map((job) => {
 						const attention = jobAttentionStatus(job);
 						const shortcutLabel = attentionShortcutLabel(job);
+						const controlState = job.control && job.control.state ? job.control.state : job.run?.controlState || 'active';
+						const isSelected = selectedJobId === job.jobId;
 						return `
-							<article class="job-card">
+							<article class="job-card${isSelected ? ' is-selected' : ''}" data-card-state="${escapeHtml(attention)}">
 								<div class="stack-header">
 									<div class="meta-row">
 										${statusPill(attention)}
 										${job.repo ? metricChip(job.repo) : ''}
+										${metricChip(`control ${controlState}`)}
 									</div>
 									<h3>${escapeHtml(job.run ? job.run.title : job.jobId)}</h3>
 									<p class="supporting-copy">${escapeHtml(job.run && job.run.lastEvent ? job.run.lastEvent : job.blockingState?.reason || 'No summary yet.')}</p>
 								</div>
 								<div class="detail-list">
 									<div><span>Job</span><strong>${escapeHtml(job.jobId)}</strong></div>
-									<div><span>Updated</span><strong>${escapeHtml(job.run?.updatedAt ? formatTime(job.run.updatedAt) : 'Unknown')}</strong></div>
+									<div><span>Updated</span><strong>${escapeHtml(job.run?.updatedAt ? formatRelativeTime(job.run.updatedAt) : 'Unknown')}</strong></div>
 									<div><span>Progress</span><strong>${escapeHtml(job.run ? `${job.run.progressPercent}%` : 'n/a')}</strong></div>
 									<div><span>Next</span><strong>${escapeHtml(job.nextActor || 'system')}</strong></div>
 								</div>
 								<div class="action-row">
-									<button type="button" class="action-button" data-action="open-job" data-job-id="${escapeHtml(job.jobId)}">Details</button>
+									<button type="button" class="action-button" data-select-job="${escapeHtml(job.jobId)}">${runIcon('inline-icon')}Open</button>
 									<button type="button" class="action-button secondary" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRunAttentionShortcut(job) || shortcutLabel === 'Open')}>${escapeHtml(shortcutLabel)}</button>
 								</div>
 							</article>
@@ -3380,18 +3589,178 @@ function renderDetailSection(job, host) {
 	return renderDetailOverview(job);
 }
 
+function renderNotificationCenter() {
+	const items = buildNotificationCenterItems();
+	const unread = unreadNotificationCount();
+	return `
+		<div class="notification-shell" data-notification-menu>
+			<button type="button" class="icon-button notification-button" data-action="toggle-notifications" aria-label="Open notifications" aria-expanded="${state.notificationMenuOpen ? 'true' : 'false'}">
+				${bellIcon('icon')}
+				${unread ? `<span class="notification-badge">${escapeHtml(unread)}</span>` : ''}
+			</button>
+			${
+				state.notificationMenuOpen
+					? `
+						<div class="notification-menu" data-notification-menu>
+							<div class="notification-menu-header">
+								<div>
+									<h3>Notifications</h3>
+									<p class="supporting-copy">${escapeHtml(items.length ? `${items.length} actionable alerts` : 'No notifications')}</p>
+								</div>
+								${items.length ? `<button type="button" class="mini-button" data-action="clear-notifications">Clear all</button>` : ''}
+							</div>
+							${
+								items.length
+									? `<div class="notification-list">
+										${items
+											.map(
+												(item) => `
+													<article class="notification-entry">
+														<button type="button" class="notification-entry-main" data-action="open-notification" data-alert-key="${escapeHtml(item.key)}" data-job-id="${escapeHtml(item.jobId)}" data-section-target="${escapeHtml(item.section)}"${item.notificationId ? ` data-notification-id="${escapeHtml(item.notificationId)}"` : ''}>
+															<div class="meta-row">
+																${statusPill(item.status)}
+																${item.repo ? metricChip(item.repo) : ''}
+																${metricChip(formatRelativeTime(item.createdAt))}
+															</div>
+															<h4>${escapeHtml(item.title)}</h4>
+															<p class="supporting-copy">${escapeHtml(item.body)}</p>
+														</button>
+														<button type="button" class="icon-button notification-dismiss" data-action="dismiss-notification" data-alert-key="${escapeHtml(item.key)}"${item.notificationId ? ` data-notification-id="${escapeHtml(item.notificationId)}"` : ''} aria-label="Dismiss notification">
+															${closeIcon('icon')}
+														</button>
+													</article>
+												`,
+											)
+											.join('')}
+									</div>`
+									: '<article class="empty-card">Approval waits, interrupted runs, and failures will appear here.</article>'
+							}
+						</div>
+					`
+					: ''
+			}
+		</div>
+	`;
+}
+
+function renderDashboardHeader() {
+	const counts = aggregateRunCounts();
+	const alertPermission = browserAlertsSupported() ? window.Notification.permission : 'unsupported';
+	const filteredRuns = dashboardJobs().length;
+	const totalRuns = sortedJobs().length;
+	const sessionLabel = state.session.email || currentBridgeLabel();
+	return `
+		<header class="topbar dashboard-topbar">
+			<div class="topbar-main">
+				<div class="topbar-brand">
+					<div class="brand-mark">${runIcon('brand-icon')}</div>
+					<div>
+						<h1>Run Console</h1>
+						<p class="brand-subtitle">MCP Worker Dashboard</p>
+					</div>
+				</div>
+				<div class="topbar-side">
+					<span class="run-counter">${escapeHtml(filteredRuns)}/${escapeHtml(totalRuns)} runs</span>
+					${renderNotificationCenter()}
+				</div>
+			</div>
+			<div class="topbar-toolbar">
+				<label class="header-search">
+					${searchIcon('icon')}
+					<input type="search" name="dashboard-search" value="${escapeHtml(state.dashboardSearch)}" placeholder="Search runs..." autocomplete="off" />
+				</label>
+				<div class="header-filters">
+					<select name="dashboard-status" aria-label="Filter runs by status">
+						<option value="all"${selectedAttr(state.dashboardStatus, 'all')}>All Status</option>
+						${ATTENTION_STATUSES.map((status) => `<option value="${escapeHtml(status)}"${selectedAttr(state.dashboardStatus, status)}>${escapeHtml(statusLabel(status))}</option>`).join('')}
+					</select>
+					<select name="dashboard-sort" aria-label="Sort runs">
+						<option value="name"${selectedAttr(state.dashboardSort, 'name')}>Sort: Name</option>
+						<option value="status"${selectedAttr(state.dashboardSort, 'status')}>Sort: Status</option>
+						<option value="recent"${selectedAttr(state.dashboardSort, 'recent')}>Sort: Recent</option>
+					</select>
+				</div>
+				<div class="topbar-actions">
+					<button type="button" class="action-button" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>${refreshIcon('inline-icon')}Load runs</button>
+					<button type="button" class="action-button secondary" data-action="retry-standalone-session"${buttonDisabledAttr(window.parent && window.parent !== window)}>Reconnect API</button>
+					<button type="button" class="mini-button" data-action="enable-alerts"${buttonDisabledAttr(!browserAlertsSupported() || alertPermission === 'granted')}>${escapeHtml(alertPermission === 'granted' ? 'Alerts enabled' : 'Enable alerts')}</button>
+					${renderStandaloneAuthAction()}
+				</div>
+			</div>
+			<div class="topbar-meta topbar-meta-wide">
+				<article class="topbar-card"><span>Bridge</span><strong>${escapeHtml(currentBridgeLabel())}</strong></article>
+				<article class="topbar-card"><span>Operator</span><strong>${escapeHtml(sessionLabel)}</strong></article>
+				<article class="topbar-card"><span>Open approvals</span><strong>${escapeHtml(Object.values(state.store.jobs).filter((entry) => entry.approval && entry.approval.status === 'requested').length)}</strong></article>
+				<article class="topbar-card"><span>Interrupted runs</span><strong>${escapeHtml(counts.interrupted)}</strong></article>
+			</div>
+		</header>
+	`;
+}
+
+function renderWorkspaceSummary() {
+	return `
+		<section class="panel hero-panel dashboard-summary">
+			<div class="hero-copy">
+				<p class="panel-kicker">Queue</p>
+				<h2>Project attention summary</h2>
+				<p class="supporting-copy">Approval waits, interrupted runs, failures, and queue control stay visible from one operator surface.</p>
+			</div>
+			<div class="hero-side">${renderCountsGrid(aggregateRunCounts())}</div>
+		</section>
+	`;
+}
+
+function renderWorkspaceDetailPane(job, host) {
+	const isOpen = Boolean(job);
+	return `
+		${isOpen ? '<button type="button" class="drawer-backdrop" data-action="close-detail" aria-label="Close detail panel"></button>' : ''}
+		<aside class="workspace-side${isOpen ? ' is-open' : ''}">
+			<div class="detail-pane">
+				${
+					job && job.run
+						? `
+							<div class="detail-pane-header">
+								<div class="stack-header">
+									<p class="panel-kicker">Run Detail</p>
+									<h2>${escapeHtml(job.run.title)}</h2>
+									<p class="supporting-copy">${escapeHtml(job.repo || job.jobId)}</p>
+								</div>
+								<div class="action-row inline-actions">
+									<button type="button" class="mini-button" data-action="refresh-run"${buttonDisabledAttr(!toolAvailable('job_progress') || !job)}>${refreshIcon('inline-icon')}Refresh</button>
+									<button type="button" class="icon-button" data-action="close-detail" aria-label="Close detail panel">${closeIcon('icon')}</button>
+								</div>
+							</div>
+							${renderNavigation()}
+							<div class="detail-pane-body">${renderDetailSection(job, host)}</div>
+						`
+						: `
+							<div class="detail-pane-empty">
+								<div class="empty-state-icon">${runIcon('brand-icon')}</div>
+								<h3>No run selected</h3>
+								<p class="supporting-copy">Click a run card to inspect logs, approvals, controls, and the next ChatGPT step.</p>
+							</div>
+						`
+				}
+			</div>
+		</aside>
+	`;
+}
+
 function render() {
-	const job = currentJob();
+	const job = currentRouteJobId() ? currentJob() : null;
 	const host = currentHostApi();
-	const page = currentPage();
 	root.innerHTML = `
 		<div class="app-shell">
-			${renderTopbar(state.store.host)}
+			${renderDashboardHeader()}
 			${state.message ? `<div class="banner info">${escapeHtml(state.message)}</div>` : ''}
 			${state.error ? `<div class="banner error">${escapeHtml(state.error)}</div>` : ''}
-			${renderNavigation()}
-			<div class="content-shell">
-				${page === 'detail' ? renderDetailSection(job, host) : renderDashboard()}
+			<div class="workspace-shell${job ? ' has-selection' : ''}">
+				<div class="workspace-main">
+					${renderWorkspaceSummary()}
+					${renderStandaloneAccessPanel()}
+					${renderDashboardJobs()}
+				</div>
+				${renderWorkspaceDetailPane(job, host)}
 			</div>
 			<p id="analysis-summary" class="supporting-copy"></p>
 			<pre class="capture-json" id="capture-json" hidden></pre>
@@ -3417,6 +3786,7 @@ function seedDemoStore() {
 	for (const envelope of DEMO_ENVELOPES) {
 		hydrateFromEnvelope(envelope);
 	}
+	primeBrowserAlertsBaseline();
 	state.message = 'Loaded standalone demo data. Connect from the MCP host to use live tools.';
 }
 
@@ -3438,6 +3808,9 @@ function hydrate() {
 		new URLSearchParams(window.location.search).get('demo') === '1'
 	) {
 		seedDemoStore();
+	}
+	if (!state.alertBaselineReady && sortedJobs().length) {
+		primeBrowserAlertsBaseline();
 	}
 	render();
 }
@@ -3498,6 +3871,7 @@ async function connectStandardBridge() {
 				const envelope = coerceToolEnvelope(result);
 				if (envelope) {
 					applyStructuredContent(envelope.structuredContent, envelope.meta, sessionId);
+					maybeEmitBrowserAlerts(sortedJobs());
 				}
 			}
 			render();
@@ -3557,10 +3931,10 @@ root.addEventListener('click', (event) => {
 		return;
 	}
 	if (target.dataset.selectJob) {
-		state.selectedJobId = target.dataset.selectJob;
 		state.selectedNotificationId = '';
 		state.selectedLogId = '';
-		render();
+		state.notificationMenuOpen = false;
+		navigateToJob(target.dataset.selectJob, 'overview');
 		void syncModelContext(false).catch((error) => console.warn(error));
 		return;
 	}
@@ -3578,6 +3952,49 @@ root.addEventListener('click', (event) => {
 		case 'load-jobs':
 			void loadJobs();
 			break;
+		case 'toggle-notifications':
+			state.notificationMenuOpen = !state.notificationMenuOpen;
+			if (state.notificationMenuOpen) {
+				markNotificationsSeen();
+			}
+			render();
+			break;
+		case 'clear-notifications':
+			for (const item of buildNotificationCenterItems()) {
+				state.dismissedAlertKeys[item.key] = true;
+				if (item.notificationId) {
+					state.dismissedNotificationIds[item.notificationId] = true;
+				}
+			}
+			state.notificationMenuOpen = false;
+			render();
+			break;
+		case 'dismiss-notification':
+			if (target.dataset.alertKey) {
+				state.dismissedAlertKeys[target.dataset.alertKey] = true;
+			}
+			if (target.dataset.notificationId) {
+				state.dismissedNotificationIds[target.dataset.notificationId] = true;
+			}
+			render();
+			break;
+		case 'open-notification': {
+			const sectionTarget = target.dataset.sectionTarget;
+			if (target.dataset.alertKey) {
+				state.seenAlertKeys[target.dataset.alertKey] = true;
+			}
+			if (target.dataset.notificationId) {
+				state.selectedNotificationId = target.dataset.notificationId;
+			}
+			state.notificationMenuOpen = false;
+			if (target.dataset.jobId) {
+				navigateToJob(target.dataset.jobId, sectionTarget || 'overview');
+				if (sectionTarget === 'activity') {
+					void loadFeed({ silent: true, keepSection: true });
+				}
+			}
+			break;
+		}
 		case 'open-job':
 			if (target.dataset.jobId) {
 				state.selectedJobId = target.dataset.jobId;
@@ -3587,6 +4004,8 @@ root.addEventListener('click', (event) => {
 			}
 			break;
 		case 'back-to-list':
+		case 'close-detail':
+			state.notificationMenuOpen = false;
 			navigateToList();
 			break;
 		case 'job-shortcut':
@@ -3683,6 +4102,7 @@ root.addEventListener('click', (event) => {
 			break;
 		case 'load-demo':
 			seedDemoStore();
+			state.notificationMenuOpen = false;
 			render();
 			break;
 		case 'send-chat-draft':
@@ -3699,10 +4119,23 @@ root.addEventListener('click', (event) => {
 	}
 });
 
+document.addEventListener('click', (event) => {
+	if (!state.notificationMenuOpen) {
+		return;
+	}
+	const target = event.target instanceof Element ? event.target : null;
+	if (target && target.closest('[data-notification-menu]')) {
+		return;
+	}
+	state.notificationMenuOpen = false;
+	render();
+});
+
 function handleMutableInput(target) {
 	if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
 		return;
 	}
+	let shouldRerender = false;
 	switch (target.name) {
 		case 'approval-note':
 			state.approvalNote = target.value;
@@ -3715,6 +4148,18 @@ function handleMutableInput(target) {
 			break;
 		case 'standalone-token':
 			state.standaloneToken = target.value;
+			break;
+		case 'dashboard-search':
+			state.dashboardSearch = target.value;
+			shouldRerender = true;
+			break;
+		case 'dashboard-status':
+			state.dashboardStatus = target.value;
+			shouldRerender = true;
+			break;
+		case 'dashboard-sort':
+			state.dashboardSort = DASHBOARD_SORTS.includes(target.value) ? target.value : 'recent';
+			shouldRerender = true;
 			break;
 		case 'feed-status':
 			state.feedFilters.status = target.value;
@@ -3729,6 +4174,9 @@ function handleMutableInput(target) {
 			return;
 	}
 	persistViewState();
+	if (shouldRerender) {
+		render();
+	}
 }
 
 root.addEventListener('input', (event) => {
@@ -3766,6 +4214,7 @@ window.addEventListener('openai:set_globals', (event) => {
 						: null;
 	if (payload) {
 		hydrateFromEnvelope(payload);
+		maybeEmitBrowserAlerts(sortedJobs());
 	}
 	render();
 });
