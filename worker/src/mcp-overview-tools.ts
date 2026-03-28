@@ -33,6 +33,15 @@ export interface ToolAnnotations extends Record<string, unknown> {
 	destructiveHint?: boolean;
 }
 
+const permissionBundleStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.permission_bundle'),
+		bundle: z.object({}).passthrough(),
+		notification: z.object({}).passthrough().nullable().optional(),
+		status: z.string().nullable().optional(),
+	})
+	.passthrough();
+
 function queueActionResult(
 	result: { ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null },
 	meta: Record<string, unknown>,
@@ -278,7 +287,7 @@ export function registerOverviewTools(
 	server.registerTool('help', { description: 'Explain what kinds of GitHub work this MCP server can do and return example request templates. Use this when the user asks what work is possible or how to phrase a request.', inputSchema: { query: z.string().optional() }, annotations: readAnnotations }, async ({ query }) => {
 		try { return toolText(ok(buildHelpPayload(query), readAnnotations)); } catch (error) { return toolText(fail(errorCodeFor(error, 'help_failed'), error, readAnnotations)); }
 	});
-	server.registerTool('request_permission_bundle', { description: 'Build a batch approval bundle for one or more repositories so the user can approve the smallest useful set of MCP actions in one step.', inputSchema: { repos: z.array(z.string()).min(1).describe('List of owner/repo'), preset: z.enum(listPermissionPresets().map((preset) => preset.id) as [string, ...string[]]).optional(), capabilities: z.array(z.enum(['read', 'write', 'workflow', 'review', 'workspace', 'queue', 'self_host'])).default([]), extra_tools: z.array(z.string()).default([]).describe('Optional extra tools to include explicitly'), reason: z.string().describe('Why are these permissions needed?'), job_id: z.string().optional(), blocked_action: z.string().optional() }, annotations: readAnnotations, _meta: { 'openai/toolInvocation/invoking': 'Preparing approval bundle', 'openai/toolInvocation/invoked': 'Approval bundle ready' } }, async ({ repos, preset, capabilities, extra_tools, reason, job_id, blocked_action }) => {
+	server.registerTool('request_permission_bundle', { description: 'Build a batch approval bundle for one or more repositories so the user can approve the smallest useful set of MCP actions in one step.', inputSchema: { repos: z.array(z.string()).min(1).describe('List of owner/repo'), preset: z.enum(listPermissionPresets().map((preset) => preset.id) as [string, ...string[]]).optional(), capabilities: z.array(z.enum(['read', 'write', 'workflow', 'review', 'workspace', 'queue', 'self_host'])).default([]), extra_tools: z.array(z.string()).default([]).describe('Optional extra tools to include explicitly'), reason: z.string().describe('Why are these permissions needed?'), job_id: z.string().optional(), blocked_action: z.string().optional() }, outputSchema: permissionBundleStructuredSchema, annotations: readAnnotations, _meta: { 'openai/toolInvocation/invoking': 'Preparing approval bundle', 'openai/toolInvocation/invoked': 'Approval bundle ready' } }, async ({ repos, preset, capabilities, extra_tools, reason, job_id, blocked_action }) => {
 		try {
 			let notification: Record<string, unknown> | null = null;
 			if (job_id) {
