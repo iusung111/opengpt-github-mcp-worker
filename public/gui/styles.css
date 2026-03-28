@@ -125,6 +125,7 @@ h3 {
 
 .topbar-meta,
 .split-grid,
+.detail-grid,
 .count-grid,
 .action-row,
 .detail-list,
@@ -261,6 +262,12 @@ input[type="number"] {
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.detail-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 18px;
+}
+
 .status-pill,
 .metric-chip,
 .reference-pill,
@@ -388,6 +395,18 @@ input[type="number"] {
 	grid-template-columns: 10px minmax(0, 1fr);
 }
 
+.selector-card {
+	width: 100%;
+	text-align: left;
+	font: inherit;
+	cursor: pointer;
+}
+
+.selector-card.is-selected {
+	border-color: rgba(15, 118, 110, 0.42);
+	box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.12);
+}
+
 .timeline-rail {
 	border-radius: 999px;
 }
@@ -424,6 +443,23 @@ input[type="number"] {
 	color: var(--color-text-secondary, var(--muted));
 }
 
+.detail-card,
+.detail-block {
+	display: grid;
+	gap: 12px;
+}
+
+.detail-json {
+	margin: 0;
+	padding: 14px;
+	border-radius: 16px;
+	background: rgba(21, 34, 34, 0.06);
+	color: var(--color-text-primary, var(--text));
+	font-size: 0.82rem;
+	line-height: 1.55;
+	overflow: auto;
+}
+
 .capture-json {
 	margin-top: 16px;
 	padding: 18px;
@@ -438,6 +474,7 @@ input[type="number"] {
 @media (max-width: 1100px) {
 	.hero-panel,
 	.split-grid,
+	.detail-grid,
 	.topbar-meta,
 	.hero-side,
 	.count-grid {

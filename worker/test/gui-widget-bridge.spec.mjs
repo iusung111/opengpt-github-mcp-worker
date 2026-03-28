@@ -4,6 +4,7 @@ import {
 	applyHostContextToDocument,
 	buildModelContextText,
 	createMcpUiBridge,
+	extractToolResultEnvelope,
 	readParentOrigin,
 } from '../../public/gui/bridge-core.mjs';
 
@@ -204,6 +205,50 @@ describe('gui widget bridge helpers', () => {
 		await expect(callPromise).resolves.toMatchObject({
 			structuredContent: {
 				kind: 'opengpt.notification_contract.jobs_list',
+			},
+		});
+		expect(
+			extractToolResultEnvelope({
+				structuredContent: {
+					kind: 'opengpt.notification_contract.jobs_list',
+				},
+				_meta: {
+					'opengpt/widget': {
+						kind: 'opengpt.notification_contract.jobs_list',
+					},
+				},
+			}),
+		).toMatchObject({
+			structuredContent: {
+				kind: 'opengpt.notification_contract.jobs_list',
+			},
+			meta: {
+				'opengpt/widget': {
+					kind: 'opengpt.notification_contract.jobs_list',
+				},
+			},
+		});
+		expect(
+			extractToolResultEnvelope({
+				result: {
+					structuredContent: {
+						kind: 'opengpt.notification_contract.job_progress',
+					},
+					_meta: {
+						'opengpt/widget': {
+							kind: 'opengpt.notification_contract.job_progress',
+						},
+					},
+				},
+			}),
+		).toMatchObject({
+			structuredContent: {
+				kind: 'opengpt.notification_contract.job_progress',
+			},
+			meta: {
+				'opengpt/widget': {
+					kind: 'opengpt.notification_contract.job_progress',
+				},
 			},
 		});
 

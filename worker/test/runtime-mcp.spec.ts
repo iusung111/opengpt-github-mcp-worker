@@ -243,11 +243,18 @@ describe('runtime mcp surface', () => {
 			'openai/toolInvocation/invoking': 'Collecting incident bundle',
 			'openai/toolInvocation/invoked': 'Incident bundle ready',
 		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'self_host_status')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Loading self host status',
+			'openai/toolInvocation/invoked': 'Self host status ready',
+		});
 		expect(tools.tools.find((tool) => tool.name === 'job_progress')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'jobs_list')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'job_event_feed')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'request_permission_bundle')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'incident_bundle_create')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'self_host_status')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'job_progress')?._meta).toMatchObject({
 			ui: {
 				resourceUri: widgetUri,
@@ -269,7 +276,7 @@ describe('runtime mcp surface', () => {
 		const widgetResource = resourceResult.contents.find((resource) => resource.uri === widgetUri);
 		expect(widgetResource).toBeTruthy();
 		expect(widgetResource).toMatchObject({
-			mimeType: 'text/html',
+			mimeType: 'text/html;profile=mcp-app',
 			_meta: {
 				ui: {
 					prefersBorder: true,
@@ -365,6 +372,11 @@ describe('runtime mcp surface', () => {
 		expect((eventFeedResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.job_event_feed',
 		});
+		expect((eventFeedResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
+			'opengpt/widget': {
+				kind: 'opengpt.notification_contract.job_event_feed',
+			},
+		});
 		const eventFeedText = 'text' in eventFeedResult.content[0] ? eventFeedResult.content[0].text : '';
 		expect(JSON.parse(eventFeedText)).toMatchObject({
 			ok: true,
@@ -374,6 +386,31 @@ describe('runtime mcp surface', () => {
 				counts: {
 					idle: expect.any(Number),
 				},
+			},
+		});
+
+		const selfHostStatusResult = await client.callTool({
+			name: 'self_host_status',
+			arguments: {
+				include_healthz: true,
+			},
+		});
+		expect((selfHostStatusResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.self_host_status',
+			self_repo_key: 'iusung111/opengpt-github-mcp-worker',
+			current_deploy: {
+				environment: expect.any(String),
+			},
+			workflow_allowlist: {
+				self_repo: expect.any(Array),
+			},
+			read_observability: {
+				counters: expect.any(Object),
+			},
+		});
+		expect((selfHostStatusResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
+			'opengpt/widget': {
+				kind: 'opengpt.notification_contract.self_host_status',
 			},
 		});
 

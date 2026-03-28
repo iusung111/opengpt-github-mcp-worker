@@ -56,13 +56,13 @@ export function registerWidgetResources(server: McpServer, env: AppEnv): void {
 		{
 			title: 'OpenGPT Notification Center',
 			description: 'Interactive queue run dashboard for notifications, approvals, and incident bundles.',
-			mimeType: 'text/html',
+			mimeType: 'text/html;profile=mcp-app',
 		},
 		async () => ({
 			contents: [
 				{
 					uri: NOTIFICATION_WIDGET_URI,
-					mimeType: 'text/html',
+					mimeType: 'text/html;profile=mcp-app',
 					text: buildNotificationWidgetHtml(origin),
 					_meta: {
 						ui: {
