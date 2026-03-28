@@ -100,19 +100,25 @@ function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, u
 			counts: data.counts,
 		};
 	}
-	if (hasRecord(data.notification) && hasRecord(data.bundle)) {
+	if (hasRecord(data.bundle) && typeof data.status === 'string') {
 		return {
 			kind: 'opengpt.notification_contract.permission_bundle',
-			notification: data.notification,
 			bundle: data.bundle,
+			notification: hasRecord(data.notification) ? data.notification : null,
 			status: data.status ?? null,
 		};
 	}
-	if (typeof data.bundle_id === 'string' && (Array.isArray(data.runs) || Array.isArray(data.layer_logs) || data.scope)) {
+	if (typeof data.bundle_id === 'string' && typeof data.repo === 'string') {
 		return {
 			kind: 'opengpt.notification_contract.incident_bundle',
 			bundle_id: data.bundle_id,
+			repo: data.repo,
 			scope: data.scope ?? 'job',
+			run_id: typeof data.run_id === 'number' ? data.run_id : undefined,
+			summary: hasRecord(data.summary) ? data.summary : null,
+			artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
+			preview: hasRecord(data.preview) ? data.preview : null,
+			browser: hasRecord(data.browser) ? data.browser : null,
 			runs: data.runs ?? null,
 			layer_logs: data.layer_logs ?? null,
 			error_logs: data.error_logs ?? null,

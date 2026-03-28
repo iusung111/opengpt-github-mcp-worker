@@ -72,6 +72,23 @@ function normalizeArtifacts(artifacts: Array<Record<string, unknown>>): string[]
 		.filter(Boolean);
 }
 
+const incidentBundleStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.incident_bundle'),
+		bundle_id: z.string(),
+		repo: z.string(),
+		scope: z.enum(['job', 'all_active']),
+		run_id: z.number().int().positive().optional(),
+		summary: z.object({}).passthrough().nullable().optional(),
+		artifacts: z.array(z.object({}).passthrough()).optional(),
+		preview: z.object({}).passthrough().nullable().optional(),
+		browser: z.object({}).passthrough().nullable().optional(),
+		runs: z.array(z.object({}).passthrough()).optional(),
+		layer_logs: z.array(z.object({}).passthrough()).optional(),
+		error_logs: z.array(z.object({}).passthrough()).optional(),
+	})
+	.passthrough();
+
 function firstObjectUrl(urls: Record<string, string>): string | null {
 	for (const value of Object.values(urls)) {
 		if (typeof value === 'string' && value.trim()) {
@@ -2105,6 +2122,7 @@ export function registerFullstackTools(
 				scope: z.enum(['job', 'all_active']).default('job'),
 				include_layer_logs: z.boolean().default(false),
 			},
+			outputSchema: incidentBundleStructuredSchema,
 			annotations: writeAnnotations,
 			_meta: {
 				'openai/toolInvocation/invoking': 'Collecting incident bundle',

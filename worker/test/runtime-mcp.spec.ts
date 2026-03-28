@@ -242,6 +242,11 @@ describe('runtime mcp surface', () => {
 			'openai/toolInvocation/invoking': 'Collecting incident bundle',
 			'openai/toolInvocation/invoked': 'Incident bundle ready',
 		});
+		expect(tools.tools.find((tool) => tool.name === 'job_progress')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'jobs_list')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'job_event_feed')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'request_permission_bundle')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'incident_bundle_create')?.outputSchema).toBeTruthy();
 
 		const createResult = await client.callTool({
 			name: 'job_create',

@@ -20,6 +20,90 @@ const notificationReadMeta = {
 	'openai/toolInvocation/invoked': 'Run status ready',
 } as const;
 
+const attentionStatusSchema = z.enum(['idle', 'pending_approval', 'running', 'completed', 'failed']);
+const sourceLayerSchema = z.enum(['gpt', 'mcp', 'cloudflare', 'repo', 'system']);
+const notificationCountsSchema = z
+	.object({
+		idle: z.number(),
+		pending_approval: z.number(),
+		running: z.number(),
+		completed: z.number(),
+		failed: z.number(),
+	})
+	.passthrough();
+const runSummarySchema = z
+	.object({
+		run_id: z.string(),
+		job_id: z.string().optional(),
+		status: attentionStatusSchema,
+	})
+	.passthrough();
+const blockingStateSchema = z
+	.object({
+		kind: z.enum(['none', 'approval', 'review', 'failure']),
+		reason: z.string().nullable().optional(),
+		blocked_action: z.string().nullable().optional(),
+		resume_hint: z.string().nullable().optional(),
+	})
+	.passthrough();
+const notificationItemSchema = z
+	.object({
+		id: z.string(),
+		job_id: z.string(),
+		run_id: z.string(),
+		status: attentionStatusSchema,
+		source_layer: sourceLayerSchema,
+	})
+	.passthrough();
+const layerLogEntrySchema = z
+	.object({
+		id: z.string(),
+		job_id: z.string(),
+		run_id: z.string(),
+		source_layer: sourceLayerSchema,
+		level: z.enum(['info', 'warning', 'error']),
+	})
+	.passthrough();
+const jobProgressStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.job_progress'),
+		progress: z
+			.object({
+				job_id: z.string(),
+				run_summary: runSummarySchema,
+				blocking_state: blockingStateSchema.optional(),
+				latest_notification: notificationItemSchema.nullable().optional(),
+				notification_counts: notificationCountsSchema.optional(),
+			})
+			.passthrough(),
+		run_summary: runSummarySchema,
+		blocking_state: blockingStateSchema.optional(),
+		latest_notification: notificationItemSchema.nullable().optional(),
+		notification_counts: notificationCountsSchema.optional(),
+	})
+	.passthrough();
+const jobsListStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.jobs_list'),
+		jobs: z.array(
+			z
+				.object({
+					job_id: z.string(),
+					run_summary: runSummarySchema.optional(),
+				})
+				.passthrough(),
+		),
+	})
+	.passthrough();
+const jobEventFeedStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.job_event_feed'),
+		items: z.array(notificationItemSchema),
+		logs: z.array(layerLogEntrySchema),
+		counts: notificationCountsSchema,
+	})
+	.passthrough();
+
 const reviewFindingSchema = z.object({
 	severity: z.enum(['low', 'medium', 'high', 'critical']),
 	file: z.string().min(1),
@@ -105,6 +189,7 @@ export function registerQueueTools(
 			inputSchema: {
 				job_id: z.string(),
 			},
+			outputSchema: jobProgressStructuredSchema,
 			annotations: readAnnotations,
 			_meta: notificationReadMeta,
 		},
@@ -126,6 +211,7 @@ export function registerQueueTools(
 				status: z.enum(['queued', 'working', 'review_pending', 'rework_pending', 'done', 'failed']).optional(),
 				next_actor: z.enum(['worker', 'reviewer', 'system']).optional(),
 			},
+			outputSchema: jobsListStructuredSchema,
 			annotations: readAnnotations,
 			_meta: notificationReadMeta,
 		},
@@ -151,6 +237,7 @@ export function registerQueueTools(
 				since: z.string().optional(),
 				limit: z.number().int().positive().max(200).default(50),
 			},
+			outputSchema: jobEventFeedStructuredSchema,
 			annotations: readAnnotations,
 			_meta: {
 				'openai/toolInvocation/invoking': 'Loading run events',
