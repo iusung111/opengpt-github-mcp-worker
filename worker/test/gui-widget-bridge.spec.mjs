@@ -207,6 +207,65 @@ describe('gui widget bridge helpers', () => {
 				kind: 'opengpt.notification_contract.jobs_list',
 			},
 		});
+		const messagePromise = bridge.sendMessage('Continue this run and use the queue tools as needed.');
+		expect(win.posted[3]).toMatchObject({
+			message: {
+				jsonrpc: '2.0',
+				id: 3,
+				method: 'ui/message',
+				params: {
+					role: 'user',
+					content: [{ type: 'text', text: 'Continue this run and use the queue tools as needed.' }],
+				},
+			},
+		});
+		win.dispatchMessage({
+			source: win.parent,
+			origin: 'https://chatgpt.com',
+			data: {
+				jsonrpc: '2.0',
+				id: 3,
+				result: {
+					ok: true,
+				},
+			},
+		});
+		await expect(messagePromise).resolves.toMatchObject({
+			ok: true,
+		});
+		const contextPromise = bridge.updateModelContext({
+			structuredContent: {
+				kind: 'opengpt.notification_widget.context',
+				job_id: 'job-1',
+			},
+		});
+		expect(win.posted[4]).toMatchObject({
+			message: {
+				jsonrpc: '2.0',
+				id: 4,
+				method: 'ui/update-model-context',
+				params: {
+					structuredContent: {
+						kind: 'opengpt.notification_widget.context',
+						job_id: 'job-1',
+					},
+				},
+			},
+		});
+		win.dispatchMessage({
+			source: win.parent,
+			origin: 'https://chatgpt.com',
+			data: {
+				jsonrpc: '2.0',
+				id: 4,
+				result: {
+					updated: true,
+				},
+			},
+		});
+		await expect(contextPromise).resolves.toMatchObject({
+			updated: true,
+		});
 		expect(
 			extractToolResultEnvelope({
 				structuredContent: {
@@ -321,6 +380,13 @@ describe('gui widget bridge helpers', () => {
 				title: 'Approval requested',
 				body: 'Need workflow access before continuing.',
 			},
+			permission_bundle: {
+				status: 'ready_for_approval',
+				bundle: {
+					repos: ['iusung111/OpenGPT'],
+					approval_request: 'Approve one MCP permission bundle for workflow dispatch.',
+				},
+			},
 			host: {
 				display_mode: 'inline',
 				platform: 'web',
@@ -331,5 +397,8 @@ describe('gui widget bridge helpers', () => {
 		expect(text).toContain('job-id: job-ctx-1');
 		expect(text).toContain('Blocked action: workflow_dispatch');
 		expect(text).toContain('Notification detail: Need workflow access before continuing.');
+		expect(text).toContain('Permission bundle status: ready_for_approval');
+		expect(text).toContain('Permission scope: iusung111/OpenGPT');
+		expect(text).toContain('Approval request: Approve one MCP permission bundle for workflow dispatch.');
 	});
 });
