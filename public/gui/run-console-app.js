@@ -32,6 +32,7 @@ const ATTENTION_STATUSES = ['idle', 'pending_approval', 'running', 'paused', 'ca
 const SOURCE_LAYERS = ['gpt', 'mcp', 'cloudflare', 'repo', 'system'];
 const POLL_INTERVAL_MS = 20000;
 const DASHBOARD_SORTS = ['recent', 'status', 'name'];
+const DETAIL_SECTIONS = ['logs', 'inputs', 'info'];
 
 const DEMO_ENVELOPES = [
 	{
@@ -276,7 +277,7 @@ const state = {
 	selectedJobId: '',
 	selectedNotificationId: '',
 	selectedLogId: '',
-	focusSection: 'overview',
+	focusSection: 'logs',
 	approvalNote: '',
 	controlNote: '',
 	chatDraft: '',
@@ -296,6 +297,7 @@ const state = {
 	lastModelContextKey: '',
 	hostStatusAutoloaded: false,
 	notificationMenuOpen: false,
+	utilityMenuOpen: false,
 	seenAlertKeys: {},
 	dismissedAlertKeys: {},
 	dismissedNotificationIds: {},
@@ -399,6 +401,15 @@ function currentPage() {
 	return currentRouteJobId() ? 'detail' : 'list';
 }
 
+function normalizeDetailSection(value) {
+	if (DETAIL_SECTIONS.includes(value)) {
+		return value;
+	}
+	if (value === 'activity') return 'logs';
+	if (value === 'approval' || value === 'control' || value === 'overview' || value === 'chat') return 'info';
+	return 'logs';
+}
+
 function syncRouteStateFromLocation() {
 	const jobId = currentRouteJobId();
 	const params = new URLSearchParams(window.location.search);
@@ -406,9 +417,7 @@ function syncRouteStateFromLocation() {
 	if (jobId) {
 		state.selectedJobId = jobId;
 	}
-	if (tab === 'overview' || tab === 'activity' || tab === 'approval' || tab === 'control' || tab === 'chat') {
-		state.focusSection = tab;
-	}
+	state.focusSection = normalizeDetailSection(tab);
 }
 
 function navigateToList() {
@@ -424,12 +433,13 @@ function navigateToList() {
 
 function navigateToJob(jobId, nextSection = state.focusSection) {
 	if (!jobId) return;
+	const detailSection = normalizeDetailSection(nextSection);
 	const nextUrl = new URL(window.location.href);
 	nextUrl.searchParams.set('job', jobId);
-	nextUrl.searchParams.set('tab', nextSection || 'overview');
+	nextUrl.searchParams.set('tab', detailSection);
 	window.history.pushState({}, '', nextUrl);
 	state.selectedJobId = jobId;
-	state.focusSection = nextSection || 'overview';
+	state.focusSection = detailSection;
 	render();
 }
 
@@ -1094,6 +1104,10 @@ function refreshIcon(className = 'icon') {
 	return iconSvg('M21 12a9 9 0 0 1-15.5 6.4M3 12A9 9 0 0 1 18.5 5.6M21 3v6h-6M3 21v-6h6', className);
 }
 
+function clockIcon(className = 'icon') {
+	return iconSvg('M12 7v5l3 3M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z', className);
+}
+
 function runIcon(className = 'icon') {
 	return `<svg class="${className}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m8 5 11 7-11 7Z"></path></svg>`;
 }
@@ -1115,10 +1129,10 @@ function buildNotificationCenterItems() {
 		let title = notification && notification.title ? notification.title : job.run?.title || job.jobId;
 		let body = notification && notification.body ? notification.body : job.run?.lastEvent || 'Operator attention is required.';
 		let createdAt = notification && notification.createdAt ? notification.createdAt : job.run?.updatedAt || '';
-		let section = 'overview';
+		let section = 'info';
 		let key = `${attention}:${job.jobId}:${notification && notification.id ? notification.id : createdAt || 'state'}`;
 		if (attention === 'pending_approval') {
-			section = 'approval';
+			section = 'info';
 			title = notification?.title || 'Approval requested';
 			body =
 				notification?.body ||
@@ -1130,7 +1144,7 @@ function buildNotificationCenterItems() {
 			createdAt = notification?.createdAt || approval?.requestedAt || job.run?.updatedAt || '';
 			key = `approval:${job.jobId}:${notification?.id || approval?.requestId || createdAt || 'pending'}`;
 		} else if (attention === 'interrupted') {
-			section = 'control';
+			section = 'logs';
 			title = notification?.title || interrupt?.kind || 'Run interrupted';
 			body =
 				notification?.body ||
@@ -1141,7 +1155,7 @@ function buildNotificationCenterItems() {
 			createdAt = notification?.createdAt || interrupt?.recordedAt || job.run?.updatedAt || '';
 			key = `interrupted:${job.jobId}:${notification?.id || interrupt?.recordedAt || createdAt || 'interrupted'}`;
 		} else if (attention === 'failed') {
-			section = 'overview';
+			section = 'info';
 			title = notification?.title || 'Run failed';
 			body = notification?.body || job.blockingState?.reason || job.run?.lastEvent || 'The run failed and needs operator attention.';
 			createdAt = notification?.createdAt || job.run?.updatedAt || '';
@@ -2622,7 +2636,7 @@ function restoreViewState() {
 		const saved = JSON.parse(raw);
 		if (!hasRecord(saved)) return;
 		if (typeof saved.selectedJobId === 'string') state.selectedJobId = saved.selectedJobId;
-		if (typeof saved.focusSection === 'string') state.focusSection = saved.focusSection;
+		if (typeof saved.focusSection === 'string') state.focusSection = normalizeDetailSection(saved.focusSection);
 		if (typeof saved.approvalNote === 'string') state.approvalNote = saved.approvalNote;
 		if (typeof saved.controlNote === 'string') state.controlNote = saved.controlNote;
 		if (typeof saved.chatDraft === 'string') state.chatDraft = saved.chatDraft;
@@ -2742,6 +2756,53 @@ function selectedLog(job) {
 	return logs.find((entry) => entry.id === state.selectedLogId) || logs[0];
 }
 
+function buildDetailLogLines(job) {
+	if (!job) return [];
+	const lines = [];
+	for (const item of filteredNotifications(job)) {
+		lines.push({
+			id: item.id,
+			kind: 'notification',
+			createdAt: item.createdAt || '',
+			tone: statusTone(item.status),
+			prefix: `[${formatTime(item.createdAt)}] [${item.status}]`,
+			text: `${item.title}${item.body ? ` - ${item.body}` : ''}`,
+		});
+	}
+	for (const entry of filteredLogs(job)) {
+		lines.push({
+			id: entry.id,
+			kind: 'log',
+			createdAt: entry.createdAt || '',
+			tone: entry.level === 'error' ? 'failed' : entry.level === 'warning' ? 'running' : 'idle',
+			prefix: `[${formatTime(entry.createdAt)}] [${entry.level}]`,
+			text: entry.message || 'No message',
+		});
+	}
+	return lines.sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+}
+
+function renderKeyValueList(rows, emptyMessage = 'No structured data available.') {
+	const resolvedRows = rows.filter((row) => row && row.value != null && String(row.value).trim());
+	if (!resolvedRows.length) {
+		return `<article class="empty-card">${escapeHtml(emptyMessage)}</article>`;
+	}
+	return `
+		<div class="kv-list">
+			${resolvedRows
+				.map(
+					(row) => `
+						<div class="kv-row">
+							<span>${escapeHtml(row.label)}</span>
+							<strong>${escapeHtml(row.value)}</strong>
+						</div>
+					`,
+				)
+				.join('')}
+		</div>
+	`;
+}
+
 function renderKnownRuns() {
 	const jobs = sortedJobs();
 	return `
@@ -2798,7 +2859,7 @@ function renderHostFacts(host) {
 			<div class="stack-header">
 				<p class="panel-kicker">Host Facts</p>
 				<h3>Negotiated bridge and deploy facts</h3>
-				<p class="supporting-copy">Action availability is driven from the active host capability negotiation instead of raw function presence checks.</p>
+				<p class="supporting-copy">Capabilities and deploy identity are summarized here for the active host.</p>
 			</div>
 			<div class="detail-list">
 				<div><span>Bridge</span><strong>${escapeHtml(currentBridgeLabel())}</strong></div>
@@ -2816,14 +2877,20 @@ function renderHostFacts(host) {
 			</div>
 			${
 				currentUrl
-					? `<pre class="detail-json">${escapeHtml(
-							safeJson({
-								current_url: currentUrl,
-								live: status && status.live ? status.live : null,
-								mirror: status && status.mirror ? status.mirror : null,
-								warnings: status && status.warnings ? status.warnings : [],
-							}),
-					  )}</pre>`
+					? `
+						<p class="supporting-copy detail-url">${escapeHtml(currentUrl)}</p>
+						<details class="detail-disclosure">
+							<summary>View deploy payload</summary>
+							<pre class="detail-json">${escapeHtml(
+								safeJson({
+									current_url: currentUrl,
+									live: status && status.live ? status.live : null,
+									mirror: status && status.mirror ? status.mirror : null,
+									warnings: status && status.warnings ? status.warnings : [],
+								}),
+							)}</pre>
+						</details>
+					`
 					: '<article class="empty-card">No host deployment payload has been loaded yet.</article>'
 			}
 		</div>
@@ -2855,7 +2922,10 @@ function renderLatestToolSession(job) {
 				${session.resultKind ? metricChip(session.resultKind.replace('opengpt.notification_contract.', '')) : ''}
 			</div>
 			<p class="supporting-copy">${escapeHtml(session.nextStep || 'Inspect the result and choose the next operator action.')}</p>
-			<pre class="detail-json">${escapeHtml(safeJson(session.args || {}))}</pre>
+			<details class="detail-disclosure">
+				<summary>View session payload</summary>
+				<pre class="detail-json">${escapeHtml(safeJson(session.args || {}))}</pre>
+			</details>
 		</div>
 	`;
 }
@@ -3276,12 +3346,26 @@ function canRunAttentionShortcut(job) {
 	return toolAvailable('job_control');
 }
 
+function quickActionLabel(job) {
+	if (!job) return 'Run';
+	if (jobAttentionStatus(job) === 'running') return 'Running...';
+	const shortcut = attentionShortcutLabel(job);
+	if (shortcut === 'Approve & Continue') return 'Approve';
+	return shortcut === 'Open' ? 'Run' : shortcut;
+}
+
+function canRunQuickAction(job) {
+	if (!job) return false;
+	if (jobAttentionStatus(job) === 'running') return false;
+	return canRunAttentionShortcut(job) && attentionShortcutLabel(job) !== 'Open';
+}
+
 function renderStandaloneAuthAction() {
 	if (window.parent && window.parent !== window) {
 		return '';
 	}
-	if (state.standaloneToken.trim()) {
-		return `<button type="button" class="mini-button" data-action="browser-logout">Log out</button>`;
+	if (state.session.ready || state.standaloneToken.trim()) {
+		return '<button type="button" class="mini-button" data-action="browser-logout">Log out</button>';
 	}
 	if (state.auth.enabled) {
 		return `<button type="button" class="mini-button" data-action="begin-browser-login"${buttonDisabledAttr(state.auth.loading)}>Log in</button>`;
@@ -3348,50 +3432,46 @@ function renderDashboardJobs() {
 	if (!jobs.length) {
 		return `
 			<section class="panel info-panel">
-				<article class="empty-card">No runs matched the current search or filter. Adjust the controls above or load demo data.</article>
+				<article class="empty-card">No runs matched the current search or filter.</article>
 			</section>
 		`;
 	}
 	return `
-		<section class="panel info-panel">
-			<div class="stack-header">
-				<p class="panel-kicker">Coding Runs</p>
-				<h2>Run workspace</h2>
-				<p class="supporting-copy">Select a run card to open the operator panel, inspect logs, and execute the next control or approval action.</p>
-			</div>
-			<div class="job-grid">
-				${jobs
-					.map((job) => {
-						const attention = jobAttentionStatus(job);
-						const shortcutLabel = attentionShortcutLabel(job);
-						const controlState = job.control && job.control.state ? job.control.state : job.run?.controlState || 'active';
-						const isSelected = selectedJobId === job.jobId;
-						return `
-							<article class="job-card${isSelected ? ' is-selected' : ''}" data-card-state="${escapeHtml(attention)}">
-								<div class="stack-header">
+		<section class="job-grid" aria-label="Run list">
+			${jobs
+				.map((job) => {
+					const attention = jobAttentionStatus(job);
+					const isSelected = selectedJobId === job.jobId;
+					const canRun = canRunQuickAction(job);
+					const quickLabel = quickActionLabel(job);
+					const categories = [job.repo, job.nextActor ? `next:${job.nextActor}` : ''].filter(Boolean);
+					return `
+						<article class="job-card${isSelected ? ' is-selected' : ''}" data-select-job="${escapeHtml(job.jobId)}" data-card-state="${escapeHtml(attention)}" tabindex="0" role="button" aria-label="${escapeHtml(job.run ? job.run.title : job.jobId)}">
+							<div class="job-card-main">
+								<div class="job-card-copy">
+									<div class="job-card-heading">
+										<h3>${escapeHtml(job.run ? job.run.title : job.jobId)}</h3>
+									</div>
+									<p class="supporting-copy">${escapeHtml(job.run && job.run.lastEvent ? job.run.lastEvent : job.blockingState?.reason || 'No summary yet.')}</p>
 									<div class="meta-row">
 										${statusPill(attention)}
-										${job.repo ? metricChip(job.repo) : ''}
-										${metricChip(`control ${controlState}`)}
+										${categories
+											.map((label) => `<span class="run-category">${escapeHtml(label)}</span>`)
+											.join('')}
 									</div>
-									<h3>${escapeHtml(job.run ? job.run.title : job.jobId)}</h3>
-									<p class="supporting-copy">${escapeHtml(job.run && job.run.lastEvent ? job.run.lastEvent : job.blockingState?.reason || 'No summary yet.')}</p>
 								</div>
-								<div class="detail-list">
-									<div><span>Job</span><strong>${escapeHtml(job.jobId)}</strong></div>
-									<div><span>Updated</span><strong>${escapeHtml(job.run?.updatedAt ? formatRelativeTime(job.run.updatedAt) : 'Unknown')}</strong></div>
-									<div><span>Progress</span><strong>${escapeHtml(job.run ? `${job.run.progressPercent}%` : 'n/a')}</strong></div>
-									<div><span>Next</span><strong>${escapeHtml(job.nextActor || 'system')}</strong></div>
+								<div class="job-card-actions">
+									<button type="button" class="card-run-button" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRun)}>${runIcon('inline-icon')}${escapeHtml(quickLabel)}</button>
 								</div>
-								<div class="action-row">
-									<button type="button" class="action-button" data-select-job="${escapeHtml(job.jobId)}">${runIcon('inline-icon')}Open</button>
-									<button type="button" class="action-button secondary" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRunAttentionShortcut(job) || shortcutLabel === 'Open')}>${escapeHtml(shortcutLabel)}</button>
-								</div>
-							</article>
-						`;
-					})
-					.join('')}
-			</div>
+							</div>
+							<div class="job-card-footer">
+								<span>${clockIcon('inline-icon')}Updated ${escapeHtml(job.run?.updatedAt ? formatRelativeTime(job.run.updatedAt) : 'Unknown')}</span>
+								${job.run && job.run.progressPercent != null ? `<span class="mono-copy">${escapeHtml(`${job.run.progressPercent}%`)}</span>` : ''}
+							</div>
+						</article>
+					`;
+				})
+				.join('')}
 		</section>
 	`;
 }
@@ -3399,51 +3479,110 @@ function renderDashboardJobs() {
 function renderDetailOverview(job) {
 	if (!job || !job.run) {
 		return `
-			<section class="panel hero-panel">
-				<div class="hero-copy">
-					<p class="panel-kicker">Overview</p>
-					<h2>Run not loaded</h2>
-					<p class="supporting-copy">Return to the list and reload queue jobs, or keep the current URL and wait for the next poll cycle.</p>
-					<div class="action-row">
-						<button type="button" class="action-button" data-action="back-to-list">Back to list</button>
-						<button type="button" class="action-button secondary" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>Reload list</button>
-					</div>
-				</div>
-				<div class="hero-side">${renderCountsGrid(aggregateRunCounts())}</div>
+			<section class="detail-tab-panel">
+				<article class="empty-card">No run metadata is available yet.</article>
 			</section>
 		`;
 	}
-	const controlState = job.control && job.control.state ? job.control.state : job.run.controlState || 'active';
-	const attention = jobAttentionStatus(job);
-	const blocker =
-		job.blockingState && job.blockingState.kind && job.blockingState.kind !== 'none'
-			? `${job.blockingState.kind}: ${job.blockingState.reason || 'Operator action required.'}`
-			: 'No blocking state is currently active.';
 	return `
-		<section class="panel hero-panel" id="section-overview" data-section="overview">
-			<div class="hero-copy">
-				<p class="panel-kicker">Overview</p>
-				<h2>${escapeHtml(job.run.title)}</h2>
-				<div class="hero-inline">
-					${statusPill(attention)}
-					${metricChip(`control ${controlState}`)}
-					${job.repo ? metricChip(job.repo) : ''}
+		<section class="detail-tab-panel">
+			<div class="detail-card simple-card">
+				<div class="stack-header">
+					<p class="panel-kicker">Info</p>
+					<h3>Run metadata</h3>
 				</div>
-				<p class="lede">${escapeHtml(job.run.lastEvent || blocker)}</p>
-				<p class="supporting-copy">${escapeHtml(blocker)}</p>
-				${renderReferences(job)}
-				<div class="topbar-meta">
-					<article class="hero-metric"><span>Progress</span><strong>${escapeHtml(job.run.progressPercent)}%</strong></article>
-					<article class="hero-metric"><span>Updated</span><strong>${escapeHtml(formatTime(job.run.updatedAt))}</strong></article>
-					<article class="hero-metric"><span>Next actor</span><strong>${escapeHtml(job.nextActor || 'system')}</strong></article>
+				${renderKeyValueList([
+					{ label: 'Status', value: statusLabel(jobAttentionStatus(job)) },
+					{ label: 'Control', value: job.control && job.control.state ? job.control.state : job.run.controlState || 'active' },
+					{ label: 'Updated', value: formatTime(job.run.updatedAt) },
+					{ label: 'Progress', value: `${job.run.progressPercent}%` },
+					{ label: 'Workflow', value: job.run.workflowRunId != null ? `#${job.run.workflowRunId}` : '' },
+					{ label: 'Preview', value: job.run.previewId || '' },
+					{ label: 'Approval', value: job.approval && job.approval.requestId ? job.approval.requestId : '' },
+					{ label: 'Next actor', value: job.nextActor || 'system' },
+				])}
+			</div>
+			<div class="detail-card simple-card">
+				<div class="stack-header">
+					<p class="panel-kicker">Environment</p>
+					<h3>Host state</h3>
+				</div>
+				${renderKeyValueList([
+					{ label: 'Bridge', value: currentBridgeLabel() },
+					{ label: 'Operator', value: state.session.email || '' },
+					{ label: 'Deploy env', value: state.store.host.currentDeploy?.environment || '' },
+					{ label: 'Current URL', value: state.store.host.currentDeploy?.currentUrl || '' },
+					{ label: 'Release', value: state.store.host.currentDeploy?.releaseCommitSha || '' },
+				], 'Host metadata has not been loaded yet.')}
+			</div>
+		</section>
+	`;
+}
+
+function renderDetailLogs(job) {
+	if (!job || !job.run) {
+		return `
+			<section class="detail-tab-panel">
+				<article class="empty-card">No logs available yet.</article>
+			</section>
+		`;
+	}
+	const lines = buildDetailLogLines(job);
+	return `
+		<section class="detail-tab-panel">
+			<div class="detail-card simple-card">
+				<div class="stack-header">
+					<p class="panel-kicker">Logs</p>
+					<h3>Run activity</h3>
+					<p class="supporting-copy">Notifications and layer logs for the selected run are merged into a single console view.</p>
+				</div>
+				<div class="console-block">
+					${
+						lines.length
+							? lines
+									.map(
+										(line) => `
+											<div class="console-line ${escapeHtml(line.tone)}">
+												<span class="console-prefix">${escapeHtml(line.prefix)}</span>
+												<span>${escapeHtml(line.text)}</span>
+											</div>
+										`,
+									)
+									.join('')
+							: '<p class="console-empty">No logs available yet.</p>'
+					}
 				</div>
 			</div>
-			<div class="hero-side">${renderCountsGrid(job.feed.counts)}</div>
 		</section>
-		<section class="panel info-panel">
-			<div class="split-grid">
-				${renderHostFacts(state.store.host)}
-				${renderLatestToolSession(job)}
+	`;
+}
+
+function renderDetailInputs(job) {
+	if (!job || !job.run) {
+		return `
+			<section class="detail-tab-panel">
+				<article class="empty-card">No run inputs are available yet.</article>
+			</section>
+		`;
+	}
+	const targetPaths = Array.isArray(job.targetPaths) ? job.targetPaths.filter(Boolean) : [];
+	return `
+		<section class="detail-tab-panel">
+			<div class="detail-card simple-card">
+				<div class="stack-header">
+					<p class="panel-kicker">Inputs</p>
+					<h3>Current run inputs</h3>
+				</div>
+				${renderKeyValueList([
+					{ label: 'Job ID', value: job.jobId },
+					{ label: 'Repo', value: job.repo || '' },
+					{ label: 'Run ID', value: job.run.runId || '' },
+					{ label: 'Blocked action', value: job.blockingState?.blockedAction || '' },
+					{ label: 'Reason', value: job.blockingState?.reason || '' },
+					{ label: 'Approval request', value: job.approval && job.approval.requestId ? job.approval.requestId : '' },
+					{ label: 'Latest notification', value: job.latestNotification?.title || '' },
+					{ label: 'Target paths', value: targetPaths.join(', ') },
+				])}
 			</div>
 		</section>
 	`;
@@ -3547,14 +3686,12 @@ function renderNavigation() {
 		return '';
 	}
 	const tabs = [
-		['overview', 'Overview'],
-		['activity', 'Activity'],
-		['approval', 'Approval'],
-		['control', 'Control'],
-		['chat', 'Chat'],
+		['logs', 'Logs'],
+		['inputs', 'Inputs'],
+		['info', 'Info'],
 	];
 	return `
-		<nav class="tab-row" aria-label="Run console sections">
+		<nav class="tab-row detail-tab-row" aria-label="Run console sections">
 			${tabs
 				.map(
 					([key, label]) => `
@@ -3582,10 +3719,8 @@ function renderDashboard() {
 }
 
 function renderDetailSection(job, host) {
-	if (state.focusSection === 'activity') return renderActivity(job);
-	if (state.focusSection === 'approval') return renderApproval(job, host);
-	if (state.focusSection === 'control') return renderControl(job, host);
-	if (state.focusSection === 'chat') return renderChat(job, host);
+	if (state.focusSection === 'logs') return renderDetailLogs(job);
+	if (state.focusSection === 'inputs') return renderDetailInputs(job);
 	return renderDetailOverview(job);
 }
 
@@ -3603,11 +3738,7 @@ function renderNotificationCenter() {
 					? `
 						<div class="notification-menu" data-notification-menu>
 							<div class="notification-menu-header">
-								<div>
-									<h3>Notifications</h3>
-									<p class="supporting-copy">${escapeHtml(items.length ? `${items.length} actionable alerts` : 'No notifications')}</p>
-								</div>
-								${items.length ? `<button type="button" class="mini-button" data-action="clear-notifications">Clear all</button>` : ''}
+								<h3>Notifications</h3>
 							</div>
 							${
 								items.length
@@ -3615,25 +3746,15 @@ function renderNotificationCenter() {
 										${items
 											.map(
 												(item) => `
-													<article class="notification-entry">
-														<button type="button" class="notification-entry-main" data-action="open-notification" data-alert-key="${escapeHtml(item.key)}" data-job-id="${escapeHtml(item.jobId)}" data-section-target="${escapeHtml(item.section)}"${item.notificationId ? ` data-notification-id="${escapeHtml(item.notificationId)}"` : ''}>
-															<div class="meta-row">
-																${statusPill(item.status)}
-																${item.repo ? metricChip(item.repo) : ''}
-																${metricChip(formatRelativeTime(item.createdAt))}
-															</div>
-															<h4>${escapeHtml(item.title)}</h4>
-															<p class="supporting-copy">${escapeHtml(item.body)}</p>
-														</button>
-														<button type="button" class="icon-button notification-dismiss" data-action="dismiss-notification" data-alert-key="${escapeHtml(item.key)}"${item.notificationId ? ` data-notification-id="${escapeHtml(item.notificationId)}"` : ''} aria-label="Dismiss notification">
-															${closeIcon('icon')}
-														</button>
-													</article>
+													<button type="button" class="notification-entry${state.seenAlertKeys[item.key] ? '' : ' is-unread'}" data-action="dismiss-notification" data-alert-key="${escapeHtml(item.key)}"${item.notificationId ? ` data-notification-id="${escapeHtml(item.notificationId)}"` : ''}>
+														<p>${escapeHtml(item.body || item.title)}</p>
+														<span>${escapeHtml(formatRelativeTime(item.createdAt))}</span>
+													</button>
 												`,
 											)
 											.join('')}
 									</div>`
-									: '<article class="empty-card">Approval waits, interrupted runs, and failures will appear here.</article>'
+									: '<div class="notification-empty">No notifications</div>'
 							}
 						</div>
 					`
@@ -3644,11 +3765,8 @@ function renderNotificationCenter() {
 }
 
 function renderDashboardHeader() {
-	const counts = aggregateRunCounts();
-	const alertPermission = browserAlertsSupported() ? window.Notification.permission : 'unsupported';
 	const filteredRuns = dashboardJobs().length;
 	const totalRuns = sortedJobs().length;
-	const sessionLabel = state.session.email || currentBridgeLabel();
 	return `
 		<header class="topbar dashboard-topbar">
 			<div class="topbar-main">
@@ -3683,15 +3801,8 @@ function renderDashboardHeader() {
 				<div class="topbar-actions">
 					<button type="button" class="action-button" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>${refreshIcon('inline-icon')}Load runs</button>
 					<button type="button" class="action-button secondary" data-action="retry-standalone-session"${buttonDisabledAttr(window.parent && window.parent !== window)}>Reconnect API</button>
-					<button type="button" class="mini-button" data-action="enable-alerts"${buttonDisabledAttr(!browserAlertsSupported() || alertPermission === 'granted')}>${escapeHtml(alertPermission === 'granted' ? 'Alerts enabled' : 'Enable alerts')}</button>
 					${renderStandaloneAuthAction()}
 				</div>
-			</div>
-			<div class="topbar-meta topbar-meta-wide">
-				<article class="topbar-card"><span>Bridge</span><strong>${escapeHtml(currentBridgeLabel())}</strong></article>
-				<article class="topbar-card"><span>Operator</span><strong>${escapeHtml(sessionLabel)}</strong></article>
-				<article class="topbar-card"><span>Open approvals</span><strong>${escapeHtml(Object.values(state.store.jobs).filter((entry) => entry.approval && entry.approval.status === 'requested').length)}</strong></article>
-				<article class="topbar-card"><span>Interrupted runs</span><strong>${escapeHtml(counts.interrupted)}</strong></article>
 			</div>
 		</header>
 	`;
@@ -3712,6 +3823,9 @@ function renderWorkspaceSummary() {
 
 function renderWorkspaceDetailPane(job, host) {
 	const isOpen = Boolean(job);
+	const runStatus = job ? jobAttentionStatus(job) : 'idle';
+	const canRun = job ? canRunQuickAction(job) : false;
+	const actionLabel = job ? quickActionLabel(job) : 'Run';
 	return `
 		${isOpen ? '<button type="button" class="drawer-backdrop" data-action="close-detail" aria-label="Close detail panel"></button>' : ''}
 		<aside class="workspace-side${isOpen ? ' is-open' : ''}">
@@ -3720,15 +3834,21 @@ function renderWorkspaceDetailPane(job, host) {
 					job && job.run
 						? `
 							<div class="detail-pane-header">
-								<div class="stack-header">
-									<p class="panel-kicker">Run Detail</p>
-									<h2>${escapeHtml(job.run.title)}</h2>
-									<p class="supporting-copy">${escapeHtml(job.repo || job.jobId)}</p>
+								<div class="detail-pane-copy">
+									<div class="stack-header">
+										<div class="meta-row">
+											${statusPill(runStatus)}
+											${job.repo ? `<span class="run-category">${escapeHtml(job.repo)}</span>` : ''}
+										</div>
+										<h2>${escapeHtml(job.run.title)}</h2>
+										<p class="supporting-copy">${escapeHtml(job.run.lastEvent || job.jobId)}</p>
+									</div>
 								</div>
-								<div class="action-row inline-actions">
-									<button type="button" class="mini-button" data-action="refresh-run"${buttonDisabledAttr(!toolAvailable('job_progress') || !job)}>${refreshIcon('inline-icon')}Refresh</button>
-									<button type="button" class="icon-button" data-action="close-detail" aria-label="Close detail panel">${closeIcon('icon')}</button>
-								</div>
+								<button type="button" class="icon-button detail-close-button" data-action="close-detail" aria-label="Close detail panel">${closeIcon('icon')}</button>
+							</div>
+							<div class="detail-pane-actions">
+								<button type="button" class="detail-primary-button" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRun)}>${runIcon('inline-icon')}${escapeHtml(actionLabel)}</button>
+								<span class="detail-meta-text">Updated ${escapeHtml(job.run.updatedAt ? formatRelativeTime(job.run.updatedAt) : 'Unknown')}</span>
 							</div>
 							${renderNavigation()}
 							<div class="detail-pane-body">${renderDetailSection(job, host)}</div>
@@ -3737,7 +3857,7 @@ function renderWorkspaceDetailPane(job, host) {
 							<div class="detail-pane-empty">
 								<div class="empty-state-icon">${runIcon('brand-icon')}</div>
 								<h3>No run selected</h3>
-								<p class="supporting-copy">Click a run card to inspect logs, approvals, controls, and the next ChatGPT step.</p>
+								<p class="supporting-copy">Click a run card to view details, logs, and execution state.</p>
 							</div>
 						`
 				}
@@ -3752,12 +3872,9 @@ function render() {
 	root.innerHTML = `
 		<div class="app-shell">
 			${renderDashboardHeader()}
-			${state.message ? `<div class="banner info">${escapeHtml(state.message)}</div>` : ''}
 			${state.error ? `<div class="banner error">${escapeHtml(state.error)}</div>` : ''}
 			<div class="workspace-shell${job ? ' has-selection' : ''}">
 				<div class="workspace-main">
-					${renderWorkspaceSummary()}
-					${renderStandaloneAccessPanel()}
 					${renderDashboardJobs()}
 				</div>
 				${renderWorkspaceDetailPane(job, host)}
@@ -3921,7 +4038,7 @@ root.addEventListener('click', (event) => {
 	const target = event.target instanceof Element ? event.target.closest('[data-focus-section],[data-select-job],[data-select-notification],[data-select-log],[data-action]') : null;
 	if (!(target instanceof HTMLElement)) return;
 	if (target.dataset.focusSection) {
-		state.focusSection = target.dataset.focusSection;
+		state.focusSection = normalizeDetailSection(target.dataset.focusSection);
 		if (currentPage() === 'detail' && currentJob()) {
 			navigateToJob(currentJob().jobId, state.focusSection);
 		} else {
@@ -3934,7 +4051,8 @@ root.addEventListener('click', (event) => {
 		state.selectedNotificationId = '';
 		state.selectedLogId = '';
 		state.notificationMenuOpen = false;
-		navigateToJob(target.dataset.selectJob, 'overview');
+		state.utilityMenuOpen = false;
+		navigateToJob(target.dataset.selectJob, 'logs');
 		void syncModelContext(false).catch((error) => console.warn(error));
 		return;
 	}
@@ -3952,8 +4070,21 @@ root.addEventListener('click', (event) => {
 		case 'load-jobs':
 			void loadJobs();
 			break;
+		case 'toggle-access-menu':
+			state.utilityMenuOpen = !state.utilityMenuOpen;
+			if (state.utilityMenuOpen) {
+				state.notificationMenuOpen = false;
+			}
+			render();
+			break;
 		case 'toggle-notifications':
 			state.notificationMenuOpen = !state.notificationMenuOpen;
+			if (state.notificationMenuOpen) {
+				state.utilityMenuOpen = false;
+				if (browserAlertsSupported() && window.Notification.permission === 'default') {
+					void requestBrowserAlertsPermission().catch((error) => console.warn(error));
+				}
+			}
 			if (state.notificationMenuOpen) {
 				markNotificationsSeen();
 			}
@@ -3988,17 +4119,14 @@ root.addEventListener('click', (event) => {
 			}
 			state.notificationMenuOpen = false;
 			if (target.dataset.jobId) {
-				navigateToJob(target.dataset.jobId, sectionTarget || 'overview');
-				if (sectionTarget === 'activity') {
-					void loadFeed({ silent: true, keepSection: true });
-				}
+				navigateToJob(target.dataset.jobId, normalizeDetailSection(sectionTarget));
 			}
 			break;
 		}
 		case 'open-job':
 			if (target.dataset.jobId) {
 				state.selectedJobId = target.dataset.jobId;
-				navigateToJob(target.dataset.jobId, 'overview');
+				navigateToJob(target.dataset.jobId, 'logs');
 				void refreshCurrentRun({ silent: true, keepSection: true });
 				void loadFeed({ silent: true, keepSection: true });
 			}
@@ -4006,6 +4134,7 @@ root.addEventListener('click', (event) => {
 		case 'back-to-list':
 		case 'close-detail':
 			state.notificationMenuOpen = false;
+			state.utilityMenuOpen = false;
 			navigateToList();
 			break;
 		case 'job-shortcut':
@@ -4073,6 +4202,7 @@ root.addEventListener('click', (event) => {
 			break;
 		case 'save-standalone-token':
 			persistStandaloneToken();
+			state.utilityMenuOpen = false;
 			void refreshStandaloneSession().then(() => {
 				if (state.session.ready) {
 					startPolling();
@@ -4081,9 +4211,11 @@ root.addEventListener('click', (event) => {
 			});
 			break;
 		case 'clear-standalone-token':
+			state.utilityMenuOpen = false;
 			void disconnectStandaloneBrowserLogin();
 			break;
 		case 'retry-standalone-session':
+			state.utilityMenuOpen = false;
 			void refreshStandaloneSession().then(() => {
 				if (state.session.ready) {
 					startPolling();
@@ -4095,14 +4227,17 @@ root.addEventListener('click', (event) => {
 			void refreshStandaloneAuthConfig();
 			break;
 		case 'begin-browser-login':
+			state.utilityMenuOpen = false;
 			void beginStandaloneBrowserLogin();
 			break;
 		case 'browser-logout':
+			state.utilityMenuOpen = false;
 			void disconnectStandaloneBrowserLogin();
 			break;
 		case 'load-demo':
 			seedDemoStore();
 			state.notificationMenuOpen = false;
+			state.utilityMenuOpen = false;
 			render();
 			break;
 		case 'send-chat-draft':
@@ -4120,14 +4255,15 @@ root.addEventListener('click', (event) => {
 });
 
 document.addEventListener('click', (event) => {
-	if (!state.notificationMenuOpen) {
+	if (!state.notificationMenuOpen && !state.utilityMenuOpen) {
 		return;
 	}
 	const target = event.target instanceof Element ? event.target : null;
-	if (target && target.closest('[data-notification-menu]')) {
+	if (target && (target.closest('[data-notification-menu]') || target.closest('[data-access-menu]'))) {
 		return;
 	}
 	state.notificationMenuOpen = false;
+	state.utilityMenuOpen = false;
 	render();
 });
 
@@ -4185,6 +4321,17 @@ root.addEventListener('input', (event) => {
 
 root.addEventListener('change', (event) => {
 	handleMutableInput(event.target);
+});
+
+root.addEventListener('keydown', (event) => {
+	if (event.target instanceof Element && event.target.closest('[data-action]') && !event.target.matches('[data-select-job][role="button"]')) {
+		return;
+	}
+	const target = event.target instanceof HTMLElement ? event.target.closest('[data-select-job][role="button"]') : null;
+	if (!(target instanceof HTMLElement)) return;
+	if (event.key !== 'Enter' && event.key !== ' ') return;
+	event.preventDefault();
+	target.click();
 });
 
 root.addEventListener('submit', (event) => {
