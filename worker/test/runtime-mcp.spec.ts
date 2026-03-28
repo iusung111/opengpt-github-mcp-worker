@@ -362,14 +362,19 @@ describe('runtime mcp surface', () => {
 		expect(JSON.parse(openText)).toMatchObject({
 			ok: true,
 			data: {
+				gui_url: expect.stringContaining('/gui/'),
 				jobs: expect.any(Array),
 				include_healthz: true,
 				selected_job_id: expect.anything(),
+				selected_job_url: expect.stringContaining('/gui/?job='),
 			},
 		});
 		expect((openResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.jobs_list',
+			gui_url: expect.stringContaining('/gui/'),
 			jobs: expect.any(Array),
+			selected_job_id: expect.anything(),
+			selected_job_url: expect.stringContaining('/gui/?job='),
 		});
 		expect((openResult as { _meta?: Record<string, unknown> })._meta ?? {}).not.toHaveProperty('opengpt/widget');
 		expect(

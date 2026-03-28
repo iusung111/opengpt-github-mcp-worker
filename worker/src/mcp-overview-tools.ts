@@ -74,6 +74,9 @@ const selfHostStatusStructuredSchema = z
 const jobsListStructuredSchema = z
 	.object({
 		kind: z.literal('opengpt.notification_contract.jobs_list'),
+		gui_url: z.string().nullable().optional(),
+		selected_job_id: z.string().nullable().optional(),
+		selected_job_url: z.string().nullable().optional(),
 		jobs: z.array(
 			z
 				.object({
@@ -525,7 +528,7 @@ export function registerOverviewTools(
 	});
 	server.registerTool('run_console_open', {
 		description:
-			'Open the Run Console widget directly and preload current queue jobs. Use this when ChatGPT should expose the widget before it has chosen a more specific queue tool.',
+			'Open the Run Console widget directly and preload current queue jobs. Returns the direct /gui/ URL too so ChatGPT web can expose the console link alongside the widget.',
 		inputSchema: {
 			include_healthz: z.boolean().default(true),
 		},
@@ -539,14 +542,19 @@ export function registerOverviewTools(
 		try {
 			const jobsResult = await queueJsonOrThrow(env, { action: 'jobs_list' }, 'failed to load queue jobs');
 			const jobs = Array.isArray(jobsResult.data?.jobs) ? jobsResult.data.jobs : [];
+			const appOrigin = getSelfCurrentUrl(env) ?? getSelfLiveUrl(env) ?? getSelfMirrorUrl(env);
+			const guiUrl = appOrigin ? `${appOrigin}/gui/` : null;
+			const firstJob = jobs.length > 0 ? (jobs[0] as Record<string, unknown>) : null;
+			const selectedJobId = firstJob && typeof firstJob.job_id === 'string' ? firstJob.job_id : null;
+			const selectedJobUrl =
+				guiUrl && selectedJobId ? `${guiUrl}?job=${encodeURIComponent(selectedJobId)}&tab=overview` : null;
 			const response = ok(
 				{
 					jobs,
 					include_healthz,
-					selected_job_id:
-						jobs.length > 0 && jobs[0] && typeof (jobs[0] as Record<string, unknown>).job_id === 'string'
-							? (jobs[0] as Record<string, unknown>).job_id
-							: null,
+					gui_url: guiUrl,
+					selected_job_id: selectedJobId,
+					selected_job_url: selectedJobUrl,
 				},
 				readAnnotations,
 			);
@@ -554,6 +562,9 @@ export function registerOverviewTools(
 				content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }],
 				structuredContent: {
 					kind: 'opengpt.notification_contract.jobs_list' as const,
+					gui_url: guiUrl,
+					selected_job_id: selectedJobId,
+					selected_job_url: selectedJobUrl,
 					jobs,
 				},
 			};
