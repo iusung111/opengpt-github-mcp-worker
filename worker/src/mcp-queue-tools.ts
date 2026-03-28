@@ -15,6 +15,11 @@ import {
 	toolText,
 } from './utils';
 
+const notificationReadMeta = {
+	'openai/toolInvocation/invoking': 'Loading run status',
+	'openai/toolInvocation/invoked': 'Run status ready',
+} as const;
+
 const reviewFindingSchema = z.object({
 	severity: z.enum(['low', 'medium', 'high', 'critical']),
 	file: z.string().min(1),
@@ -101,6 +106,7 @@ export function registerQueueTools(
 				job_id: z.string(),
 			},
 			annotations: readAnnotations,
+			_meta: notificationReadMeta,
 		},
 		async ({ job_id }) => {
 			try {
@@ -121,6 +127,7 @@ export function registerQueueTools(
 				next_actor: z.enum(['worker', 'reviewer', 'system']).optional(),
 			},
 			annotations: readAnnotations,
+			_meta: notificationReadMeta,
 		},
 		async ({ status, next_actor }) => {
 			try {
@@ -145,6 +152,10 @@ export function registerQueueTools(
 				limit: z.number().int().positive().max(200).default(50),
 			},
 			annotations: readAnnotations,
+			_meta: {
+				'openai/toolInvocation/invoking': 'Loading run events',
+				'openai/toolInvocation/invoked': 'Run events ready',
+			},
 		},
 		async ({ job_id, status, source_layer, since, limit }) => {
 			try {

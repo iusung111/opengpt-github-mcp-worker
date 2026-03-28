@@ -224,6 +224,24 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'workspace_resolve')).toBe(true);
+		expect(
+			tools.tools.find((tool) => tool.name === 'job_event_feed')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Loading run events',
+			'openai/toolInvocation/invoked': 'Run events ready',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'request_permission_bundle')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Preparing approval bundle',
+			'openai/toolInvocation/invoked': 'Approval bundle ready',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'incident_bundle_create')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Collecting incident bundle',
+			'openai/toolInvocation/invoked': 'Incident bundle ready',
+		});
 
 		const createResult = await client.callTool({
 			name: 'job_create',

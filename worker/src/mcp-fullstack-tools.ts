@@ -2106,6 +2106,10 @@ export function registerFullstackTools(
 				include_layer_logs: z.boolean().default(false),
 			},
 			annotations: writeAnnotations,
+			_meta: {
+				'openai/toolInvocation/invoking': 'Collecting incident bundle',
+				'openai/toolInvocation/invoked': 'Incident bundle ready',
+			},
 		},
 		async ({ owner, repo, run_id, job_id, preview_token, browser_result_token, scope, include_layer_logs }) => {
 			try {
