@@ -217,3 +217,4 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - description: Inspect self-host state from any environment, but allow secret sync and live promotion only from the live self-host worker.
 - capabilities: `read`, `workflow`, `self_host`
 - group ids: `overview`, `workspace`, `repo_read`, `repo_write`, `queue`
+

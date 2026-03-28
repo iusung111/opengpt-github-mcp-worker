@@ -41,6 +41,37 @@ Workflow allowlist precedence for dispatch:
 
 These two paths are not interchangeable.
 
+## Run Console Widget Exposure
+
+This repository does not expose a separate MCP tool named `alarm`, `reminder`, or `notification_open`.
+
+Instead, the interactive web UI is the shared queue widget resource:
+
+- widget URI: `ui://widget/notification-center.html`
+- frontend entry points:
+  - `public/gui/index.html`
+  - `public/gui/app.js`
+  - `public/gui/run-console-app.js`
+- widget registration:
+  - `worker/src/mcp-widget-resources.ts`
+
+The widget is attached through `openai/outputTemplate` metadata on queue and overview tools such as:
+
+- `jobs_list`
+- `job_progress`
+- `job_event_feed`
+- `request_permission_bundle`
+- `permission_request_resolve`
+- `job_control`
+- `incident_bundle_create`
+- `self_host_status`
+
+Practical implication for ChatGPT web:
+
+- the widget appears when ChatGPT calls one of the tools above
+- there is no standalone "open alarm UI" tool on main right now
+- if the model never chooses one of those tools, the widget will not render even though the exposure metadata is present
+
 ## Required Config
 
 Set these Worker vars for ChatGPT connector use:
