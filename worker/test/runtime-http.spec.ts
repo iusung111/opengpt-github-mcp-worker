@@ -64,6 +64,26 @@ describe('runtime http surface', () => {
 		});
 	});
 
+	it('returns browser login config for the standalone GUI without requiring auth', async () => {
+		const response = await SELF.fetch('https://example.com/gui/api/auth/config');
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				auth: {
+					enabled: true,
+					provider: 'auth0',
+					client_id: 'spa-client-id',
+					audience: 'chatgpt-mcp-worker',
+					scope: 'openid profile email',
+					redirect_uri: 'https://example.com/gui/',
+					authorization_url: 'https://auth.example.com/authorize',
+					token_url: 'https://auth.example.com/oauth/token',
+				},
+			},
+		});
+	});
+
 	it('returns a standalone GUI session payload when Access auth is present', async () => {
 		const response = await SELF.fetch('https://example.com/gui/api/session', {
 			headers: mcpAccessHeaders,

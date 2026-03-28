@@ -27,6 +27,7 @@ const APP_INFO = {
 
 const VIEW_STATE_STORAGE_KEY = 'opengpt.run-console.view';
 const STANDALONE_TOKEN_STORAGE_KEY = 'opengpt.run-console.token';
+const STANDALONE_AUTH_STATE_STORAGE_KEY = 'opengpt.run-console.auth.pending';
 const ATTENTION_STATUSES = ['idle', 'pending_approval', 'running', 'paused', 'cancelled', 'interrupted', 'completed', 'failed'];
 const SOURCE_LAYERS = ['gpt', 'mcp', 'cloudflare', 'repo', 'system'];
 const POLL_INTERVAL_MS = 20000;
@@ -296,6 +297,21 @@ const state = {
 		authType: null,
 		error: '',
 	},
+	auth: {
+		ready: false,
+		enabled: false,
+		loading: false,
+		error: '',
+		issuer: null,
+		clientId: null,
+		audience: null,
+		scope: 'openid profile email',
+		redirectUri: null,
+		authorizationUrl: null,
+		tokenUrl: null,
+		logoutUrl: null,
+		missing: [],
+	},
 	standaloneToken: '',
 	pollTimer: null,
 	alertSignatures: {},
@@ -425,6 +441,305 @@ function persistStandaloneToken() {
 		window.localStorage.removeItem(STANDALONE_TOKEN_STORAGE_KEY);
 	} catch (error) {
 		console.warn(error);
+	}
+}
+
+function readPendingStandaloneAuth() {
+	try {
+		const raw = window.sessionStorage.getItem(STANDALONE_AUTH_STATE_STORAGE_KEY);
+		if (!raw) {
+			return null;
+		}
+		const parsed = JSON.parse(raw);
+		if (!hasRecord(parsed)) {
+			return null;
+		}
+		return {
+			state: typeof parsed.state === 'string' ? parsed.state : '',
+			codeVerifier: typeof parsed.codeVerifier === 'string' ? parsed.codeVerifier : '',
+			redirectUri: typeof parsed.redirectUri === 'string' ? parsed.redirectUri : '',
+			returnTo: typeof parsed.returnTo === 'string' ? parsed.returnTo : '',
+		};
+	} catch (error) {
+		console.warn(error);
+		return null;
+	}
+}
+
+function writePendingStandaloneAuth(value) {
+	try {
+		window.sessionStorage.setItem(STANDALONE_AUTH_STATE_STORAGE_KEY, JSON.stringify(value));
+	} catch (error) {
+		console.warn(error);
+	}
+}
+
+function clearPendingStandaloneAuth() {
+	try {
+		window.sessionStorage.removeItem(STANDALONE_AUTH_STATE_STORAGE_KEY);
+	} catch (error) {
+		console.warn(error);
+	}
+}
+
+function base64UrlEncodeBytes(bytes) {
+	let binary = '';
+	for (const byte of bytes) {
+		binary += String.fromCharCode(byte);
+	}
+	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function createRandomBase64Url(byteLength) {
+	const bytes = new Uint8Array(byteLength);
+	window.crypto.getRandomValues(bytes);
+	return base64UrlEncodeBytes(bytes);
+}
+
+async function sha256Base64Url(value) {
+	const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+	return base64UrlEncodeBytes(new Uint8Array(digest));
+}
+
+async function parseJsonResponse(response) {
+	const contentType = response.headers.get('content-type') || '';
+	if (contentType.includes('application/json')) {
+		return response.json();
+	}
+	const text = await response.text();
+	try {
+		return JSON.parse(text);
+	} catch {
+		return { error: text };
+	}
+}
+
+async function refreshStandaloneAuthConfig(options = {}) {
+	if (window.parent && window.parent !== window) {
+		return;
+	}
+	state.auth.loading = true;
+	if (!options.skipRender) {
+		render();
+	}
+	try {
+		const response = await fetch(`${config.appOrigin}/gui/api/auth/config`, {
+			headers: { accept: 'application/json' },
+			credentials: 'same-origin',
+		});
+		const payload = await parseJsonResponse(response);
+		if (!response.ok || payload.ok === false || !payload.data || !hasRecord(payload.data.auth)) {
+			throw new Error(
+				payload && typeof payload.error === 'string'
+					? payload.error
+					: `${response.status} ${response.statusText}`.trim(),
+			);
+		}
+		const auth = payload.data.auth;
+		state.auth.ready = true;
+		state.auth.enabled = auth.enabled === true;
+		state.auth.error = '';
+		state.auth.issuer = typeof auth.issuer === 'string' ? auth.issuer : null;
+		state.auth.clientId = typeof auth.client_id === 'string' ? auth.client_id : null;
+		state.auth.audience = typeof auth.audience === 'string' ? auth.audience : null;
+		state.auth.scope = typeof auth.scope === 'string' && auth.scope.trim() ? auth.scope : 'openid profile email';
+		state.auth.redirectUri = typeof auth.redirect_uri === 'string' ? auth.redirect_uri : null;
+		state.auth.authorizationUrl = typeof auth.authorization_url === 'string' ? auth.authorization_url : null;
+		state.auth.tokenUrl = typeof auth.token_url === 'string' ? auth.token_url : null;
+		state.auth.logoutUrl = typeof auth.logout_url === 'string' ? auth.logout_url : null;
+		state.auth.missing = Array.isArray(auth.missing) ? auth.missing.filter((item) => typeof item === 'string') : [];
+	} catch (error) {
+		state.auth.ready = false;
+		state.auth.enabled = false;
+		state.auth.error = error instanceof Error ? error.message : String(error);
+		state.auth.issuer = null;
+		state.auth.clientId = null;
+		state.auth.audience = null;
+		state.auth.scope = 'openid profile email';
+		state.auth.redirectUri = null;
+		state.auth.authorizationUrl = null;
+		state.auth.tokenUrl = null;
+		state.auth.logoutUrl = null;
+		state.auth.missing = [];
+	} finally {
+		state.auth.loading = false;
+		if (!options.skipRender) {
+			render();
+		}
+	}
+}
+
+function cleanupStandaloneAuthQuery(returnTo = '') {
+	const nextUrl = returnTo ? new URL(returnTo, window.location.origin) : new URL(window.location.href);
+	nextUrl.searchParams.delete('code');
+	nextUrl.searchParams.delete('state');
+	nextUrl.searchParams.delete('error');
+	nextUrl.searchParams.delete('error_description');
+	window.history.replaceState({}, '', nextUrl);
+	syncRouteStateFromLocation();
+}
+
+async function completeStandaloneBrowserLogin(options = {}) {
+	if (window.parent && window.parent !== window) {
+		return false;
+	}
+	const url = new URL(window.location.href);
+	const authError = url.searchParams.get('error');
+	const authErrorDescription = url.searchParams.get('error_description');
+	const authCode = url.searchParams.get('code');
+	const authState = url.searchParams.get('state');
+	if (!authError && !authCode) {
+		return false;
+	}
+	if (authError) {
+		clearPendingStandaloneAuth();
+		cleanupStandaloneAuthQuery();
+		state.error = authErrorDescription ? `${authError}: ${authErrorDescription}` : authError;
+		state.message = '';
+		if (!options.skipRender) {
+			render();
+		}
+		return true;
+	}
+	const pending = readPendingStandaloneAuth();
+	if (!pending || !pending.state || !pending.codeVerifier || !pending.redirectUri) {
+		cleanupStandaloneAuthQuery();
+		state.error = 'The browser login flow could not be resumed because the PKCE session is missing.';
+		state.message = '';
+		if (!options.skipRender) {
+			render();
+		}
+		return true;
+	}
+	if (pending.state !== authState) {
+		clearPendingStandaloneAuth();
+		cleanupStandaloneAuthQuery();
+		state.error = 'The browser login callback state does not match the pending request.';
+		state.message = '';
+		if (!options.skipRender) {
+			render();
+		}
+		return true;
+	}
+	if (!state.auth.ready) {
+		await refreshStandaloneAuthConfig({ skipRender: true });
+	}
+	if (!state.auth.enabled || !state.auth.clientId || !state.auth.tokenUrl) {
+		clearPendingStandaloneAuth();
+		cleanupStandaloneAuthQuery();
+		state.error = state.auth.error || 'Browser login is not configured for this GUI.';
+		state.message = '';
+		if (!options.skipRender) {
+			render();
+		}
+		return true;
+	}
+	try {
+		const body = new URLSearchParams({
+			grant_type: 'authorization_code',
+			client_id: state.auth.clientId,
+			code: authCode,
+			code_verifier: pending.codeVerifier,
+			redirect_uri: pending.redirectUri,
+		});
+		const response = await fetch(state.auth.tokenUrl, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/x-www-form-urlencoded',
+				accept: 'application/json',
+			},
+			body: body.toString(),
+		});
+		const payload = await parseJsonResponse(response);
+		if (!response.ok) {
+			throw new Error(
+				payload && typeof payload.error_description === 'string'
+					? payload.error_description
+					: payload && typeof payload.error === 'string'
+						? payload.error
+						: `${response.status} ${response.statusText}`.trim(),
+			);
+		}
+		if (!payload || typeof payload.access_token !== 'string' || !payload.access_token.trim()) {
+			throw new Error('The token response did not include an access_token.');
+		}
+		state.standaloneToken = payload.access_token.trim();
+		persistStandaloneToken();
+		clearPendingStandaloneAuth();
+		cleanupStandaloneAuthQuery(pending.returnTo);
+		state.message = 'Signed in with Auth0 for the standalone web control API.';
+		state.error = '';
+		if (!options.skipRender) {
+			render();
+		}
+		return true;
+	} catch (error) {
+		clearPendingStandaloneAuth();
+		cleanupStandaloneAuthQuery(pending.returnTo);
+		state.error = error instanceof Error ? error.message : String(error);
+		state.message = '';
+		if (!options.skipRender) {
+			render();
+		}
+		return true;
+	}
+}
+
+async function beginStandaloneBrowserLogin() {
+	if (window.parent && window.parent !== window) {
+		return;
+	}
+	if (!state.auth.ready) {
+		await refreshStandaloneAuthConfig({ skipRender: true });
+	}
+	if (!state.auth.enabled || !state.auth.clientId || !state.auth.authorizationUrl || !state.auth.redirectUri) {
+		state.error =
+			state.auth.error ||
+			(state.auth.missing.length
+				? `Browser login is unavailable until ${state.auth.missing.join(', ')} is configured.`
+				: 'Browser login is unavailable for this GUI.');
+		state.message = '';
+		render();
+		return;
+	}
+	const codeVerifier = createRandomBase64Url(48);
+	const loginState = createRandomBase64Url(24);
+	const codeChallenge = await sha256Base64Url(codeVerifier);
+	writePendingStandaloneAuth({
+		state: loginState,
+		codeVerifier,
+		redirectUri: state.auth.redirectUri,
+		returnTo: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+	});
+	const authorizeUrl = new URL(state.auth.authorizationUrl);
+	authorizeUrl.searchParams.set('response_type', 'code');
+	authorizeUrl.searchParams.set('client_id', state.auth.clientId);
+	authorizeUrl.searchParams.set('redirect_uri', state.auth.redirectUri);
+	authorizeUrl.searchParams.set('scope', state.auth.scope || 'openid profile email');
+	if (state.auth.audience) {
+		authorizeUrl.searchParams.set('audience', state.auth.audience);
+	}
+	authorizeUrl.searchParams.set('state', loginState);
+	authorizeUrl.searchParams.set('code_challenge', codeChallenge);
+	authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+	window.location.assign(authorizeUrl.toString());
+}
+
+async function disconnectStandaloneBrowserLogin() {
+	state.standaloneToken = '';
+	persistStandaloneToken();
+	clearPendingStandaloneAuth();
+	state.session.ready = false;
+	state.session.email = null;
+	state.session.authType = null;
+	state.session.error = '';
+	state.message = 'Stored bearer token cleared from this browser.';
+	state.error = '';
+	stopPolling();
+	await refreshStandaloneSession();
+	if (state.session.ready) {
+		startPolling();
+		void loadJobs({ silent: true, keepSection: true });
 	}
 }
 
@@ -2743,6 +3058,19 @@ function canRunAttentionShortcut(job) {
 	return toolAvailable('job_control');
 }
 
+function renderStandaloneAuthAction() {
+	if (window.parent && window.parent !== window) {
+		return '';
+	}
+	if (state.standaloneToken.trim()) {
+		return `<button type="button" class="mini-button" data-action="browser-logout">Log out</button>`;
+	}
+	if (state.auth.enabled) {
+		return `<button type="button" class="mini-button" data-action="begin-browser-login"${buttonDisabledAttr(state.auth.loading)}>Log in</button>`;
+	}
+	return '';
+}
+
 function renderStandaloneAccessPanel() {
 	if (window.parent && window.parent !== window) {
 		return '';
@@ -2755,17 +3083,41 @@ function renderStandaloneAccessPanel() {
 			<div class="stack-header">
 				<p class="panel-kicker">Standalone Access</p>
 				<h2>Connect the web control API</h2>
-				<p class="supporting-copy">This page can drive queue status, approvals, and retry actions directly when Cloudflare Access is active in the browser or when you provide a bearer token.</p>
+				<p class="supporting-copy">This page can drive queue status, approvals, and retry actions directly when Cloudflare Access is active in the browser, when you sign in with Auth0, or when you provide a bearer token manually.</p>
 			</div>
-			<div class="field-stack">
-				<label for="standalone-token">Bearer token</label>
-				<textarea id="standalone-token" class="command-textarea" name="standalone-token" placeholder="Paste a ChatGPT MCP bearer token when Cloudflare Access is not available.">${escapeHtml(state.standaloneToken)}</textarea>
-			</div>
-			<div class="action-row">
-				<button type="button" class="action-button" data-action="save-standalone-token">Save token</button>
-				<button type="button" class="action-button secondary" data-action="retry-standalone-session">Retry connection</button>
-				<button type="button" class="mini-button" data-action="clear-standalone-token"${buttonDisabledAttr(!state.standaloneToken.trim())}>Clear token</button>
-				<button type="button" class="mini-button" data-action="load-demo">Demo mode</button>
+			<div class="split-grid">
+				<article class="detail-card">
+					<div class="stack-header">
+						<p class="panel-kicker">Browser Login</p>
+						<h3>Auth0 sign-in</h3>
+						<p class="supporting-copy">Use the hosted login page to obtain a bearer token automatically in this browser.</p>
+					</div>
+					<div class="action-row">
+						<button type="button" class="action-button" data-action="begin-browser-login"${buttonDisabledAttr(!state.auth.enabled || state.auth.loading)}>
+							${escapeHtml(state.auth.loading ? 'Loading login config...' : 'Sign in with Auth0')}
+						</button>
+						<button type="button" class="mini-button" data-action="retry-auth-config"${buttonDisabledAttr(state.auth.loading)}>Reload login config</button>
+					</div>
+					${state.auth.error ? `<article class="empty-card">${escapeHtml(state.auth.error)}</article>` : ''}
+					${!state.auth.error && state.auth.missing.length ? `<article class="empty-card">Browser login is unavailable until ${escapeHtml(state.auth.missing.join(', '))} is configured.</article>` : ''}
+				</article>
+				<article class="detail-card">
+					<div class="stack-header">
+						<p class="panel-kicker">Manual Token</p>
+						<h3>Paste a bearer token</h3>
+						<p class="supporting-copy">Keep the manual path for environments where browser login is disabled or you want to use an existing ChatGPT MCP token.</p>
+					</div>
+					<div class="field-stack">
+						<label for="standalone-token">Bearer token</label>
+						<textarea id="standalone-token" class="command-textarea" name="standalone-token" placeholder="Paste a ChatGPT MCP bearer token when Cloudflare Access is not available.">${escapeHtml(state.standaloneToken)}</textarea>
+					</div>
+					<div class="action-row">
+						<button type="button" class="action-button" data-action="save-standalone-token">Save token</button>
+						<button type="button" class="action-button secondary" data-action="retry-standalone-session">Retry connection</button>
+						<button type="button" class="mini-button" data-action="clear-standalone-token"${buttonDisabledAttr(!state.standaloneToken.trim())}>Clear token</button>
+						<button type="button" class="mini-button" data-action="load-demo">Demo mode</button>
+					</div>
+				</article>
 			</div>
 			${state.session.error ? `<article class="empty-card">${escapeHtml(state.session.error)}</article>` : ''}
 		</section>
@@ -2932,6 +3284,7 @@ function renderTopbar(host) {
 						<button type="button" class="action-button" data-action="back-to-list">Back to list</button>
 						<button type="button" class="action-button secondary" data-action="job-shortcut" data-job-id="${escapeHtml(job ? job.jobId : '')}"${buttonDisabledAttr(!job || !canRunAttentionShortcut(job) || attentionShortcutLabel(job) === 'Open')}>${escapeHtml(attentionShortcutLabel(job))}</button>
 						<button type="button" class="mini-button" data-action="refresh-run"${buttonDisabledAttr(!toolAvailable('job_progress') || !job)}>Refresh</button>
+						${renderStandaloneAuthAction()}
 					</div>
 				</div>
 				<div class="topbar-meta topbar-meta-wide">
@@ -2953,6 +3306,7 @@ function renderTopbar(host) {
 					<button type="button" class="action-button" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>Load runs</button>
 					<button type="button" class="action-button secondary" data-action="retry-standalone-session"${buttonDisabledAttr(window.parent && window.parent !== window)}>Reconnect API</button>
 					<button type="button" class="mini-button" data-action="enable-alerts"${buttonDisabledAttr(!browserAlertsSupported() || alertPermission === 'granted')}>${escapeHtml(alertPermission === 'granted' ? 'Alerts enabled' : 'Enable alerts')}</button>
+					${renderStandaloneAuthAction()}
 				</div>
 			</div>
 			<div class="topbar-meta topbar-meta-wide">
@@ -3078,6 +3432,8 @@ async function connectStandardBridge() {
 	currentHostApi().setOpenInAppUrl();
 	if (!window.parent || window.parent === window) {
 		state.store.host.source = openaiBridge() ? 'window.openai fallback' : 'standalone';
+		await refreshStandaloneAuthConfig({ skipRender: true });
+		await completeStandaloneBrowserLogin({ skipRender: true });
 		await refreshStandaloneSession({ skipRender: true });
 		if (state.session.ready) {
 			await loadJobs({ silent: true, keepSection: true });
@@ -3292,9 +3648,7 @@ root.addEventListener('click', (event) => {
 			});
 			break;
 		case 'clear-standalone-token':
-			state.standaloneToken = '';
-			persistStandaloneToken();
-			void refreshStandaloneSession();
+			void disconnectStandaloneBrowserLogin();
 			break;
 		case 'retry-standalone-session':
 			void refreshStandaloneSession().then(() => {
@@ -3303,6 +3657,15 @@ root.addEventListener('click', (event) => {
 					void loadJobs({ silent: true, keepSection: true });
 				}
 			});
+			break;
+		case 'retry-auth-config':
+			void refreshStandaloneAuthConfig();
+			break;
+		case 'begin-browser-login':
+			void beginStandaloneBrowserLogin();
+			break;
+		case 'browser-logout':
+			void disconnectStandaloneBrowserLogin();
 			break;
 		case 'load-demo':
 			seedDemoStore();

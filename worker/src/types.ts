@@ -74,6 +74,9 @@ export type AppEnv = Env & {
 	CHATGPT_MCP_JWKS_URL?: string;
 	CHATGPT_MCP_JWKS_JSON?: string;
 	CHATGPT_MCP_ALLOWED_EMAILS?: string;
+	GUI_OIDC_CLIENT_ID?: string;
+	GUI_OIDC_AUDIENCE?: string;
+	GUI_OIDC_SCOPE?: string;
 };
 
 export interface ReviewFinding {

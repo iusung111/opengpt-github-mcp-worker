@@ -1,6 +1,16 @@
 import { authorizeGuiOperatorRequest } from './auth';
 import { AppEnv, JobStatus, NextActor, QueueEnvelope } from './types';
-import { fail, jsonResponse, ok, queueFetch } from './utils';
+import {
+	fail,
+	getChatgptMcpAuthMode,
+	getChatgptMcpIssuer,
+	getGuiOidcAudience,
+	getGuiOidcClientId,
+	getGuiOidcScope,
+	jsonResponse,
+	ok,
+	queueFetch,
+} from './utils';
 
 function badRequest(message: string): Response {
 	return jsonResponse(fail('bad_request', message), 400);
@@ -90,18 +100,55 @@ async function proxyQueueAction(env: AppEnv, payload: QueueEnvelope): Promise<Re
 }
 
 export async function handleGuiApi(request: Request, env: AppEnv): Promise<Response> {
+	const url = new URL(request.url);
+	const parts = url.pathname.split('/').filter(Boolean);
+	if (parts.length < 3 || parts[0] !== 'gui' || parts[1] !== 'api') {
+		return jsonResponse(fail('not_found', 'not found'), 404);
+	}
+
+	if (request.method === 'GET' && parts.length === 4 && parts[2] === 'auth' && parts[3] === 'config') {
+		const issuer = getChatgptMcpIssuer(env);
+		const clientId = getGuiOidcClientId(env);
+		const audience = getGuiOidcAudience(env);
+		const redirectUri = new URL('/gui/', `${url.protocol}//${url.host}`).toString();
+		const missing: string[] = [];
+		if (getChatgptMcpAuthMode(env) === 'disabled') {
+			missing.push('CHATGPT_MCP_AUTH_MODE=oidc');
+		}
+		if (!issuer) {
+			missing.push('CHATGPT_MCP_ISSUER');
+		}
+		if (!clientId) {
+			missing.push('GUI_OIDC_CLIENT_ID');
+		}
+		if (!audience) {
+			missing.push('GUI_OIDC_AUDIENCE or CHATGPT_MCP_AUDIENCE');
+		}
+		return jsonResponse(
+			ok({
+				auth: {
+					enabled: missing.length === 0,
+					provider: 'auth0',
+					issuer,
+					client_id: clientId,
+					audience,
+					scope: getGuiOidcScope(env),
+					redirect_uri: redirectUri,
+					authorization_url: issuer ? new URL('/authorize', issuer).toString() : null,
+					token_url: issuer ? new URL('/oauth/token', issuer).toString() : null,
+					logout_url: issuer ? new URL('/v2/logout', issuer).toString() : null,
+					missing,
+				},
+			}),
+		);
+	}
+
 	const auth = await authorizeGuiOperatorRequest(request, env);
 	if (!auth.ok) {
 		return jsonResponse(
 			fail(auth.code ?? 'unauthorized', auth.error ?? 'GUI operator authorization failed'),
 			auth.status ?? 401,
 		);
-	}
-
-	const url = new URL(request.url);
-	const parts = url.pathname.split('/').filter(Boolean);
-	if (parts.length < 3 || parts[0] !== 'gui' || parts[1] !== 'api') {
-		return jsonResponse(fail('not_found', 'not found'), 404);
 	}
 
 	if (request.method === 'GET' && parts.length === 3 && parts[2] === 'session') {

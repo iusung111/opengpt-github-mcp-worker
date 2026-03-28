@@ -53,6 +53,7 @@ K9+gf+A3EShgPx3IBp1EQz3m9yCNRuY6IQqADgm4ycYuRAvYig24yOH8Fjv9nFvQ
 						CHATGPT_MCP_JWKS_JSON:
 							'{"keys":[{"kty":"RSA","kid":"chatgpt-test-rs256","use":"sig","alg":"RS256","n":"n_CCP8v6eqjs-MvA65GSr29UxL-_zLzl_PVzywg7YXtY-H6m4XZOxAos6AZKvQn4ADBxGEa5kDXgx3XYvqAuDnB5acC_IuqJ1ts76SJUGaTeY_oAu34gUnS3nV6nDAv3VfdUnVHTppHFsC_HKWDsW3zfNUZSOgjFtax0Q5Pz8QKF02BRYAI6L5nw9iE_2WXkhOB18BzVkL7vhPcDHxR1nYKnqzpQKpBFk-rH6VQjwgn5fzrvZ2OjkzCX8NKhnpJ_tXaF5nUH0CchfZkROukBV1e9HYj8THTD2i9dLQuvd13IAmulGfQY47VCUEEpjeYelQ8gky3EGEn9CYY5PCwW2Q","e":"AQAB"}]}',
 						CHATGPT_MCP_ALLOWED_EMAILS: 'developer@example.com',
+						GUI_OIDC_CLIENT_ID: 'spa-client-id',
 					},
 				},
 				wrangler: { configPath: './wrangler.jsonc' },

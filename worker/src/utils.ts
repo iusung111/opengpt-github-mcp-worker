@@ -263,6 +263,26 @@ export function getChatgptMcpAllowedEmails(env: AppEnv): string[] {
 	return parseCsvLower(env.CHATGPT_MCP_ALLOWED_EMAILS);
 }
 
+export function getGuiOidcClientId(env: AppEnv): string | null {
+	const value = env.GUI_OIDC_CLIENT_ID?.trim();
+	return value ? value : null;
+}
+
+export function getGuiOidcAudience(env: AppEnv): string | null {
+	const explicit = env.GUI_OIDC_AUDIENCE?.trim();
+	if (explicit) {
+		return explicit;
+	}
+	const audiences = getChatgptMcpAudiences(env);
+	const preferred = audiences.find((audience) => !audience.endsWith('/userinfo'));
+	return preferred ?? audiences[0] ?? null;
+}
+
+export function getGuiOidcScope(env: AppEnv): string {
+	const value = env.GUI_OIDC_SCOPE?.trim();
+	return value || 'openid profile email';
+}
+
 export function repoAllowed(env: AppEnv, repo: string): boolean {
 	const allowed = getAllowedRepos(env);
 	return allowed.length === 0 || allowed.includes(repo);
