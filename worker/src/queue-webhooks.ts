@@ -1,9 +1,10 @@
 import { JobRecord } from './types';
+import { mergeWorkerManifest } from './job-manifest';
 import { branchMatchScore, parseJobIdFromPrBody } from './queue-helpers';
 import { JobIndexPointer, jobBranchIndexKey, jobRepoIndexPrefix, jobRunIndexKey } from './queue-index';
 import { applyPullRequestEventToJob } from './queue-events';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
-import { recordWorkflowSnapshot, transitionJob } from './queue-state';
+import { canAdvanceJob, recordWorkflowSnapshot, transitionJob } from './queue-state';
 import { nowIso } from './utils';
 
 export interface QueueWebhookContext {
@@ -113,6 +114,7 @@ export async function applyGithubEvent(
 			| {
 					id?: number;
 					head_branch?: string;
+					name?: string;
 					status?: string;
 					conclusion?: string;
 					html_url?: string;
@@ -128,9 +130,23 @@ export async function applyGithubEvent(
 			const previous = structuredClone(job);
 			job.last_webhook_event_at = nowIso();
 			job.workflow_run_id = run.id;
-			if (run.status === 'completed') {
+			if (!canAdvanceJob(job)) {
+				recordWorkflowSnapshot(job, run);
+			} else if (run.status === 'completed') {
 				const decision = decideCompletedWorkflowRun(job, run, 'webhook');
 				applyCompletedWorkflowRunDecision(job, run, decision);
+				if (run.conclusion === 'cancelled' || run.conclusion === 'timed_out') {
+					job.worker_manifest = mergeWorkerManifest(job.worker_manifest, {
+						control: {
+							last_interrupt: {
+								kind: run.conclusion === 'cancelled' ? 'workflow_cancelled' : 'workflow_timed_out',
+								source: 'workflow',
+								message: `${run.name ?? 'workflow'} concluded with ${run.conclusion}`,
+								recorded_at: nowIso(),
+							},
+						},
+					});
+				}
 				if (decision.shouldAutoRedispatch) {
 					job.auto_improve_cycle += 1;
 					const redispatched = await context.autoRedispatchJob(
@@ -172,7 +188,7 @@ export async function applyGithubEvent(
 				(await findByRepoAndBranch(context, repoFullName, pr.head.ref));
 			if (job) {
 				const previous = structuredClone(job);
-				applyPullRequestEventToJob(job, pr, nowIso());
+				applyPullRequestEventToJob(job, pr, nowIso(), canAdvanceJob(job));
 				await context.persistJob(job, previous);
 				return {
 					matched: true,

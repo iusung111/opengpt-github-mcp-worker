@@ -10,6 +10,7 @@ Guidance, self-host inspection, live-only control-plane actions, and permission 
 
 - `help`
 - `request_permission_bundle`
+- `permission_request_resolve`
 - `repo_work_context`
 - `self_host_status`
 - `self_deploy`
@@ -159,6 +160,7 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - `jobs_list`
 - `job_event_feed`
 - `audit_list`
+- `job_control`
 - `job_update_status`
 - `job_append_note`
 - `job_submit_review`
@@ -215,4 +217,3 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - description: Inspect self-host state from any environment, but allow secret sync and live promotion only from the live self-host worker.
 - capabilities: `read`, `workflow`, `self_host`
 - group ids: `overview`, `workspace`, `repo_read`, `repo_write`, `queue`
-

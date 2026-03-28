@@ -12,6 +12,7 @@ export function applyPullRequestEventToJob(
 	job: JobRecord,
 	pr: PullRequestEventPayload,
 	timestamp: string,
+	allowTransition = true,
 ): void {
 	job.last_webhook_event_at = timestamp;
 	if (pr.number && job.pr_number !== pr.number) {
@@ -21,7 +22,7 @@ export function applyPullRequestEventToJob(
 	if (pr.head?.ref && pr.head.ref !== job.work_branch) {
 		job.work_branch = pr.head.ref;
 	}
-	if (pr.state === 'open' && (job.status === 'queued' || job.status === 'working')) {
+	if (allowTransition && pr.state === 'open' && (job.status === 'queued' || job.status === 'working')) {
 		transitionJob(job, 'review_pending', 'reviewer');
 	}
 	job.updated_at = timestamp;

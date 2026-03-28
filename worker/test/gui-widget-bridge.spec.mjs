@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
 	applyHostContextToDocument,
@@ -332,6 +332,148 @@ describe('gui widget bridge helpers', () => {
 		});
 	});
 
+	it('keeps long-running executions in waiting state and reconciles late tool results by request id', async () => {
+		vi.useFakeTimers();
+		try {
+			const doc = createFakeDocument();
+			const win = createFakeWindow();
+			let sessionUpdates = [];
+			let toolResultSessionId = null;
+
+			const bridge = createMcpUiBridge({
+				doc,
+				win,
+				initializeTimeoutMs: 25,
+				executionSoftTimeoutMs: 20,
+				executionHardTimeoutMs: 100,
+				onRequestStateChanged(session) {
+					sessionUpdates.push(session);
+				},
+				onToolResult(_params, sessionId) {
+					toolResultSessionId = sessionId;
+				},
+			});
+
+			const connectPromise = bridge.connect();
+			win.dispatchMessage({
+				source: win.parent,
+				origin: 'https://chatgpt.com',
+				data: {
+					jsonrpc: '2.0',
+					id: 1,
+					result: {
+						hostContext: { theme: 'dark', displayMode: 'inline', platform: 'web' },
+						hostCapabilities: { message: {}, openLink: {} },
+					},
+				},
+			});
+			await connectPromise;
+
+			const toolCallPromise = bridge.callTool('job_progress', { job_id: 'job-soft-wait' });
+			expect(win.posted[2]).toMatchObject({
+				message: {
+					jsonrpc: '2.0',
+					id: 2,
+					method: 'tools/call',
+				},
+			});
+
+			await vi.advanceTimersByTimeAsync(25);
+			expect(bridge.getState().toolSessions[0]).toMatchObject({
+				requestId: '2',
+				toolName: 'job_progress',
+				phase: 'waiting',
+			});
+
+			win.dispatchMessage({
+				source: win.parent,
+				origin: 'https://chatgpt.com',
+				data: {
+					jsonrpc: '2.0',
+					method: 'ui/notifications/tool-result',
+					params: {
+						request_id: '2',
+						structuredContent: {
+							kind: 'opengpt.notification_contract.job_progress',
+							progress: { job_id: 'job-soft-wait' },
+						},
+					},
+				},
+			});
+
+			await expect(toolCallPromise).resolves.toMatchObject({
+				structuredContent: {
+					kind: 'opengpt.notification_contract.job_progress',
+				},
+			});
+			expect(toolResultSessionId).toBe('2');
+			expect(bridge.getState().toolSessions[0]).toMatchObject({
+				requestId: '2',
+				phase: 'completed',
+				resultKind: 'opengpt.notification_contract.job_progress',
+			});
+			expect(sessionUpdates.some((session) => session.requestId === '2' && session.phase === 'waiting')).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('marks cancelled sessions and rejects pending work on teardown', async () => {
+		const doc = createFakeDocument();
+		const win = createFakeWindow();
+		const bridge = createMcpUiBridge({ doc, win });
+
+		const connectPromise = bridge.connect();
+		win.dispatchMessage({
+			source: win.parent,
+			origin: 'https://chatgpt.com',
+			data: {
+				jsonrpc: '2.0',
+				id: 1,
+				result: {
+					hostContext: { theme: 'dark', displayMode: 'inline', platform: 'web' },
+					hostCapabilities: { message: {}, openLink: {} },
+				},
+			},
+		});
+		await connectPromise;
+
+		const toolCallPromise = bridge.callTool('jobs_list', {});
+		const sendMessagePromise = bridge.sendMessage('Please hold this run.');
+
+		win.dispatchMessage({
+			source: win.parent,
+			origin: 'https://chatgpt.com',
+			data: {
+				jsonrpc: '2.0',
+				method: 'ui/notifications/tool-cancelled',
+				params: {
+					request_id: '2',
+				},
+			},
+		});
+		await expect(toolCallPromise).rejects.toThrow('Host cancelled the current tool execution.');
+		expect(bridge.getState().toolSessions.find((session) => session.requestId === '2')).toMatchObject({
+			phase: 'cancelled',
+		});
+
+		win.dispatchMessage({
+			source: win.parent,
+			origin: 'https://chatgpt.com',
+			data: {
+				jsonrpc: '2.0',
+				method: 'ui/notifications/request-teardown',
+				params: {
+					reason: 'host disconnect',
+				},
+			},
+		});
+		await expect(sendMessagePromise).rejects.toThrow('Host requested widget teardown.');
+		expect(bridge.getState().toolSessions.find((session) => session.requestId === '3')).toMatchObject({
+			phase: 'cancelled',
+		});
+	});
+
 	it('applies host context CSS variables and fonts', () => {
 		const doc = createFakeDocument();
 		applyHostContextToDocument(
@@ -381,11 +523,18 @@ describe('gui widget bridge helpers', () => {
 				body: 'Need workflow access before continuing.',
 			},
 			permission_bundle: {
-				status: 'ready_for_approval',
+				status: 'requested',
+				request_id: 'req-42',
 				bundle: {
 					repos: ['iusung111/OpenGPT'],
 					approval_request: 'Approve one MCP permission bundle for workflow dispatch.',
 				},
+			},
+			latest_tool_session: {
+				request_id: 'tool-7',
+				tool_name: 'job_control',
+				phase: 'waiting',
+				next_step: 'The host is still processing the request. Keep the widget open.',
 			},
 			host: {
 				display_mode: 'inline',
@@ -397,8 +546,11 @@ describe('gui widget bridge helpers', () => {
 		expect(text).toContain('job-id: job-ctx-1');
 		expect(text).toContain('Blocked action: workflow_dispatch');
 		expect(text).toContain('Notification detail: Need workflow access before continuing.');
-		expect(text).toContain('Permission bundle status: ready_for_approval');
+		expect(text).toContain('Permission bundle status: requested');
+		expect(text).toContain('Permission request id: req-42');
 		expect(text).toContain('Permission scope: iusung111/OpenGPT');
 		expect(text).toContain('Approval request: Approve one MCP permission bundle for workflow dispatch.');
+		expect(text).toContain('Latest tool request: tool-7');
+		expect(text).toContain('Latest tool phase: waiting');
 	});
 });

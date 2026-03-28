@@ -2,6 +2,7 @@ import {
 	DispatchRequestRecord,
 	JobAttentionManifest,
 	JobBrowserManifest,
+	JobControlManifest,
 	JobDesktopManifest,
 	JobExecutionManifest,
 	JobPreviewManifest,
@@ -75,6 +76,7 @@ export function createEmptyWorkerManifest(): JobWorkerManifest {
 		desktop: {},
 		runtime: {},
 		attention: {},
+		control: {},
 		dispatch_request: null,
 		last_workflow_run: null,
 	};
@@ -89,6 +91,7 @@ export function normalizeWorkerManifest(value: unknown): JobWorkerManifest {
 	const desktop = normalizeSection<JobDesktopManifest>(input.desktop);
 	const runtime = normalizeSection<JobRuntimeManifest>(input.runtime);
 	const attention = normalizeSection<JobAttentionManifest>(input.attention);
+	const control = normalizeSection<JobControlManifest>(input.control);
 
 	const dispatchRequest =
 		normalizeDispatchRequest(execution.dispatch_request) ?? normalizeDispatchRequest(input.dispatch_request);
@@ -110,6 +113,7 @@ export function normalizeWorkerManifest(value: unknown): JobWorkerManifest {
 		desktop,
 		runtime,
 		attention,
+		control,
 		dispatch_request: dispatchRequest,
 		last_workflow_run: lastWorkflowRun,
 	};
@@ -150,6 +154,10 @@ export function mergeWorkerManifest(current: unknown, patch: unknown): JobWorker
 		attention: {
 			...(base.attention ?? {}),
 			...(isRecord(patch.attention) ? patch.attention : {}),
+		},
+		control: {
+			...(base.control ?? {}),
+			...(isRecord(patch.control) ? patch.control : {}),
 		},
 	});
 

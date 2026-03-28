@@ -21,13 +21,16 @@ const notificationReadMeta = notificationWidgetToolMeta({
 	'openai/toolInvocation/invoked': 'Run status ready',
 });
 
-const attentionStatusSchema = z.enum(['idle', 'pending_approval', 'running', 'completed', 'failed']);
+const attentionStatusSchema = z.enum(['idle', 'pending_approval', 'running', 'paused', 'cancelled', 'interrupted', 'completed', 'failed']);
 const sourceLayerSchema = z.enum(['gpt', 'mcp', 'cloudflare', 'repo', 'system']);
 const notificationCountsSchema = z
 	.object({
 		idle: z.number(),
 		pending_approval: z.number(),
 		running: z.number(),
+		paused: z.number(),
+		cancelled: z.number(),
+		interrupted: z.number(),
 		completed: z.number(),
 		failed: z.number(),
 	})
@@ -41,7 +44,7 @@ const runSummarySchema = z
 	.passthrough();
 const blockingStateSchema = z
 	.object({
-		kind: z.enum(['none', 'approval', 'review', 'failure']),
+		kind: z.enum(['none', 'approval', 'review', 'failure', 'paused', 'cancelled', 'interrupted']),
 		reason: z.string().nullable().optional(),
 		blocked_action: z.string().nullable().optional(),
 		resume_hint: z.string().nullable().optional(),
@@ -68,6 +71,7 @@ const layerLogEntrySchema = z
 const jobProgressStructuredSchema = z
 	.object({
 		kind: z.literal('opengpt.notification_contract.job_progress'),
+		action: z.string().optional(),
 		progress: z
 			.object({
 				job_id: z.string(),
@@ -81,6 +85,8 @@ const jobProgressStructuredSchema = z
 		blocking_state: blockingStateSchema.optional(),
 		latest_notification: notificationItemSchema.nullable().optional(),
 		notification_counts: notificationCountsSchema.optional(),
+		resume_strategy: z.string().optional(),
+		workflow_cancel: z.object({}).passthrough().nullable().optional(),
 	})
 	.passthrough();
 const jobsListStructuredSchema = z
@@ -233,7 +239,7 @@ export function registerQueueTools(
 				'List derived MCP notification items and layer logs for one job or across active jobs. Use this when you need the normalized run attention feed rather than raw audit rows.',
 			inputSchema: {
 				job_id: z.string().optional(),
-				status: z.enum(['idle', 'pending_approval', 'running', 'completed', 'failed']).optional(),
+				status: z.enum(['idle', 'pending_approval', 'running', 'paused', 'cancelled', 'interrupted', 'completed', 'failed']).optional(),
 				source_layer: z.enum(['gpt', 'mcp', 'cloudflare', 'repo', 'system']).optional(),
 				since: z.string().optional(),
 				limit: z.number().int().positive().max(200).default(50),
@@ -299,6 +305,44 @@ export function registerQueueTools(
 				return toolText(result);
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'job_update_status_failed'), error, writeAnnotations));
+			}
+		},
+	);
+
+	server.registerTool(
+		'job_control',
+		{
+			description:
+				'Pause, resume, cancel, or retry a queue job. Use this from the Run Console when execution should be explicitly held, resumed, cancelled, or re-dispatched.',
+			inputSchema: {
+				job_id: z.string(),
+				action: z.enum(['pause', 'resume', 'cancel', 'retry']),
+				reason: z.string().optional(),
+				resume_strategy: z.enum(['refresh', 'redispatch']).optional(),
+				expected_state: z
+					.enum(['active', 'paused', 'cancelled', 'idle', 'pending_approval', 'running', 'interrupted', 'completed', 'failed'])
+					.optional(),
+			},
+			outputSchema: jobProgressStructuredSchema,
+			annotations: writeAnnotations,
+			_meta: notificationWidgetToolMeta({
+				'openai/toolInvocation/invoking': 'Updating run control state',
+				'openai/toolInvocation/invoked': 'Run control state updated',
+			}),
+		},
+		async ({ job_id, action, reason, resume_strategy, expected_state }) => {
+			try {
+				const result = await queueJson(env, {
+					action: 'job_control',
+					job_id,
+					control_action: action,
+					reason,
+					resume_strategy,
+					expected_state,
+				});
+				return toolText(result);
+			} catch (error) {
+				return toolText(fail(errorCodeFor(error, 'job_control_failed'), error, writeAnnotations));
 			}
 		},
 	);

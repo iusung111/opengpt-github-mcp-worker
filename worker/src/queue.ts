@@ -18,6 +18,7 @@ import {
 	getReviewStaleAfterMs,
 	getWorkingStaleAfterMs,
 	githubGet,
+	githubPost,
 	repoAllowed,
 	nowIso,
 	jsonResponse,
@@ -26,6 +27,7 @@ import {
 	fail
 } from './utils';
 import { githubAuthConfigured } from './github';
+import { mergeWorkerManifest } from './job-manifest';
 import { autoRedispatchJob as autoRedispatchQueueJob } from './queue-dispatch';
 import {
 	enforceAuditRetention as enforceQueueAuditRetention,
@@ -179,9 +181,27 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		const previous = structuredClone(job);
 		job.stale_reason = reason;
 		pushJobNote(job, note);
+		job.worker_manifest = mergeWorkerManifest(job.worker_manifest, {
+			control: {
+				last_interrupt: {
+					kind: 'stale_reconcile',
+					source: 'queue',
+					message: note,
+					recorded_at: nowIso(),
+				},
+			},
+		});
 		job.updated_at = nowIso();
 		await this.persistJob(job, previous);
 		await this.writeAudit('job_reconcile_stale', this.buildJobAudit(job, { reason }));
+		await this.writeAudit('job_interrupt_recorded', {
+			job_id: job.job_id,
+			repo: job.repo,
+			interrupt_kind: 'stale_reconcile',
+			source_layer: 'system',
+			attention_status: 'interrupted',
+			message: note,
+		});
 		return true;
 	}
 
@@ -195,6 +215,28 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 
 	private async autoRedispatchJob(job: JobRecord, reason: string): Promise<boolean> {
 		return autoRedispatchQueueJob({ env: this.env }, job, reason);
+	}
+
+	private async cancelWorkflowRun(
+		job: JobRecord,
+	): Promise<{ attempted: boolean; cancelled: boolean; error: string | null }> {
+		if (!job.workflow_run_id || !githubAuthConfigured(this.env) || !repoAllowed(this.env, job.repo)) {
+			return { attempted: false, cancelled: false, error: null };
+		}
+		const [owner, repo] = job.repo.split('/');
+		if (!owner || !repo) {
+			return { attempted: false, cancelled: false, error: 'invalid repo key' };
+		}
+		try {
+			await githubPost(this.env, `/repos/${owner}/${repo}/actions/runs/${job.workflow_run_id}/cancel`);
+			return { attempted: true, cancelled: true, error: null };
+		} catch (error) {
+			return {
+				attempted: true,
+				cancelled: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
 	}
 
 	private async reconcileJob(job: JobRecord): Promise<JobRecord> {
@@ -313,6 +355,8 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 						getActiveWorkspaceRepoKey: this.getActiveWorkspaceRepoKey.bind(this),
 						findSimilarWorkspaces: this.findSimilarWorkspaces.bind(this),
 						tryRegisterDelivery: this.tryRegisterDelivery.bind(this),
+						autoRedispatchJob: this.autoRedispatchJob.bind(this),
+						cancelWorkflowRun: this.cancelWorkflowRun.bind(this),
 						applyGithubEvent: (payload, _deliveryId) =>
 							applyGitHubWebhookEvent(
 								{

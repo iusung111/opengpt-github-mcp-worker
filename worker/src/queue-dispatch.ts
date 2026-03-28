@@ -1,8 +1,8 @@
 import { githubAuthConfigured } from './github';
-import { setManifestDispatchRequest, setManifestWorkflowRun } from './job-manifest';
+import { mergeWorkerManifest, setManifestDispatchRequest, setManifestWorkflowRun } from './job-manifest';
 import { JobRecord } from './types';
 import { buildDispatchFingerprint, githubPost, nowIso } from './utils';
-import { getDispatchRequest, pushJobNote, transitionJob } from './queue-state';
+import { canAdvanceJob, getDispatchRequest, pushJobNote, transitionJob } from './queue-state';
 
 export interface QueueDispatchContext {
 	env: Parameters<typeof githubAuthConfigured>[0];
@@ -14,7 +14,7 @@ export async function autoRedispatchJob(
 	reason: string,
 ): Promise<boolean> {
 	const dispatchRequest = getDispatchRequest(job);
-	if (!dispatchRequest || !githubAuthConfigured(context.env)) {
+	if (!dispatchRequest || !githubAuthConfigured(context.env) || !canAdvanceJob(job)) {
 		return false;
 	}
 	const fingerprint = await buildDispatchFingerprint(
@@ -38,17 +38,28 @@ export async function autoRedispatchJob(
 	job.last_error = undefined;
 	job.stale_reason = undefined;
 	pushJobNote(job, `auto redispatch triggered: ${reason}`);
-	job.worker_manifest = setManifestWorkflowRun(
-		setManifestDispatchRequest(job.worker_manifest, {
-			...dispatchRequest,
-			fingerprint,
-			dispatched_at: nowIso(),
-		}),
+	job.worker_manifest = mergeWorkerManifest(
+		setManifestWorkflowRun(
+			setManifestDispatchRequest(job.worker_manifest, {
+				...dispatchRequest,
+				fingerprint,
+				dispatched_at: nowIso(),
+			}),
+			{
+				status: 'queued',
+				conclusion: null,
+				html_url: null,
+				updated_at: nowIso(),
+			},
+		),
 		{
-			status: 'queued',
-			conclusion: null,
-			html_url: null,
-			updated_at: nowIso(),
+			control: {
+				state: 'active',
+				reason: null,
+				resolved_at: nowIso(),
+				resume_strategy: 'redispatch',
+				last_interrupt: null,
+			},
 		},
 	);
 	return true;

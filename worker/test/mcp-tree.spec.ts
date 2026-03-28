@@ -37,6 +37,8 @@ describe('repo_tree_snapshot tool', () => {
 		expect(tools.tools.some((tool) => tool.name === 'preview_env_get')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'db_reset_prepare')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_event_feed')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'job_control')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'permission_request_resolve')).toBe(true);
 		await client.close();
 	});
 });

@@ -6,8 +6,11 @@ function toArray(value) {
 	return Array.isArray(value) ? value : [];
 }
 
+const RUN_STATUSES = ['idle', 'pending_approval', 'running', 'paused', 'cancelled', 'interrupted', 'completed', 'failed'];
+const SOURCE_LAYERS = ['gpt', 'mcp', 'cloudflare', 'repo', 'system'];
+
 function coerceRunStatus(value) {
-	return ['idle', 'pending_approval', 'running', 'completed', 'failed'].includes(value) ? value : 'idle';
+	return RUN_STATUSES.includes(value) ? value : 'idle';
 }
 
 function coerceSeverity(value) {
@@ -31,6 +34,19 @@ function clampProgress(value) {
 	const numeric = coerceNumber(value);
 	if (numeric == null) return 0;
 	return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function createEmptyCounts() {
+	return {
+		idle: 0,
+		pending_approval: 0,
+		running: 0,
+		paused: 0,
+		cancelled: 0,
+		interrupted: 0,
+		completed: 0,
+		failed: 0,
+	};
 }
 
 function normalizeBlockingState(value) {
@@ -71,7 +87,7 @@ function normalizeNotification(item, fallback = {}) {
 		title: typeof item.title === 'string' && item.title ? item.title : 'Notification',
 		body: typeof item.body === 'string' ? item.body : '',
 		sourceLayer:
-			typeof item.source_layer === 'string' && ['gpt', 'mcp', 'cloudflare', 'repo', 'system'].includes(item.source_layer)
+			typeof item.source_layer === 'string' && SOURCE_LAYERS.includes(item.source_layer)
 				? item.source_layer
 				: 'system',
 		severity: coerceSeverity(item.severity),
@@ -103,7 +119,7 @@ function normalizeLogEntry(entry, fallback = {}) {
 		runId,
 		jobId,
 		source:
-			typeof entry.source_layer === 'string' && ['gpt', 'mcp', 'cloudflare', 'repo', 'system'].includes(entry.source_layer)
+			typeof entry.source_layer === 'string' && SOURCE_LAYERS.includes(entry.source_layer)
 				? entry.source_layer
 				: 'system',
 		level: coerceLevel(entry.level),
@@ -113,9 +129,64 @@ function normalizeLogEntry(entry, fallback = {}) {
 	};
 }
 
+function normalizeControlState(value) {
+	if (!hasRecord(value)) return null;
+	return {
+		state:
+			typeof value.state === 'string' && ['active', 'paused', 'cancelled'].includes(value.state)
+				? value.state
+				: null,
+		reason: typeof value.reason === 'string' ? value.reason : null,
+		requestedBy: typeof value.requested_by === 'string' ? value.requested_by : null,
+		requestedAt: typeof value.requested_at === 'string' ? value.requested_at : null,
+		resolvedAt: typeof value.resolved_at === 'string' ? value.resolved_at : null,
+		resumeStrategy: typeof value.resume_strategy === 'string' ? value.resume_strategy : null,
+		lastInterrupt:
+			hasRecord(value.last_interrupt)
+				? {
+						kind: typeof value.last_interrupt.kind === 'string' ? value.last_interrupt.kind : null,
+						source: typeof value.last_interrupt.source === 'string' ? value.last_interrupt.source : null,
+						message: typeof value.last_interrupt.message === 'string' ? value.last_interrupt.message : null,
+						recordedAt: typeof value.last_interrupt.recorded_at === 'string' ? value.last_interrupt.recorded_at : null,
+				  }
+				: null,
+	};
+}
+
+function normalizeApprovalRequest(value) {
+	if (!hasRecord(value)) return null;
+	return {
+		pending: Boolean(value.pending),
+		requestId: typeof value.request_id === 'string' ? value.request_id : null,
+		status: typeof value.status === 'string' ? value.status : null,
+		reason: typeof value.reason === 'string' ? value.reason : null,
+		blockedAction: typeof value.blocked_action === 'string' ? value.blocked_action : null,
+		bundle: hasRecord(value.bundle) ? value.bundle : null,
+		note: typeof value.note === 'string' ? value.note : null,
+		requestedAt: typeof value.requested_at === 'string' ? value.requested_at : null,
+		resolvedAt: typeof value.resolved_at === 'string' ? value.resolved_at : null,
+		clearedAt: typeof value.cleared_at === 'string' ? value.cleared_at : null,
+	};
+}
+
+function deriveRunStatus(summary, latestNotification, controlState, blockingState) {
+	if (controlState?.state === 'cancelled') return 'cancelled';
+	if (controlState?.state === 'paused') return 'paused';
+	if (
+		controlState?.lastInterrupt?.kind ||
+		blockingState?.kind === 'interrupted' ||
+		(typeof summary.interrupt_kind === 'string' && summary.interrupt_kind)
+	) {
+		return 'interrupted';
+	}
+	return coerceRunStatus(summary.status || latestNotification?.type);
+}
+
 function normalizeRunRecord(job, fallback = {}) {
 	if (!hasRecord(job)) return null;
 	const summary = hasRecord(job.run_summary) ? job.run_summary : {};
+	const controlState = normalizeControlState(job.control_state);
+	const approvalRequest = normalizeApprovalRequest(job.approval_request);
 	const latestNotification = normalizeNotification(job.latest_notification, {
 		jobId: typeof job.job_id === 'string' ? job.job_id : fallback.jobId,
 		runId: typeof summary.run_id === 'string' ? summary.run_id : fallback.runId,
@@ -148,13 +219,14 @@ function normalizeRunRecord(job, fallback = {}) {
 			: latestNotification && latestNotification.body
 				? latestNotification.body
 				: 'No run summary available.';
+	const blockingState = normalizeBlockingState(job.blocking_state);
 	return {
 		runId,
 		jobId,
 		repo: typeof job.repo === 'string' ? job.repo : typeof fallback.repo === 'string' ? fallback.repo : '',
 		title,
 		summary: summaryText,
-		status: coerceRunStatus(summary.status || latestNotification?.type),
+		status: deriveRunStatus(summary, latestNotification, controlState, blockingState),
 		progress: clampProgress(summary.progress_percent),
 		lastEvent: typeof summary.last_event === 'string' ? summary.last_event : '',
 		approvalReason: typeof summary.approval_reason === 'string' ? summary.approval_reason : null,
@@ -166,11 +238,18 @@ function normalizeRunRecord(job, fallback = {}) {
 					: '',
 		workflowRunId: coerceNumber(summary.workflow_run_id ?? job.workflow_run_id),
 		prNumber: coerceNumber(summary.pr_number ?? job.pr_number),
+		controlState,
+		approvalRequest,
+		interruptKind: typeof summary.interrupt_kind === 'string' ? summary.interrupt_kind : controlState?.lastInterrupt?.kind ?? null,
+		interruptMessage:
+			typeof summary.interrupt_message === 'string'
+				? summary.interrupt_message
+				: controlState?.lastInterrupt?.message ?? null,
 		nextActor:
 			typeof job.next_actor === 'string' && ['worker', 'reviewer', 'system'].includes(job.next_actor)
 				? job.next_actor
 				: undefined,
-		blockingState: normalizeBlockingState(job.blocking_state),
+		blockingState,
 		logs: [],
 		raw: job,
 	};
@@ -212,23 +291,20 @@ function normalizeSeedRunRecord(options = {}) {
 	};
 }
 
-function normalizeCounts(value, notifications) {
-	if (hasRecord(value)) {
-		return {
-			idle: Number(value.idle || 0),
-			pending_approval: Number(value.pending_approval || 0),
-			running: Number(value.running || 0),
-			completed: Number(value.completed || 0),
-			failed: Number(value.failed || 0),
-		};
+function countsFromValue(value) {
+	if (!hasRecord(value)) return null;
+	const counts = createEmptyCounts();
+	for (const status of RUN_STATUSES) {
+		counts[status] = Number(value[status] || 0);
 	}
-	const counts = {
-		idle: 0,
-		pending_approval: 0,
-		running: 0,
-		completed: 0,
-		failed: 0,
-	};
+	return counts;
+}
+
+function normalizeCounts(value, notifications, fallbackCounts = null) {
+	const fromValue = countsFromValue(value);
+	if (fromValue) return fromValue;
+	if (fallbackCounts) return fallbackCounts;
+	const counts = createEmptyCounts();
 	for (const item of notifications) {
 		if (!item || item.type === 'system') continue;
 		counts[item.type] += 1;
@@ -275,9 +351,13 @@ function normalizeRepoBundle(value) {
 function normalizePermissionBundle(value) {
 	if (!hasRecord(value) || value.kind !== 'opengpt.notification_contract.permission_bundle') return null;
 	return {
+		requestId: typeof value.request_id === 'string' ? value.request_id : null,
 		status: typeof value.status === 'string' ? value.status : '',
+		requestedAt: typeof value.requested_at === 'string' ? value.requested_at : null,
+		resolvedAt: typeof value.resolved_at === 'string' ? value.resolved_at : null,
 		bundle: hasRecord(value.bundle) ? value.bundle : {},
 		notification: normalizeNotification(value.notification),
+		currentProgress: hasRecord(value.current_progress) ? value.current_progress : null,
 		raw: value,
 	};
 }
@@ -319,13 +399,28 @@ export function normalizeNotificationToolState(structuredContent, meta, options 
 	}
 
 	if (source.kind === 'opengpt.notification_contract.jobs_list') {
-		model.runs = toArray(source.jobs)
+		const rawJobs = toArray(source.jobs).filter((job) => hasRecord(job));
+		model.runs = rawJobs
 			.map((job) => normalizeRunRecord(job))
 			.filter(Boolean);
 		model.notifications = model.runs
 			.map((run) => normalizeNotification(run.raw.latest_notification, { jobId: run.jobId, runId: run.runId }))
 			.filter(Boolean);
-		model.counts = normalizeCounts(source.notification_counts, model.notifications);
+		const aggregatedCounts = createEmptyCounts();
+		for (const rawJob of rawJobs) {
+			const jobCounts = countsFromValue(rawJob.notification_counts);
+			if (jobCounts) {
+				for (const status of RUN_STATUSES) {
+					aggregatedCounts[status] += jobCounts[status];
+				}
+				continue;
+			}
+			const run = normalizeRunRecord(rawJob);
+			if (run) {
+				aggregatedCounts[run.status] += 1;
+			}
+		}
+		model.counts = normalizeCounts(source.notification_counts, model.notifications, aggregatedCounts);
 	}
 
 	if (source.kind === 'opengpt.notification_contract.job_progress') {
@@ -384,6 +479,23 @@ export function normalizeNotificationToolState(structuredContent, meta, options 
 	}
 
 	if (source.kind === 'opengpt.notification_contract.permission_bundle') {
+		const currentProgress = hasRecord(source.current_progress) ? source.current_progress : null;
+		if (currentProgress) {
+			const run = normalizeRunRecord(
+				{
+					job_id: currentProgress.job_id,
+					repo: currentProgress.repo,
+					next_actor: currentProgress.next_actor,
+					run_summary: currentProgress.run_summary,
+					blocking_state: currentProgress.blocking_state,
+					latest_notification: currentProgress.latest_notification,
+					control_state: currentProgress.control_state,
+					approval_request: currentProgress.approval_request,
+				},
+				{ repo: currentProgress.repo, jobId: currentProgress.job_id },
+			);
+			model.runs = run ? [run] : [];
+		}
 		model.notifications = [normalizeNotification(source.notification, { jobId: options.selectedJobId })].filter(Boolean);
 		model.counts = normalizeCounts(source.notification_counts, model.notifications);
 	}
@@ -394,25 +506,38 @@ export function normalizeNotificationToolState(structuredContent, meta, options 
 	}
 
 	if (!model.notifications.length && model.runs.length) {
-		const fallbackRun = model.runs[0];
-		if (fallbackRun.blockingState && fallbackRun.blockingState.kind === 'approval') {
-			model.notifications = [
-				{
-					id: `${fallbackRun.runId}:approval`,
+		model.notifications = model.runs
+			.map((fallbackRun) => {
+				const fallbackType =
+					fallbackRun.blockingState && fallbackRun.blockingState.kind === 'approval'
+						? 'pending_approval'
+						: fallbackRun.blockingState && RUN_STATUSES.includes(fallbackRun.blockingState.kind)
+							? fallbackRun.blockingState.kind
+							: null;
+				if (!fallbackType) return null;
+				return {
+					id: `${fallbackRun.runId}:${fallbackType}`,
 					runId: fallbackRun.runId,
 					jobId: fallbackRun.jobId,
-					type: 'pending_approval',
-					title: 'Approval pending',
+					type: fallbackType,
+					title:
+						fallbackType === 'pending_approval'
+							? 'Approval pending'
+							: fallbackType === 'paused'
+								? 'Run paused'
+								: fallbackType === 'cancelled'
+									? 'Run cancelled'
+									: 'Run interrupted',
 					body: fallbackRun.blockingState.reason || fallbackRun.summary,
 					sourceLayer: 'system',
-					severity: 'warn',
+					severity: fallbackType === 'cancelled' || fallbackType === 'interrupted' ? 'error' : 'warn',
 					createdAt: fallbackRun.updatedAt || '',
 					linkedRefs: {},
-					dedupeKey: `${fallbackRun.runId}:approval`,
+					dedupeKey: `${fallbackRun.runId}:${fallbackType}`,
 					raw: fallbackRun.raw,
-				},
-			];
-		}
+				};
+			})
+			.filter(Boolean);
 	}
 
 	if (!model.counts) {

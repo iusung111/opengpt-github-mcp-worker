@@ -43,9 +43,13 @@ export interface ToolAnnotations extends Record<string, unknown> {
 const permissionBundleStructuredSchema = z
 	.object({
 		kind: z.literal('opengpt.notification_contract.permission_bundle'),
+		request_id: z.string().nullable().optional(),
 		bundle: z.object({}).passthrough(),
 		notification: z.object({}).passthrough().nullable().optional(),
 		status: z.string().nullable().optional(),
+		requested_at: z.string().nullable().optional(),
+		resolved_at: z.string().nullable().optional(),
+		current_progress: z.object({}).passthrough().nullable().optional(),
 	})
 	.passthrough();
 
@@ -328,7 +332,17 @@ export function registerOverviewTools(
 	});
 	server.registerTool('request_permission_bundle', { description: 'Build a batch approval bundle for one or more repositories so the user can approve the smallest useful set of MCP actions in one step.', inputSchema: { repos: z.array(z.string()).min(1).describe('List of owner/repo'), preset: z.enum(listPermissionPresets().map((preset) => preset.id) as [string, ...string[]]).optional(), capabilities: z.array(z.enum(['read', 'write', 'workflow', 'review', 'workspace', 'queue', 'self_host'])).default([]), extra_tools: z.array(z.string()).default([]).describe('Optional extra tools to include explicitly'), reason: z.string().describe('Why are these permissions needed?'), job_id: z.string().optional(), blocked_action: z.string().optional() }, outputSchema: permissionBundleStructuredSchema, annotations: readAnnotations, _meta: notificationWidgetToolMeta({ 'openai/toolInvocation/invoking': 'Preparing approval bundle', 'openai/toolInvocation/invoked': 'Approval bundle ready' }) }, async ({ repos, preset, capabilities, extra_tools, reason, job_id, blocked_action }) => {
 		try {
+			const requestId = crypto.randomUUID();
+			const bundle = buildPermissionBundleMessage({
+				repos,
+				reason,
+				preset,
+				capabilities,
+				extraTools: extra_tools,
+			});
 			let notification: Record<string, unknown> | null = null;
+			let status: 'drafted' | 'requested' = 'drafted';
+			let requestedAt: string | null = null;
 			if (job_id) {
 				const jobResult = await queueJsonOrThrow(env, { action: 'job_get', job_id }, `failed to load job ${job_id}`);
 				const job = (jobResult.data?.job ?? null) as Record<string, unknown> | null;
@@ -339,7 +353,8 @@ export function registerOverviewTools(
 				if (!repos.includes(jobRepo)) {
 					throw new Error(`job repo ${jobRepo} must be included in repos`);
 				}
-				const requestedAt = nowIso();
+				requestedAt = nowIso();
+				status = 'requested';
 				await queueJsonOrThrow(env, {
 					action: 'job_upsert',
 					job: {
@@ -349,11 +364,20 @@ export function registerOverviewTools(
 							attention: {
 								approval: {
 									pending: true,
+									request_id: requestId,
+									status: 'requested',
 									reason,
 									blocked_action: blocked_action ?? null,
+									bundle,
+									note: null,
 									requested_at: requestedAt,
+									resolved_at: null,
 									cleared_at: null,
 								},
+							},
+							control: {
+								state: 'active',
+								last_interrupt: null,
 							},
 						},
 					},
@@ -364,6 +388,7 @@ export function registerOverviewTools(
 					payload: {
 						job_id,
 						repo: jobRepo,
+						request_id: requestId,
 						reason,
 						blocked_action: blocked_action ?? null,
 						source_layer: 'gpt',
@@ -379,6 +404,7 @@ export function registerOverviewTools(
 					run_id: job_id,
 					status: 'pending_approval',
 					source_layer: 'gpt',
+					request_id: requestId,
 					blocked_action: blocked_action ?? null,
 					reason,
 					requested_at: requestedAt,
@@ -387,26 +413,35 @@ export function registerOverviewTools(
 			return toolText(
 				ok(
 					{
-						status: 'ready_for_approval',
+						request_id: requestId,
+						status,
+						requested_at: requestedAt,
+						resolved_at: null,
 						available_presets: listPermissionPresets(),
 						available_tool_groups: listToolGroups().map((group) => ({
 							id: group.id,
 							label: group.label,
 							description: group.description,
 						})),
-						bundle: buildPermissionBundleMessage({
-							repos,
-							reason,
-							preset,
-							capabilities,
-							extraTools: extra_tools,
-						}),
+						bundle,
 						notification,
 					},
 					readAnnotations,
 				),
 			);
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'request_permission_bundle_failed'), error, readAnnotations)); }
+	});
+	server.registerTool('permission_request_resolve', { description: 'Record the outcome of a previously requested permission bundle for a queue job. This updates queue state for approval-approved, rejected, or superseded flows without bypassing host-native grants.', inputSchema: { job_id: z.string(), request_id: z.string(), resolution: z.enum(['approved', 'rejected', 'superseded']), note: z.string().optional() }, outputSchema: permissionBundleStructuredSchema, annotations: writeAnnotations, _meta: notificationWidgetToolMeta({ 'openai/toolInvocation/invoking': 'Recording approval outcome', 'openai/toolInvocation/invoked': 'Approval outcome recorded' }) }, async ({ job_id, request_id, resolution, note }) => {
+		try {
+			const result = await queueJson(env, {
+				action: 'permission_request_resolve',
+				job_id,
+				request_id,
+				resolution,
+				note,
+			});
+			return toolText(result);
+		} catch (error) { return toolText(fail(errorCodeFor(error, 'permission_request_resolve_failed'), error, writeAnnotations)); }
 	});
 	server.registerTool('repo_work_context', { description: 'Use the GitHub repository itself as the primary working context instead of a local folder. Returns open agent PRs, active queue jobs, and recent workflow runs so chat can continue work in stages.', inputSchema: { owner: z.string(), repo: z.string(), include_completed_jobs: z.boolean().default(false) }, annotations: readAnnotations }, async ({ owner, repo, include_completed_jobs }) => {
 		const repoKey = `${owner}/${repo}`;

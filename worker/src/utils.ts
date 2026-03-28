@@ -79,11 +79,14 @@ function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, u
 	if (hasRecord(data.progress) && hasRecord(data.progress.run_summary)) {
 		return {
 			kind: 'opengpt.notification_contract.job_progress',
+			action: typeof data.action === 'string' ? data.action : undefined,
 			progress: data.progress,
 			run_summary: data.progress.run_summary,
 			blocking_state: data.progress.blocking_state ?? null,
 			latest_notification: data.progress.latest_notification ?? null,
 			notification_counts: data.progress.notification_counts ?? null,
+			resume_strategy: typeof data.resume_strategy === 'string' ? data.resume_strategy : undefined,
+			workflow_cancel: hasRecord(data.workflow_cancel) ? data.workflow_cancel : null,
 		};
 	}
 	if (Array.isArray(data.jobs) && data.jobs.some((item) => hasRecord(item) && hasRecord(item.run_summary))) {
@@ -103,9 +106,13 @@ function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, u
 	if (hasRecord(data.bundle) && typeof data.status === 'string') {
 		return {
 			kind: 'opengpt.notification_contract.permission_bundle',
+			request_id: typeof data.request_id === 'string' ? data.request_id : null,
 			bundle: data.bundle,
 			notification: hasRecord(data.notification) ? data.notification : null,
 			status: data.status ?? null,
+			requested_at: typeof data.requested_at === 'string' ? data.requested_at : null,
+			resolved_at: typeof data.resolved_at === 'string' ? data.resolved_at : null,
+			current_progress: hasRecord(data.current_progress) ? data.current_progress : null,
 		};
 	}
 	if (typeof data.bundle_id === 'string' && typeof data.repo === 'string') {

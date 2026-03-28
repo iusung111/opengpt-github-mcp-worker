@@ -297,4 +297,75 @@ describe('queue webhook reconciliation', () => {
 			},
 		});
 	});
+
+	it('does not silently advance paused jobs on PR webhook updates', async () => {
+		await SELF.fetch('https://example.com/queue/job', {
+			method: 'POST',
+			headers: queueJsonHeaders,
+			body: JSON.stringify({
+				job_id: 'job-paused-pr',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				work_branch: 'agent/job-paused-pr-909',
+				status: 'working',
+				next_actor: 'system',
+				worker_manifest: {
+					control: {
+						state: 'paused',
+						reason: 'Manual hold',
+					},
+				},
+			}),
+		});
+
+		const prBody = JSON.stringify({
+			action: 'opened',
+			repository: { full_name: 'iusung111/OpenGPT' },
+			pull_request: {
+				number: 13,
+				state: 'open',
+				head: { ref: 'agent/job-paused-pr-909' },
+			},
+		});
+		const prResponse = await SELF.fetch('https://example.com/webhooks/github', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'X-GitHub-Event': 'pull_request',
+				'X-Hub-Signature-256': await webhookSignature(prBody),
+			},
+			body: prBody,
+		});
+		expect(prResponse.status).toBe(200);
+		await expect(prResponse.json()).resolves.toMatchObject({
+			ok: true,
+			outcome: {
+				matched: true,
+				job_id: 'job-paused-pr',
+				pr_number: 13,
+				work_branch: 'agent/job-paused-pr-909',
+				status: 'working',
+				next_actor: 'system',
+			},
+		});
+
+		const getResponse = await SELF.fetch('https://example.com/queue/job/job-paused-pr', {
+			headers: queueAuthHeaders,
+		});
+		await expect(getResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				job: {
+					status: 'working',
+					next_actor: 'system',
+					pr_number: 13,
+					worker_manifest: {
+						control: {
+							state: 'paused',
+						},
+					},
+				},
+			},
+		});
+	});
 });

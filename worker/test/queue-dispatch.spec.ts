@@ -57,6 +57,43 @@ describe('queue dispatch helpers', () => {
 		expect(githubPost).not.toHaveBeenCalled();
 	});
 
+	it('does not redispatch paused or cancelled jobs', async () => {
+		const pausedJob = makeJob({
+			worker_manifest: {
+				control: {
+					state: 'paused',
+				},
+				dispatch_request: {
+					owner: 'iusung111',
+					repo: 'OpenGPT',
+					workflow_id: 'agent-run.yml',
+					ref: 'main',
+					inputs: { job_id: 'job-1' },
+					dispatched_at: '2026-03-21T00:00:00.000Z',
+				},
+			},
+		});
+		const cancelledJob = makeJob({
+			worker_manifest: {
+				control: {
+					state: 'cancelled',
+				},
+				dispatch_request: {
+					owner: 'iusung111',
+					repo: 'OpenGPT',
+					workflow_id: 'agent-run.yml',
+					ref: 'main',
+					inputs: { job_id: 'job-1' },
+					dispatched_at: '2026-03-21T00:00:00.000Z',
+				},
+			},
+		});
+
+		await expect(autoRedispatchJob({ env: {} as never }, pausedJob, 'retry')).resolves.toBe(false);
+		await expect(autoRedispatchJob({ env: {} as never }, cancelledJob, 'retry')).resolves.toBe(false);
+		expect(githubPost).not.toHaveBeenCalled();
+	});
+
 	it('re-dispatches the workflow and rewrites job state', async () => {
 		const job = makeJob({
 			workflow_run_id: 123,
@@ -82,6 +119,11 @@ describe('queue dispatch helpers', () => {
 		expect(job.stale_reason).toBeUndefined();
 		expect(job.notes.at(-1)).toBe('auto redispatch triggered: retry');
 		expect(job.worker_manifest).toMatchObject({
+			control: {
+				state: 'active',
+				resume_strategy: 'redispatch',
+				last_interrupt: null,
+			},
 			dispatch_request: {
 				fingerprint: 'fp-1',
 				dispatched_at: '2026-03-21T00:00:10.000Z',

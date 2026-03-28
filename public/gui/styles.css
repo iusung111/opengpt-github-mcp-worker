@@ -302,6 +302,21 @@ textarea {
 	color: var(--completed);
 }
 
+.status-pill.paused {
+	background: #f6e2c9;
+	color: #9a4f11;
+}
+
+.status-pill.cancelled {
+	background: #f8dfdf;
+	color: #b91c1c;
+}
+
+.status-pill.interrupted {
+	background: #efe4c8;
+	color: #8a5a00;
+}
+
 .status-pill.failed {
 	background: var(--failed-soft);
 	color: var(--failed);
@@ -440,6 +455,18 @@ input[type="number"],
 
 .timeline-rail.completed {
 	background: linear-gradient(180deg, #166534, #4ade80);
+}
+
+.timeline-rail.paused {
+	background: linear-gradient(180deg, #c46b1a, #f1b45d);
+}
+
+.timeline-rail.cancelled {
+	background: linear-gradient(180deg, #991b1b, #f87171);
+}
+
+.timeline-rail.interrupted {
+	background: linear-gradient(180deg, #8a5a00, #f2c35f);
 }
 
 .timeline-rail.failed {

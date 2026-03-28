@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { getDispatchRequest, isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob } from '../src/queue-state';
+import {
+	canAdvanceJob,
+	getControlState,
+	getDispatchRequest,
+	hasExecutionRelatedInterrupt,
+	isDryRunJob,
+	pushJobNote,
+	recordWorkflowSnapshot,
+	transitionJob,
+} from '../src/queue-state';
 import { JobRecord } from '../src/types';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
@@ -76,5 +85,34 @@ describe('queue-state helpers', () => {
 				html_url: 'https://github.com/example/run/1',
 			},
 		});
+	});
+
+	it('derives queue control state and interrupt semantics from the worker manifest', () => {
+		const pausedJob = makeJob({
+			worker_manifest: {
+				control: {
+					state: 'paused',
+					reason: 'Waiting on operator confirmation',
+				},
+			},
+		});
+		const interruptedJob = makeJob({
+			worker_manifest: {
+				control: {
+					last_interrupt: {
+						kind: 'workflow_timed_out',
+						source: 'workflow',
+						recorded_at: '2026-03-21T00:00:01.000Z',
+					},
+				},
+			},
+		});
+
+		expect(getControlState(pausedJob)).toMatchObject({
+			state: 'paused',
+			reason: 'Waiting on operator confirmation',
+		});
+		expect(canAdvanceJob(pausedJob)).toBe(false);
+		expect(hasExecutionRelatedInterrupt(interruptedJob)).toBe(true);
 	});
 });

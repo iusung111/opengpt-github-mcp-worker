@@ -2,6 +2,8 @@ import {
 	AuditRecord,
 	BlockingState,
 	JobApprovalManifest,
+	JobControlManifest,
+	JobInterruptRecord,
 	JobProgressSnapshot,
 	JobRecord,
 	JobWorkerManifest,
@@ -35,6 +37,9 @@ function buildNotificationCounts(items: NotificationItem[]): NotificationCounts 
 		idle: 0,
 		pending_approval: 0,
 		running: 0,
+		paused: 0,
+		cancelled: 0,
+		interrupted: 0,
 		completed: 0,
 		failed: 0,
 	};
@@ -47,6 +52,20 @@ function buildNotificationCounts(items: NotificationItem[]): NotificationCounts 
 function getApprovalManifest(manifest: JobWorkerManifest | undefined): JobApprovalManifest | null {
 	const approval = manifest?.attention?.approval;
 	return approval && typeof approval === 'object' ? approval : null;
+}
+
+function getControlManifest(manifest: JobWorkerManifest | undefined): JobControlManifest | null {
+	const control = manifest?.control;
+	return control && typeof control === 'object' ? control : null;
+}
+
+function getLastInterrupt(manifest: JobWorkerManifest | undefined): JobInterruptRecord | null {
+	const interrupt = getControlManifest(manifest)?.last_interrupt;
+	return interrupt && typeof interrupt === 'object' ? interrupt : null;
+}
+
+function interruptMessage(interrupt: JobInterruptRecord | null): string | null {
+	return asString(interrupt?.message);
 }
 
 function hasActiveManifestSection(manifest: JobWorkerManifest | undefined): boolean {
@@ -79,6 +98,9 @@ function inferEventLayer(eventType: string, payload: Record<string, unknown>): N
 		return explicitLayer;
 	}
 	if (eventType.startsWith('job_attention_approval')) return 'gpt';
+	if (eventType === 'permission_request_resolved') return 'gpt';
+	if (eventType.startsWith('job_control_')) return 'gpt';
+	if (eventType === 'job_interrupt_recorded') return 'system';
 	if (eventType === 'job_submit_review' || eventType === 'github_event_processed') return 'repo';
 	if (payload.section === 'preview') return 'cloudflare';
 	if (payload.section === 'verification' || payload.section === 'browser' || payload.section === 'desktop' || payload.section === 'runtime') {
@@ -93,6 +115,9 @@ function inferStatusFromEvent(job: JobRecord, eventType: string, payload: Record
 		explicitStatus === 'idle' ||
 		explicitStatus === 'pending_approval' ||
 		explicitStatus === 'running' ||
+		explicitStatus === 'paused' ||
+		explicitStatus === 'cancelled' ||
+		explicitStatus === 'interrupted' ||
 		explicitStatus === 'completed' ||
 		explicitStatus === 'failed'
 	) {
@@ -100,6 +125,13 @@ function inferStatusFromEvent(job: JobRecord, eventType: string, payload: Record
 	}
 	if (eventType === 'job_attention_approval_requested') return 'pending_approval';
 	if (eventType === 'job_attention_approval_cleared') return 'running';
+	if (eventType === 'job_control_paused') return 'paused';
+	if (eventType === 'job_control_cancelled') return 'cancelled';
+	if (eventType === 'job_interrupt_recorded') return 'interrupted';
+	if (eventType === 'permission_request_resolved') {
+		if (payload.resolution === 'approved') return 'running';
+		if (payload.resolution === 'rejected' || payload.resolution === 'superseded') return 'interrupted';
+	}
 	if (eventType === 'job_submit_review' && payload.verdict === 'blocked') return 'failed';
 	if (eventType === 'job_submit_review' && payload.verdict === 'approved') return 'completed';
 	return computeRunAttentionStatus(job);
@@ -113,7 +145,13 @@ function inferSeverity(status: RunAttentionStatus, eventType: string, payload: R
 	if (status === 'failed' || eventType.includes('failed') || eventType === 'job_submit_review' && payload.verdict === 'blocked') {
 		return 'error';
 	}
-	if (status === 'pending_approval' || payload.verdict === 'changes_requested') {
+	if (
+		status === 'pending_approval' ||
+		status === 'paused' ||
+		status === 'cancelled' ||
+		status === 'interrupted' ||
+		payload.verdict === 'changes_requested'
+	) {
 		return 'warning';
 	}
 	return 'info';
@@ -126,6 +164,14 @@ function buildAuditTitle(eventType: string, payload: Record<string, unknown>, st
 	}
 	if (eventType === 'job_attention_approval_requested') return 'Approval requested';
 	if (eventType === 'job_attention_approval_cleared') return 'Approval cleared';
+	if (eventType === 'permission_request_resolved' && payload.resolution === 'approved') return 'Approval approved';
+	if (eventType === 'permission_request_resolved' && payload.resolution === 'rejected') return 'Approval rejected';
+	if (eventType === 'permission_request_resolved' && payload.resolution === 'superseded') return 'Approval superseded';
+	if (eventType === 'job_control_paused') return 'Run paused';
+	if (eventType === 'job_control_resumed') return 'Run resumed';
+	if (eventType === 'job_control_retried') return 'Run retry requested';
+	if (eventType === 'job_control_cancelled') return 'Run cancelled';
+	if (eventType === 'job_interrupt_recorded') return 'Run interrupted';
 	if (eventType === 'job_submit_review' && payload.verdict === 'approved') return 'Review approved';
 	if (eventType === 'job_submit_review' && payload.verdict === 'changes_requested') return 'Review changes requested';
 	if (eventType === 'job_submit_review' && payload.verdict === 'blocked') return 'Review blocked';
@@ -159,6 +205,33 @@ function buildAuditBody(job: JobRecord, eventType: string, payload: Record<strin
 	if (eventType === 'job_attention_approval_cleared') {
 		return 'Approval requirement cleared and work can continue.';
 	}
+	if (eventType === 'permission_request_resolved') {
+		if (payload.resolution === 'approved') {
+			return 'Approval was recorded and the run can continue.';
+		}
+		if (payload.resolution === 'rejected') {
+			return asString(payload.note) ?? 'Approval was rejected and the run remains blocked.';
+		}
+		if (payload.resolution === 'superseded') {
+			return asString(payload.note) ?? 'Approval request was superseded by a newer request.';
+		}
+	}
+	if (eventType === 'job_control_paused') {
+		return asString(payload.reason) ?? 'Run paused by operator request.';
+	}
+	if (eventType === 'job_control_resumed') {
+		const strategy = asString(payload.resume_strategy);
+		return strategy ? `Run resumed with ${strategy}.` : 'Run resumed.';
+	}
+	if (eventType === 'job_control_retried') {
+		return asString(payload.reason) ?? 'Run retry requested.';
+	}
+	if (eventType === 'job_control_cancelled') {
+		return asString(payload.reason) ?? 'Run cancelled by operator request.';
+	}
+	if (eventType === 'job_interrupt_recorded') {
+		return asString(payload.message) ?? 'Run interrupted.';
+	}
 	if (eventType === 'job_submit_review') {
 		const verdict = asString(payload.verdict) ?? 'reviewed';
 		return `Review verdict: ${verdict}.`;
@@ -170,6 +243,15 @@ function buildAuditBody(job: JobRecord, eventType: string, payload: Record<strin
 	}
 	if (status === 'failed') {
 		return job.last_error ?? 'Run failed.';
+	}
+	if (status === 'interrupted') {
+		return interruptMessage(getLastInterrupt(job.worker_manifest)) ?? 'Run interrupted.';
+	}
+	if (status === 'paused') {
+		return asString(getControlManifest(job.worker_manifest)?.reason) ?? 'Run paused.';
+	}
+	if (status === 'cancelled') {
+		return asString(getControlManifest(job.worker_manifest)?.reason) ?? 'Run cancelled.';
 	}
 	if (status === 'pending_approval') {
 		return getApprovalManifest(job.worker_manifest)?.reason ?? 'Awaiting approval.';
@@ -183,16 +265,28 @@ function buildLinkedRefs(job: JobRecord, payload: Record<string, unknown>): Reco
 	const prNumber = asNumber(payload.pr_number) ?? job.pr_number ?? null;
 	const previewId = asString(payload.preview_id) ?? job.worker_manifest?.preview?.preview_id ?? null;
 	const blockedAction = asString(payload.blocked_action);
+	const requestId = asString(payload.request_id);
+	const resolution = asString(payload.resolution);
+	const resumeStrategy = asString(payload.resume_strategy);
+	const controlState = asString(payload.control_state);
+	const interruptKind = asString(payload.interrupt_kind) ?? getLastInterrupt(job.worker_manifest)?.kind ?? null;
 	if (workflowRunId !== null) refs.workflow_run_id = workflowRunId;
 	if (prNumber !== null) refs.pr_number = prNumber;
 	if (previewId !== null) refs.preview_id = previewId;
 	if (blockedAction !== null) refs.blocked_action = blockedAction;
+	if (requestId !== null) refs.request_id = requestId;
+	if (resolution !== null) refs.resolution = resolution;
+	if (resumeStrategy !== null) refs.resume_strategy = resumeStrategy;
+	if (controlState !== null) refs.control_state = controlState;
+	if (interruptKind !== null) refs.interrupt_kind = interruptKind;
 	return refs;
 }
 
 function buildSyntheticStatusNotification(job: JobRecord): NotificationItem {
 	const status = computeRunAttentionStatus(job);
 	const approval = getApprovalManifest(job.worker_manifest);
+	const control = getControlManifest(job.worker_manifest);
+	const interrupt = getLastInterrupt(job.worker_manifest);
 	return {
 		id: `${job.job_id}:status:${job.updated_at}`,
 		job_id: job.job_id,
@@ -200,7 +294,13 @@ function buildSyntheticStatusNotification(job: JobRecord): NotificationItem {
 		status,
 		title: buildAuditTitle('job_status_projection', {}, status),
 		body:
-			status === 'pending_approval'
+			status === 'cancelled'
+				? asString(control?.reason) ?? 'Run cancelled.'
+				: status === 'paused'
+					? asString(control?.reason) ?? 'Run paused.'
+					: status === 'interrupted'
+						? interruptMessage(interrupt) ?? 'Run interrupted.'
+						: status === 'pending_approval'
 				? approval?.reason ?? 'Awaiting approval.'
 				: status === 'failed'
 					? job.last_error ?? 'Run failed.'
@@ -233,9 +333,20 @@ function buildSyntheticLog(job: JobRecord): LayerLogEntry[] {
 }
 
 export function computeRunAttentionStatus(job: JobRecord): RunAttentionStatus {
+	const control = getControlManifest(job.worker_manifest);
 	const approval = getApprovalManifest(job.worker_manifest);
+	const interrupt = getLastInterrupt(job.worker_manifest);
+	if (control?.state === 'cancelled') {
+		return 'cancelled';
+	}
+	if (control?.state === 'paused') {
+		return 'paused';
+	}
 	if (approval?.pending) {
 		return 'pending_approval';
+	}
+	if (interrupt) {
+		return 'interrupted';
 	}
 	if (job.status === 'failed' || job.review_verdict === 'blocked') {
 		return 'failed';
@@ -251,6 +362,9 @@ export function computeRunAttentionStatus(job: JobRecord): RunAttentionStatus {
 
 function buildProgressPercent(job: JobRecord, status: RunAttentionStatus): number {
 	if (status === 'completed' || status === 'failed') return 100;
+	if (status === 'cancelled') return 100;
+	if (status === 'paused') return 60;
+	if (status === 'interrupted') return 55;
 	if (status === 'pending_approval') return 70;
 	if (status === 'idle') return 10;
 	if (job.status === 'review_pending') return 90;
@@ -269,13 +383,41 @@ function buildRunTitle(job: JobRecord): string {
 }
 
 export function buildBlockingState(job: JobRecord): BlockingState {
+	const control = getControlManifest(job.worker_manifest);
+	const interrupt = getLastInterrupt(job.worker_manifest);
 	const approval = getApprovalManifest(job.worker_manifest);
+	if (control?.state === 'cancelled') {
+		return {
+			kind: 'cancelled',
+			reason: asString(control.reason) ?? 'Run cancelled.',
+			blocked_action: null,
+			resume_hint: 'Retry the run explicitly if work should continue.',
+		};
+	}
+	if (control?.state === 'paused') {
+		return {
+			kind: 'paused',
+			reason: asString(control.reason) ?? 'Run paused.',
+			blocked_action: 'job_control.resume',
+			resume_hint: 'Resume the run to continue.',
+		};
+	}
 	if (approval?.pending) {
 		return {
 			kind: 'approval',
 			reason: approval.reason ?? 'Approval is required before continuing.',
 			blocked_action: approval.blocked_action ?? null,
 			resume_hint: 'Approve the requested tool bundle, then resume the job.',
+		};
+	}
+	if (interrupt) {
+		return {
+			kind: 'interrupted',
+			reason: interruptMessage(interrupt) ?? job.last_error ?? 'The run was interrupted.',
+			blocked_action: getManifestSectionHasDispatch(job) ? 'job_control.retry' : null,
+			resume_hint: getManifestSectionHasDispatch(job)
+				? 'Retry the run to re-dispatch execution, or inspect logs before retrying.'
+				: 'Inspect the latest notification or layer logs before deciding the next step.',
 		};
 	}
 	if (job.status === 'review_pending') {
@@ -300,6 +442,11 @@ export function buildBlockingState(job: JobRecord): BlockingState {
 		blocked_action: null,
 		resume_hint: null,
 	};
+}
+
+function getManifestSectionHasDispatch(job: JobRecord): boolean {
+	const manifest = job.worker_manifest ?? {};
+	return Boolean(manifest.dispatch_request || manifest.execution?.dispatch_request);
 }
 
 export function buildJobEventFeed(
@@ -345,7 +492,8 @@ export function buildJobEventFeed(
 			layer === 'cloudflare' ||
 			audit.event_type === 'job_manifest_notification' ||
 			audit.event_type === 'job_attention_approval_requested' ||
-			audit.event_type === 'job_attention_approval_cleared';
+			audit.event_type === 'job_attention_approval_cleared' ||
+			audit.event_type === 'job_interrupt_recorded';
 		if (shouldEmitLog) {
 			const message = asString(payload.log_message) ?? body;
 			const logLevel = item.severity === 'error' ? 'error' : item.severity === 'warning' ? 'warning' : 'info';
@@ -394,6 +542,8 @@ export function buildRunSummary(job: JobRecord, recentAudits: AuditRecord[]): Ru
 	const feed = buildJobEventFeed(job, recentAudits);
 	const status = computeRunAttentionStatus(job);
 	const approval = getApprovalManifest(job.worker_manifest);
+	const control = getControlManifest(job.worker_manifest);
+	const interrupt = getLastInterrupt(job.worker_manifest);
 	return {
 		run_id: job.job_id,
 		job_id: job.job_id,
@@ -406,6 +556,9 @@ export function buildRunSummary(job: JobRecord, recentAudits: AuditRecord[]): Ru
 		workflow_run_id: job.workflow_run_id ?? null,
 		pr_number: job.pr_number ?? null,
 		preview_id: job.worker_manifest?.preview?.preview_id ?? null,
+		control_state: control?.state ?? null,
+		interrupt_kind: interrupt?.kind ?? null,
+		interrupt_message: interruptMessage(interrupt),
 	};
 }
 
@@ -427,6 +580,8 @@ export function buildJobProgressSnapshot(job: JobRecord, recentAudits: AuditReco
 		blocking_state: buildBlockingState(job),
 		latest_notification: eventFeed.items[0] ?? null,
 		notification_counts: eventFeed.counts,
+		control_state: getControlManifest(job.worker_manifest),
+		approval_request: getApprovalManifest(job.worker_manifest),
 		last_transition_at: job.last_transition_at,
 		last_reconciled_at: job.last_reconciled_at ?? null,
 		last_webhook_event_at: job.last_webhook_event_at ?? null,

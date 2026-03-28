@@ -167,4 +167,77 @@ describe('queue projection helpers', () => {
 			pending_approval: 1,
 		});
 	});
+
+	it('projects paused, cancelled, and interrupted states into run summaries and blockers', () => {
+		const interruptedJob = makeJob({
+			status: 'working',
+			next_actor: 'system',
+			worker_manifest: {
+				control: {
+					last_interrupt: {
+						kind: 'workflow_timed_out',
+						source: 'workflow',
+						message: 'agent-run concluded with timed_out',
+						recorded_at: '2026-03-21T00:00:05.000Z',
+					},
+				},
+				dispatch_request: {
+					owner: 'iusung111',
+					repo: 'OpenGPT',
+					workflow_id: 'agent-run.yml',
+					ref: 'main',
+					inputs: {},
+					dispatched_at: '2026-03-21T00:00:00.000Z',
+				},
+			},
+		});
+		const pausedJob = makeJob({
+			status: 'working',
+			next_actor: 'system',
+			worker_manifest: {
+				control: {
+					state: 'paused',
+					reason: 'Waiting on maintainer input',
+				},
+			},
+		});
+		const cancelledJob = makeJob({
+			status: 'failed',
+			next_actor: 'system',
+			last_error: 'old failure',
+			worker_manifest: {
+				control: {
+					state: 'cancelled',
+					reason: 'User cancelled the run',
+				},
+			},
+		});
+
+		expect(computeRunAttentionStatus(interruptedJob)).toBe('interrupted');
+		expect(buildBlockingState(interruptedJob)).toMatchObject({
+			kind: 'interrupted',
+			blocked_action: 'job_control.retry',
+		});
+		expect(buildRunSummary(interruptedJob, [])).toMatchObject({
+			status: 'interrupted',
+			interrupt_kind: 'workflow_timed_out',
+			interrupt_message: 'agent-run concluded with timed_out',
+		});
+
+		expect(computeRunAttentionStatus(pausedJob)).toBe('paused');
+		expect(buildBlockingState(pausedJob)).toMatchObject({
+			kind: 'paused',
+			blocked_action: 'job_control.resume',
+			reason: 'Waiting on maintainer input',
+		});
+
+		expect(computeRunAttentionStatus(cancelledJob)).toBe('cancelled');
+		expect(buildBlockingState(cancelledJob)).toMatchObject({
+			kind: 'cancelled',
+			reason: 'User cancelled the run',
+		});
+		expect(buildJobProgressSnapshot(cancelledJob, []).notification_counts).toMatchObject({
+			cancelled: 1,
+		});
+	});
 });

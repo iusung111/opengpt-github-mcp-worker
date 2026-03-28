@@ -1,5 +1,5 @@
-import { DispatchRequestRecord, JobRecord, JobStatus, NextActor } from './types';
-import { getManifestDispatchRequest, setManifestWorkflowRun } from './job-manifest';
+import { DispatchRequestRecord, JobControlManifest, JobInterruptRecord, JobRecord, JobStatus, NextActor } from './types';
+import { getManifestDispatchRequest, normalizeWorkerManifest, setManifestWorkflowRun } from './job-manifest';
 
 export interface WorkflowRunSnapshot {
 	name?: string;
@@ -27,6 +27,33 @@ export function pushJobNote(job: JobRecord, note: string): void {
 
 export function getDispatchRequest(job: JobRecord): DispatchRequestRecord | null {
 	return getManifestDispatchRequest(job.worker_manifest);
+}
+
+export function getControlState(job: JobRecord): JobControlManifest | null {
+	const control = normalizeWorkerManifest(job.worker_manifest).control;
+	return control && typeof control === 'object' ? control : null;
+}
+
+export function getLastInterrupt(job: JobRecord): JobInterruptRecord | null {
+	const control = getControlState(job);
+	return control?.last_interrupt ?? null;
+}
+
+export function isJobPaused(job: JobRecord): boolean {
+	return getControlState(job)?.state === 'paused';
+}
+
+export function isJobCancelled(job: JobRecord): boolean {
+	return getControlState(job)?.state === 'cancelled';
+}
+
+export function canAdvanceJob(job: JobRecord): boolean {
+	return !isJobPaused(job) && !isJobCancelled(job);
+}
+
+export function hasExecutionRelatedInterrupt(job: JobRecord): boolean {
+	const kind = getLastInterrupt(job)?.kind;
+	return kind === 'workflow_cancelled' || kind === 'workflow_timed_out' || kind === 'stale_reconcile';
 }
 
 export function isDryRunJob(job: JobRecord): boolean {

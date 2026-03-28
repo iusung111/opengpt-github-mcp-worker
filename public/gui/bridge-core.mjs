@@ -1,6 +1,15 @@
 const DEFAULT_PROTOCOL_VERSION = '2026-01-26';
-const DEFAULT_TIMEOUT_MS = 4_000;
+const DEFAULT_INITIALIZE_TIMEOUT_MS = 4_000;
+const DEFAULT_EXECUTION_SOFT_TIMEOUT_MS = 8_000;
+const DEFAULT_EXECUTION_HARD_TIMEOUT_MS = 120_000;
 const HOST_FONT_STYLE_ID = 'mcp-app-host-fonts';
+const EXECUTION_METHODS = new Set(['tools/call', 'ui/message', 'ui/update-model-context']);
+const HOST_CAPABILITY_KEYS = {
+	'ui/message': ['message', 'messages', 'chat'],
+	'ui/update-model-context': ['modelContext', 'context', 'widgetState'],
+	'ui/open-link': ['openLink', 'links', 'browser'],
+	'ui/notifications/size-changed': ['size', 'layout', 'resize'],
+};
 
 export function hasRecord(value) {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -117,6 +126,15 @@ export function buildModelContextText(snapshot) {
 	if (snapshot.run_summary && snapshot.run_summary.last_event) {
 		lines.push(`Latest run event: ${snapshot.run_summary.last_event}`);
 	}
+	if (snapshot.run_summary && snapshot.run_summary.control_state) {
+		lines.push(`Control state: ${snapshot.run_summary.control_state}`);
+	}
+	if (snapshot.run_summary && snapshot.run_summary.interrupt_kind) {
+		lines.push(`Interrupt kind: ${snapshot.run_summary.interrupt_kind}`);
+	}
+	if (snapshot.run_summary && snapshot.run_summary.interrupt_message) {
+		lines.push(`Interrupt detail: ${snapshot.run_summary.interrupt_message}`);
+	}
 	if (snapshot.blocking_state && snapshot.blocking_state.kind && snapshot.blocking_state.kind !== 'none') {
 		lines.push(`Blocking state: ${snapshot.blocking_state.kind}`);
 		if (snapshot.blocking_state.reason) {
@@ -135,6 +153,9 @@ export function buildModelContextText(snapshot) {
 	if (snapshot.permission_bundle && snapshot.permission_bundle.status) {
 		lines.push(`Permission bundle status: ${snapshot.permission_bundle.status}`);
 	}
+	if (snapshot.permission_bundle && snapshot.permission_bundle.request_id) {
+		lines.push(`Permission request id: ${snapshot.permission_bundle.request_id}`);
+	}
 	const permissionBundle =
 		hasRecord(snapshot.permission_bundle) && hasRecord(snapshot.permission_bundle.bundle)
 			? snapshot.permission_bundle.bundle
@@ -149,12 +170,81 @@ export function buildModelContextText(snapshot) {
 	) {
 		lines.push(`Approval request: ${permissionBundle.approval_request}`);
 	}
+	if (hasRecord(snapshot.latest_tool_session)) {
+		if (snapshot.latest_tool_session.request_id) {
+			lines.push(`Latest tool request: ${snapshot.latest_tool_session.request_id}`);
+		}
+		if (snapshot.latest_tool_session.tool_name) {
+			lines.push(`Latest tool name: ${snapshot.latest_tool_session.tool_name}`);
+		}
+		if (snapshot.latest_tool_session.phase) {
+			lines.push(`Latest tool phase: ${snapshot.latest_tool_session.phase}`);
+		}
+		if (snapshot.latest_tool_session.next_step) {
+			lines.push(`Latest tool next step: ${snapshot.latest_tool_session.next_step}`);
+		}
+	}
 	lines.push('Use this context to continue the current run or explain the next operator action.');
 	return lines.join('\n');
 }
 
-function createTimeoutError(method) {
-	return new Error(`${method} timed out waiting for MCP Apps host response`);
+function createTimeoutError(method, phase) {
+	return new Error(`${method} ${phase} waiting for MCP Apps host response`);
+}
+
+function createCapabilityError(method) {
+	return new Error(`MCP Apps host does not advertise ${method} support`);
+}
+
+function capabilityEnabled(value) {
+	if (value === true) return true;
+	if (value === false) return false;
+	return hasRecord(value);
+}
+
+function extractRequestId(value) {
+	if (!hasRecord(value)) return null;
+	if (typeof value.request_id === 'string' || typeof value.request_id === 'number') {
+		return String(value.request_id);
+	}
+	if (typeof value.requestId === 'string' || typeof value.requestId === 'number') {
+		return String(value.requestId);
+	}
+	if (typeof value.id === 'string' || typeof value.id === 'number') {
+		return String(value.id);
+	}
+	if (hasRecord(value.request)) {
+		return extractRequestId(value.request);
+	}
+	return null;
+}
+
+function toolResultKind(value) {
+	const extracted = extractToolResultEnvelope(value);
+	return extracted && extracted.structuredContent && typeof extracted.structuredContent.kind === 'string'
+		? extracted.structuredContent.kind
+		: null;
+}
+
+function nextStepForSession(session) {
+	if (session.phase === 'pending') {
+		return 'Waiting for the host to acknowledge the request.';
+	}
+	if (session.phase === 'waiting') {
+		return 'The host is still processing the request. Keep the widget open.';
+	}
+	if (session.phase === 'completed') {
+		if (session.method === 'ui/message') return 'Check the host conversation for the sent message.';
+		if (session.method === 'ui/update-model-context') return 'Send the next instruction or tool call.';
+		return 'Inspect the tool result and decide the next operator action.';
+	}
+	if (session.phase === 'cancelled') {
+		return 'Decide whether to retry, resume, or leave the run paused.';
+	}
+	if (session.phase === 'timed_out') {
+		return 'Retry the request or inspect host connectivity.';
+	}
+	return 'Inspect the error and decide whether to retry.';
 }
 
 export function createMcpUiBridge(options = {}) {
@@ -162,9 +252,18 @@ export function createMcpUiBridge(options = {}) {
 	const doc = options.doc ?? globalThis.document;
 	const appInfo = options.appInfo ?? { name: 'opengpt-notification-center', version: '1.0.0' };
 	const appCapabilities = options.appCapabilities ?? { availableDisplayModes: ['inline', 'fullscreen'] };
-	const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs) ? options.requestTimeoutMs : DEFAULT_TIMEOUT_MS;
+	const initializeTimeoutMs = Number.isFinite(options.initializeTimeoutMs)
+		? options.initializeTimeoutMs
+		: DEFAULT_INITIALIZE_TIMEOUT_MS;
+	const executionSoftTimeoutMs = Number.isFinite(options.executionSoftTimeoutMs)
+		? options.executionSoftTimeoutMs
+		: DEFAULT_EXECUTION_SOFT_TIMEOUT_MS;
+	const executionHardTimeoutMs = Number.isFinite(options.executionHardTimeoutMs)
+		? options.executionHardTimeoutMs
+		: DEFAULT_EXECUTION_HARD_TIMEOUT_MS;
 	const parentOrigin = readParentOrigin(doc && doc.referrer ? doc.referrer : '', win && win.location ? win.location.origin : '*');
 	const pending = new Map();
+	const sessionMap = new Map();
 	let nextId = 1;
 	let connected = false;
 	let listenerAttached = false;
@@ -176,26 +275,84 @@ export function createMcpUiBridge(options = {}) {
 		protocolVersion: null,
 		toolInput: null,
 		toolOutput: null,
+		toolSessions: [],
 	};
 
-	function rejectPending(id, error) {
-		const deferred = pending.get(id);
-		if (!deferred) return;
-		pending.delete(id);
-		if (deferred.timeout) {
-			clearTimeout(deferred.timeout);
+	function emitSession(session) {
+		sessionMap.set(session.requestId, { ...session });
+		state.toolSessions = Array.from(sessionMap.values()).sort((left, right) =>
+			String(right.updatedAt || right.createdAt || '').localeCompare(String(left.updatedAt || left.createdAt || '')),
+		);
+		if (typeof options.onRequestStateChanged === 'function') {
+			options.onRequestStateChanged({ ...session });
 		}
-		deferred.reject(error);
 	}
 
-	function resolvePending(id, value) {
-		const deferred = pending.get(id);
-		if (!deferred) return;
-		pending.delete(id);
-		if (deferred.timeout) {
-			clearTimeout(deferred.timeout);
+	function upsertSession(id, patch = {}) {
+		const requestId = String(id);
+		const existing = sessionMap.get(requestId) ?? {
+			requestId,
+			method: '',
+			toolName: '',
+			args: {},
+			phase: 'pending',
+			nextStep: '',
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			resultKind: null,
+			error: null,
+			jobId: null,
+		};
+		const session = {
+			...existing,
+			...patch,
+			requestId,
+			args: hasRecord(patch.args) ? patch.args : existing.args,
+			updatedAt: patch.updatedAt ?? new Date().toISOString(),
+		};
+		session.nextStep = nextStepForSession(session);
+		emitSession(session);
+		return session;
+	}
+
+	function rejectPending(id, error, phase = 'failed') {
+		const requestId = String(id);
+		const deferred = pending.get(requestId);
+		if (deferred) {
+			pending.delete(requestId);
+			if (deferred.softTimeout) {
+				clearTimeout(deferred.softTimeout);
+			}
+			if (deferred.hardTimeout) {
+				clearTimeout(deferred.hardTimeout);
+			}
+			deferred.reject(error);
 		}
-		deferred.resolve(value);
+		upsertSession(requestId, {
+			phase,
+			error: error instanceof Error ? error.message : String(error),
+			resultKind: null,
+		});
+	}
+
+	function resolvePending(id, value, patch = {}) {
+		const requestId = String(id);
+		const deferred = pending.get(requestId);
+		if (deferred) {
+			pending.delete(requestId);
+			if (deferred.softTimeout) {
+				clearTimeout(deferred.softTimeout);
+			}
+			if (deferred.hardTimeout) {
+				clearTimeout(deferred.hardTimeout);
+			}
+			deferred.resolve(value);
+		}
+		upsertSession(requestId, {
+			phase: patch.phase ?? 'completed',
+			resultKind: patch.resultKind ?? toolResultKind(value),
+			error: null,
+		});
 	}
 
 	function isRpcEnvelope(data) {
@@ -213,15 +370,86 @@ export function createMcpUiBridge(options = {}) {
 		postMessage({ jsonrpc: '2.0', method, params });
 	}
 
-	function request(method, params = {}) {
+	function supports(method) {
+		if (method === 'tools/call') {
+			return connected || method === 'tools/call';
+		}
+		if (!connected) return false;
+		if (!hasRecord(state.hostCapabilities)) return true;
+		const capabilityKeys = HOST_CAPABILITY_KEYS[method] ?? [];
+		const explicitKeys = capabilityKeys.filter((key) => Object.prototype.hasOwnProperty.call(state.hostCapabilities, key));
+		if (!explicitKeys.length) return true;
+		return explicitKeys.some((key) => capabilityEnabled(state.hostCapabilities[key]));
+	}
+
+	function correlateSessionId(params) {
+		const explicitId = extractRequestId(params);
+		if (explicitId) {
+			return explicitId;
+		}
+		const candidates = state.toolSessions.filter(
+			(session) =>
+				session.method === 'tools/call' && (session.phase === 'pending' || session.phase === 'waiting'),
+		);
+		if (candidates.length === 1) {
+			return candidates[0].requestId;
+		}
+		return candidates[0]?.requestId ?? null;
+	}
+
+	function request(method, params = {}, requestOptions = {}) {
+		if (connected && !supports(method)) {
+			return Promise.reject(createCapabilityError(method));
+		}
 		const id = nextId++;
+		const isExecutionMethod = EXECUTION_METHODS.has(method);
+		const hardTimeoutMs = Number.isFinite(requestOptions.hardTimeoutMs)
+			? requestOptions.hardTimeoutMs
+			: isExecutionMethod
+				? executionHardTimeoutMs
+				: initializeTimeoutMs;
+		const softTimeoutMs = Number.isFinite(requestOptions.softTimeoutMs)
+			? requestOptions.softTimeoutMs
+			: isExecutionMethod
+				? executionSoftTimeoutMs
+				: 0;
+		const session =
+			requestOptions.trackSession === false
+				? null
+				: upsertSession(id, {
+						method,
+						toolName: method === 'tools/call' ? String(params.name || 'tool') : method,
+						args:
+							method === 'tools/call' && hasRecord(params.arguments)
+								? params.arguments
+								: hasRecord(params)
+									? params
+									: {},
+						phase: 'pending',
+						resultKind: null,
+						error: null,
+				  });
 		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => rejectPending(id, createTimeoutError(method)), requestTimeoutMs);
-			pending.set(id, { resolve, reject, timeout });
+			const requestId = String(id);
+			const softTimeout =
+				softTimeoutMs > 0
+					? setTimeout(() => {
+							if (!pending.has(requestId)) return;
+							upsertSession(requestId, { phase: 'waiting' });
+							if (typeof options.onSoftTimeout === 'function') {
+								options.onSoftTimeout(session ?? sessionMap.get(String(id)) ?? null);
+							}
+					  }, softTimeoutMs)
+					: null;
+			const hardTimeout = setTimeout(
+				() => rejectPending(requestId, createTimeoutError(method, 'timed out'), 'timed_out'),
+				hardTimeoutMs,
+			);
+			pending.set(requestId, { resolve, reject, softTimeout, hardTimeout });
 			try {
 				postMessage({ jsonrpc: '2.0', id, method, params });
 			} catch (error) {
-				rejectPending(id, error instanceof Error ? error : new Error(String(error)));
+				rejectPending(requestId, error instanceof Error ? error : new Error(String(error)));
 			}
 		});
 	}
@@ -243,14 +471,16 @@ export function createMcpUiBridge(options = {}) {
 		if (parentOrigin !== '*' && event.origin && event.origin !== parentOrigin) return;
 		const data = event.data;
 		if (!isRpcEnvelope(data)) return;
-		if (Object.prototype.hasOwnProperty.call(data, 'id') && pending.has(data.id)) {
+		if (Object.prototype.hasOwnProperty.call(data, 'id') && pending.has(String(data.id))) {
 			if (hasRecord(data.error)) {
 				const message =
 					typeof data.error.message === 'string' ? data.error.message : `MCP Apps host request failed for ${String(data.id)}`;
-				rejectPending(data.id, new Error(message));
+				rejectPending(String(data.id), new Error(message));
 				return;
 			}
-			resolvePending(data.id, data.result);
+			resolvePending(String(data.id), data.result, {
+				resultKind: toolResultKind(data.result),
+			});
 			return;
 		}
 		if (typeof data.method !== 'string') return;
@@ -261,22 +491,50 @@ export function createMcpUiBridge(options = {}) {
 			case 'ui/notifications/tool-input':
 			case 'ui/notifications/tool-input-partial':
 				state.toolInput = hasRecord(data.params) ? data.params : null;
+				{
+					const sessionId = correlateSessionId(state.toolInput);
+					if (sessionId) {
+						upsertSession(sessionId, {
+							args:
+								hasRecord(state.toolInput) && hasRecord(state.toolInput.arguments)
+									? state.toolInput.arguments
+									: {},
+						});
+					}
+				}
 				if (typeof options.onToolInput === 'function') {
 					options.onToolInput(state.toolInput, data.method);
 				}
 				break;
 			case 'ui/notifications/tool-result':
 				state.toolOutput = hasRecord(data.params) ? data.params : null;
-				if (typeof options.onToolResult === 'function') {
-					options.onToolResult(state.toolOutput);
+				{
+					const sessionId = correlateSessionId(state.toolOutput);
+					if (sessionId) {
+						resolvePending(sessionId, state.toolOutput, {
+							resultKind: toolResultKind(state.toolOutput),
+						});
+					}
+					if (typeof options.onToolResult === 'function') {
+						options.onToolResult(state.toolOutput, sessionId);
+					}
 				}
 				break;
 			case 'ui/notifications/tool-cancelled':
-				if (typeof options.onToolCancelled === 'function') {
-					options.onToolCancelled(hasRecord(data.params) ? data.params : null);
+				{
+					const sessionId = correlateSessionId(hasRecord(data.params) ? data.params : null);
+					if (sessionId) {
+						rejectPending(sessionId, new Error('Host cancelled the current tool execution.'), 'cancelled');
+					}
+					if (typeof options.onToolCancelled === 'function') {
+						options.onToolCancelled(hasRecord(data.params) ? data.params : null, sessionId);
+					}
 				}
 				break;
 			case 'ui/notifications/request-teardown':
+				for (const id of Array.from(pending.keys())) {
+					rejectPending(id, new Error('Host requested widget teardown.'), 'cancelled');
+				}
 				if (typeof options.onRequestTeardown === 'function') {
 					options.onRequestTeardown(hasRecord(data.params) ? data.params : null);
 				}
@@ -309,10 +567,17 @@ export function createMcpUiBridge(options = {}) {
 				protocolVersion: state.protocolVersion,
 				toolInput: state.toolInput,
 				toolOutput: state.toolOutput,
+				toolSessions: state.toolSessions.slice(),
 			};
 		},
 		isConnected() {
 			return connected;
+		},
+		supports(method) {
+			if (method === 'tools/call') {
+				return connected;
+			}
+			return supports(method);
 		},
 		async connect() {
 			attach();
@@ -320,7 +585,7 @@ export function createMcpUiBridge(options = {}) {
 				appCapabilities,
 				appInfo,
 				protocolVersion: DEFAULT_PROTOCOL_VERSION,
-			});
+			}, { trackSession: false, hardTimeoutMs: initializeTimeoutMs, softTimeoutMs: 0 });
 			if (hasRecord(result)) {
 				handleHostContext(result.hostContext, result);
 			}
@@ -341,16 +606,21 @@ export function createMcpUiBridge(options = {}) {
 			return request('ui/update-model-context', params);
 		},
 		openLink(url) {
+			if (!supports('ui/open-link')) {
+				return Promise.reject(createCapabilityError('ui/open-link'));
+			}
 			return request('ui/open-link', { url });
 		},
 		notifySize(params) {
-			notify('ui/notifications/size-changed', params);
+			if (supports('ui/notifications/size-changed')) {
+				notify('ui/notifications/size-changed', params);
+			}
 		},
 		destroy() {
 			detach();
 			connected = false;
 			for (const id of Array.from(pending.keys())) {
-				rejectPending(id, new Error('MCP Apps bridge destroyed'));
+				rejectPending(id, new Error('MCP Apps bridge destroyed'), 'cancelled');
 			}
 		},
 	};

@@ -3,7 +3,29 @@ import { DurableObject } from 'cloudflare:workers';
 export type JobStatus = 'queued' | 'working' | 'review_pending' | 'rework_pending' | 'done' | 'failed';
 export type NextActor = 'worker' | 'reviewer' | 'system';
 export type ReviewVerdict = 'approved' | 'changes_requested' | 'blocked';
-export type RunAttentionStatus = 'idle' | 'pending_approval' | 'running' | 'completed' | 'failed';
+export type JobControlState = 'active' | 'paused' | 'cancelled';
+export type JobControlAction = 'pause' | 'resume' | 'cancel' | 'retry';
+export type JobResumeStrategy = 'refresh' | 'redispatch';
+export type PermissionRequestStatus = 'drafted' | 'requested' | 'approved' | 'rejected' | 'superseded' | 'expired';
+export type PermissionResolution = 'approved' | 'rejected' | 'superseded';
+export type JobInterruptKind =
+	| 'approval_rejected'
+	| 'approval_superseded'
+	| 'approval_expired'
+	| 'host_cancelled'
+	| 'tool_timeout'
+	| 'workflow_cancelled'
+	| 'workflow_timed_out'
+	| 'stale_reconcile';
+export type RunAttentionStatus =
+	| 'idle'
+	| 'pending_approval'
+	| 'running'
+	| 'paused'
+	| 'cancelled'
+	| 'interrupted'
+	| 'completed'
+	| 'failed';
 export type NotificationSourceLayer = 'gpt' | 'mcp' | 'cloudflare' | 'repo' | 'system';
 export type NotificationSeverity = 'info' | 'warning' | 'error';
 
@@ -153,14 +175,36 @@ export interface JobRuntimeManifest {
 
 export interface JobApprovalManifest {
 	pending?: boolean;
+	request_id?: string | null;
+	status?: PermissionRequestStatus | null;
 	reason?: string | null;
 	blocked_action?: string | null;
+	bundle?: Record<string, unknown> | null;
+	note?: string | null;
 	requested_at?: string;
+	resolved_at?: string | null;
 	cleared_at?: string | null;
 }
 
 export interface JobAttentionManifest {
 	approval?: JobApprovalManifest;
+}
+
+export interface JobInterruptRecord {
+	kind: JobInterruptKind;
+	source: string;
+	message?: string | null;
+	recorded_at: string;
+}
+
+export interface JobControlManifest {
+	state?: JobControlState | null;
+	reason?: string | null;
+	requested_by?: string | null;
+	requested_at?: string;
+	resolved_at?: string | null;
+	resume_strategy?: JobResumeStrategy | null;
+	last_interrupt?: JobInterruptRecord | null;
 }
 
 export interface JobWorkerManifest {
@@ -172,6 +216,7 @@ export interface JobWorkerManifest {
 	desktop?: JobDesktopManifest;
 	runtime?: JobRuntimeManifest;
 	attention?: JobAttentionManifest;
+	control?: JobControlManifest;
 	dispatch_request?: DispatchRequestRecord | null;
 	last_workflow_run?: JobWorkflowRunRecord | null;
 	[key: string]: unknown;
@@ -224,6 +269,9 @@ export interface RunSummary {
 	workflow_run_id: number | null;
 	pr_number: number | null;
 	preview_id: string | null;
+	control_state: JobControlState | null;
+	interrupt_kind: JobInterruptKind | null;
+	interrupt_message: string | null;
 }
 
 export interface NotificationItem {
@@ -252,7 +300,7 @@ export interface LayerLogEntry {
 }
 
 export interface BlockingState {
-	kind: 'none' | 'approval' | 'review' | 'failure';
+	kind: 'none' | 'approval' | 'review' | 'failure' | 'paused' | 'cancelled' | 'interrupted';
 	reason: string | null;
 	blocked_action: string | null;
 	resume_hint: string | null;
@@ -262,6 +310,9 @@ export interface NotificationCounts {
 	idle: number;
 	pending_approval: number;
 	running: number;
+	paused: number;
+	cancelled: number;
+	interrupted: number;
 	completed: number;
 	failed: number;
 }
@@ -330,8 +381,10 @@ export interface QueueEnvelope {
 		| 'jobs_list'
 		| 'audit_list'
 		| 'audit_write'
+		| 'job_control'
 		| 'job_update_status'
 		| 'job_append_note'
+		| 'permission_request_resolve'
 		| 'job_submit_review'
 		| 'workspace_register'
 		| 'workspace_activate'
@@ -343,7 +396,13 @@ export interface QueueEnvelope {
 	job_id?: string;
 	status?: JobStatus;
 	next_actor?: NextActor;
+	control_action?: JobControlAction;
 	note?: string;
+	reason?: string;
+	resume_strategy?: JobResumeStrategy;
+	expected_state?: JobControlState | RunAttentionStatus | null;
+	request_id?: string;
+	resolution?: PermissionResolution;
 	review_verdict?: ReviewVerdict;
 	findings?: ReviewFinding[];
 	next_action?: string;
@@ -388,6 +447,8 @@ export interface JobProgressSnapshot {
 	blocking_state: BlockingState;
 	latest_notification: NotificationItem | null;
 	notification_counts: NotificationCounts;
+	control_state: JobControlManifest | null;
+	approval_request: JobApprovalManifest | null;
 	last_transition_at: string;
 	last_reconciled_at: string | null;
 	last_webhook_event_at: string | null;

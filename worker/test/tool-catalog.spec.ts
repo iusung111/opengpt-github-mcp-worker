@@ -27,6 +27,8 @@ describe('tool catalog permission bundles', () => {
 		expect(bundle.tools).toContain('runtime_log_query');
 		expect(bundle.tools).toContain('deploy_promote');
 		expect(bundle.tools).toContain('job_event_feed');
+		expect(bundle.tools).toContain('job_control');
+		expect(bundle.tools).toContain('permission_request_resolve');
 	});
 
 	it('builds a user-facing approval request for batch approval', () => {
@@ -51,6 +53,7 @@ describe('tool catalog permission bundles', () => {
 		expect(bundle.groups.some((group) => group.id === 'collaboration')).toBe(true);
 		expect(bundle.tools).toContain('review_prepare_context');
 		expect(bundle.tools).toContain('job_submit_review');
+		expect(bundle.tools).toContain('job_control');
 	});
 
 	it('resolves the desktop fullstack preset into the extended workflow surface', () => {

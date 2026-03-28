@@ -193,9 +193,11 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_execute')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_progress')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'job_event_feed')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'job_control')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_work_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'review_prepare_context')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'request_permission_bundle')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'permission_request_resolve')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_navigation_manifest')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_context_snapshot')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_doc_index_lookup')).toBe(true);
@@ -238,6 +240,18 @@ describe('runtime mcp surface', () => {
 			'openai/toolInvocation/invoked': 'Approval bundle ready',
 		});
 		expect(
+			tools.tools.find((tool) => tool.name === 'permission_request_resolve')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Recording approval outcome',
+			'openai/toolInvocation/invoked': 'Approval outcome recorded',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'job_control')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Updating run control state',
+			'openai/toolInvocation/invoked': 'Run control state updated',
+		});
+		expect(
 			tools.tools.find((tool) => tool.name === 'incident_bundle_create')?._meta,
 		).toMatchObject({
 			'openai/toolInvocation/invoking': 'Collecting incident bundle',
@@ -252,7 +266,9 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.find((tool) => tool.name === 'job_progress')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'jobs_list')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'job_event_feed')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'job_control')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'request_permission_bundle')?.outputSchema).toBeTruthy();
+		expect(tools.tools.find((tool) => tool.name === 'permission_request_resolve')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'incident_bundle_create')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'self_host_status')?.outputSchema).toBeTruthy();
 		expect(tools.tools.find((tool) => tool.name === 'job_progress')?._meta).toMatchObject({
@@ -1786,7 +1802,8 @@ describe('runtime mcp surface', () => {
 		expect(JSON.parse(text)).toMatchObject({
 			ok: true,
 			data: {
-				status: 'ready_for_approval',
+				request_id: expect.any(String),
+				status: 'drafted',
 				bundle: {
 					preset: {
 						id: 'implementation_with_workflow',
@@ -1824,6 +1841,8 @@ describe('runtime mcp surface', () => {
 		expect(JSON.parse(permissionText)).toMatchObject({
 			ok: true,
 			data: {
+				request_id: expect.any(String),
+				status: 'requested',
 				notification: {
 					job_id: 'job-approval-1',
 					status: 'pending_approval',
@@ -1833,6 +1852,7 @@ describe('runtime mcp surface', () => {
 		});
 		expect((permissionResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.permission_bundle',
+			request_id: expect.any(String),
 			notification: {
 				job_id: 'job-approval-1',
 			},
@@ -1876,6 +1896,166 @@ describe('runtime mcp surface', () => {
 					item.source_layer === 'gpt' && item.linked_refs?.blocked_action === 'workflow_dispatch',
 			),
 		).toBe(true);
+		await client.close();
+	});
+
+	it('records permission resolutions and exposes job control transitions', async () => {
+		const client = await createMcpClient();
+		await client.callTool({
+			name: 'job_create',
+			arguments: {
+				job_id: 'job-control-1',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+			},
+		});
+
+		const permissionResult = await client.callTool({
+			name: 'request_permission_bundle',
+			arguments: {
+				repos: ['iusung111/OpenGPT'],
+				preset: 'implementation_with_workflow',
+				reason: 'Need approval before continuing the run',
+				job_id: 'job-control-1',
+				blocked_action: 'workflow_dispatch',
+			},
+		});
+		const permissionText = 'text' in permissionResult.content[0] ? permissionResult.content[0].text : '';
+		const permissionJson = JSON.parse(permissionText);
+		const requestId = permissionJson.data.request_id as string;
+
+		const rejectedResult = await client.callTool({
+			name: 'permission_request_resolve',
+			arguments: {
+				job_id: 'job-control-1',
+				request_id: requestId,
+				resolution: 'rejected',
+				note: 'Approval denied for now',
+			},
+		});
+		const rejectedText = 'text' in rejectedResult.content[0] ? rejectedResult.content[0].text : '';
+		expect(JSON.parse(rejectedText)).toMatchObject({
+			ok: true,
+			data: {
+				request_id: requestId,
+				status: 'rejected',
+				notification: {
+					job_id: 'job-control-1',
+					status: 'interrupted',
+					resolution: 'rejected',
+				},
+				current_progress: {
+					run_summary: {
+						status: 'interrupted',
+						interrupt_kind: 'approval_rejected',
+					},
+					blocking_state: {
+						kind: 'interrupted',
+					},
+				},
+			},
+		});
+		expect((rejectedResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.permission_bundle',
+			request_id: requestId,
+			status: 'rejected',
+			current_progress: {
+				run_summary: {
+					status: 'interrupted',
+				},
+			},
+		});
+
+		const pausedResult = await client.callTool({
+			name: 'job_control',
+			arguments: {
+				job_id: 'job-control-1',
+				action: 'pause',
+				reason: 'Hold execution for manual review',
+				expected_state: 'interrupted',
+			},
+		});
+		const pausedText = 'text' in pausedResult.content[0] ? pausedResult.content[0].text : '';
+		expect(JSON.parse(pausedText)).toMatchObject({
+			ok: true,
+			data: {
+				action: 'pause',
+				progress: {
+					run_summary: {
+						status: 'paused',
+						control_state: 'paused',
+					},
+					blocking_state: {
+						kind: 'paused',
+						blocked_action: 'job_control.resume',
+					},
+				},
+			},
+		});
+		expect((pausedResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.job_progress',
+			action: 'pause',
+			run_summary: {
+				status: 'paused',
+			},
+		});
+
+		const resumedResult = await client.callTool({
+			name: 'job_control',
+			arguments: {
+				job_id: 'job-control-1',
+				action: 'resume',
+				expected_state: 'paused',
+			},
+		});
+		const resumedText = 'text' in resumedResult.content[0] ? resumedResult.content[0].text : '';
+		expect(JSON.parse(resumedText)).toMatchObject({
+			ok: true,
+			data: {
+				action: 'resume',
+				resume_strategy: 'refresh',
+				progress: {
+					run_summary: {
+						status: 'idle',
+						control_state: 'active',
+						interrupt_kind: null,
+					},
+					blocking_state: {
+						kind: 'none',
+					},
+				},
+			},
+		});
+
+		const cancelledResult = await client.callTool({
+			name: 'job_control',
+			arguments: {
+				job_id: 'job-control-1',
+				action: 'cancel',
+				reason: 'User cancelled the run',
+				expected_state: 'idle',
+			},
+		});
+		const cancelledText = 'text' in cancelledResult.content[0] ? cancelledResult.content[0].text : '';
+		expect(JSON.parse(cancelledText)).toMatchObject({
+			ok: true,
+			data: {
+				action: 'cancel',
+				workflow_cancel: {
+					attempted: false,
+					cancelled: false,
+				},
+				progress: {
+					run_summary: {
+						status: 'cancelled',
+						control_state: 'cancelled',
+					},
+					blocking_state: {
+						kind: 'cancelled',
+					},
+				},
+			},
+		});
 		await client.close();
 	});
 

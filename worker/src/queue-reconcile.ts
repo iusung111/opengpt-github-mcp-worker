@@ -1,7 +1,8 @@
 import { githubAuthConfigured } from './github';
+import { mergeWorkerManifest } from './job-manifest';
 import { JobRecord } from './types';
 import { findLatestWorkflowRunId, getWorkflowRunSnapshot } from './queue-github';
-import { getDispatchRequest, recordWorkflowSnapshot, transitionJob } from './queue-state';
+import { canAdvanceJob, getDispatchRequest, recordWorkflowSnapshot, transitionJob } from './queue-state';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
 import { isOlderThan, repoAllowed } from './utils';
 
@@ -14,18 +15,30 @@ export interface WorkflowRunCandidate {
 }
 
 export function shouldHandleWorkingTimeout(job: JobRecord, workingStaleAfterMs: number): boolean {
+	if (!canAdvanceJob(job)) {
+		return false;
+	}
 	return job.status === 'working' && !job.workflow_run_id && isOlderThan(job.updated_at, workingStaleAfterMs);
 }
 
 export function shouldHandleReviewTimeout(job: JobRecord, reviewStaleAfterMs: number): boolean {
+	if (!canAdvanceJob(job)) {
+		return false;
+	}
 	return job.status === 'review_pending' && isOlderThan(job.updated_at, reviewStaleAfterMs);
 }
 
 export function isGitHubReconcileCandidate(job: JobRecord): boolean {
+	if (!canAdvanceJob(job)) {
+		return false;
+	}
 	return job.status === 'working' || job.status === 'review_pending';
 }
 
 export function getWorkflowRunDiscoveryCandidate(job: JobRecord): WorkflowRunCandidate | null {
+	if (!canAdvanceJob(job)) {
+		return null;
+	}
 	const dispatchRequest = getDispatchRequest(job);
 	if (!dispatchRequest) {
 		return null;
@@ -129,6 +142,18 @@ export async function reconcileGitHubRunState(
 		const previous = structuredClone(job);
 		const decision = decideCompletedWorkflowRun(job, run, 'reconcile');
 		applyCompletedWorkflowRunDecision(job, run, decision);
+		if (run.conclusion === 'cancelled' || run.conclusion === 'timed_out') {
+			job.worker_manifest = mergeWorkerManifest(job.worker_manifest, {
+				control: {
+					last_interrupt: {
+						kind: run.conclusion === 'cancelled' ? 'workflow_cancelled' : 'workflow_timed_out',
+						source: 'workflow',
+						message: `${run.name ?? 'workflow'} concluded with ${run.conclusion}`,
+						recorded_at: new Date().toISOString(),
+					},
+				},
+			});
+		}
 		if (decision.shouldAutoRedispatch) {
 			job.auto_improve_cycle += 1;
 			const redispatched = await context.autoRedispatchJob(

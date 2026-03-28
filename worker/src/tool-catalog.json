@@ -7,6 +7,7 @@
       "tools": [
         "help",
         "request_permission_bundle",
+        "permission_request_resolve",
         "repo_work_context",
         "self_host_status",
         "self_deploy",
@@ -182,6 +183,7 @@
         "jobs_list",
         "job_event_feed",
         "audit_list",
+        "job_control",
         "job_update_status",
         "job_append_note",
         "job_submit_review",
