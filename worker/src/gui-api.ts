@@ -1,5 +1,21 @@
-import { authorizeGuiOperatorRequest } from './auth';
-import { AppEnv, JobStatus, NextActor, QueueEnvelope } from './types';
+import { authorizeGuiOperatorRequest, queueRequestAuthorized } from './auth';
+import { mergeWorkerManifest } from './job-manifest';
+import {
+	AppEnv,
+	BrowserRemoteCommandKind,
+	JobRecord,
+	JobStatus,
+	NextActor,
+	QueueEnvelope,
+} from './types';
+import {
+	claimBrowserRemoteCommand,
+	completeBrowserRemoteCommand,
+	disconnectBrowserRemoteSession,
+	enqueueBrowserRemoteCommand,
+	normalizeBrowserRemoteControl,
+	upsertBrowserRemoteSession,
+} from './browser-remote-control';
 import {
 	fail,
 	getChatgptMcpAuthMode,
@@ -10,6 +26,7 @@ import {
 	jsonResponse,
 	ok,
 	queueFetch,
+	queueJson,
 } from './utils';
 
 function badRequest(message: string): Response {
@@ -95,8 +112,53 @@ function parseExpectedState(value: unknown): QueueEnvelope['expected_state'] {
 	return undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseBrowserCommandKind(value: unknown): BrowserRemoteCommandKind | null {
+	return value === 'click_continue' || value === 'send_prompt' || value === 'auto_continue_run' ? value : null;
+}
+
 async function proxyQueueAction(env: AppEnv, payload: QueueEnvelope): Promise<Response> {
 	return queueFetch(env, payload);
+}
+
+async function loadJobRecord(env: AppEnv, jobId: string): Promise<JobRecord | null> {
+	const result = await queueJson(env, { action: 'job_get', job_id: jobId });
+	return result.ok && isRecord(result.data) && isRecord(result.data.job) ? (result.data.job as unknown as JobRecord) : null;
+}
+
+async function persistJobRecord(env: AppEnv, job: JobRecord): Promise<JobRecord> {
+	const result = await queueJson(env, { action: 'job_upsert', job });
+	if (!result.ok || !isRecord(result.data) || !isRecord(result.data.job)) {
+		throw new Error(result.error ?? 'failed to persist browser control state');
+	}
+	return result.data.job as unknown as JobRecord;
+}
+
+async function updateBrowserControlJob(
+	env: AppEnv,
+	jobId: string,
+	updater: (current: unknown) => unknown,
+): Promise<{ job: JobRecord; browserControl: unknown }> {
+	const job = await loadJobRecord(env, jobId);
+	if (!job) {
+		throw new Error(`job ${jobId} not found`);
+	}
+	const nextBrowserControl = updater(job.worker_manifest?.browser?.remote_control ?? null);
+	job.worker_manifest = mergeWorkerManifest(job.worker_manifest, {
+		browser: {
+			remote_control: nextBrowserControl,
+			updated_at: new Date().toISOString(),
+		},
+	});
+	job.updated_at = new Date().toISOString();
+	const saved = await persistJobRecord(env, job);
+	return {
+		job: saved,
+		browserControl: normalizeBrowserRemoteControl(saved.worker_manifest?.browser?.remote_control),
+	};
 }
 
 export async function handleGuiApi(request: Request, env: AppEnv): Promise<Response> {
@@ -143,7 +205,9 @@ export async function handleGuiApi(request: Request, env: AppEnv): Promise<Respo
 		);
 	}
 
-	const auth = await authorizeGuiOperatorRequest(request, env);
+	const isBrowserControlRoute = parts.length >= 5 && parts[2] === 'jobs' && parts[4] === 'browser-control';
+	const browserControlQueueAuth = isBrowserControlRoute && queueRequestAuthorized(request, env);
+	const auth = browserControlQueueAuth ? { ok: true, email: null, auth_type: 'bearer' as const } : await authorizeGuiOperatorRequest(request, env);
 	if (!auth.ok) {
 		return jsonResponse(
 			fail(auth.code ?? 'unauthorized', auth.error ?? 'GUI operator authorization failed'),
@@ -167,6 +231,132 @@ export async function handleGuiApi(request: Request, env: AppEnv): Promise<Respo
 				},
 			}),
 		);
+	}
+
+	if (isBrowserControlRoute) {
+		const jobId = decodeURIComponent(parts[3] ?? '').trim();
+		if (!jobId) {
+			return badRequest('job_id is required');
+		}
+
+		if (request.method === 'GET' && parts.length === 5) {
+			const job = await loadJobRecord(env, jobId);
+			if (!job) {
+				return jsonResponse(fail('job_not_found', `job ${jobId} not found`), 404);
+			}
+			return jsonResponse(
+				ok({
+					browser_control: normalizeBrowserRemoteControl(job.worker_manifest?.browser?.remote_control),
+				}),
+			);
+		}
+
+		if (request.method === 'POST' && parts.length === 6 && parts[5] === 'session') {
+			const body = await readJsonBody(request).catch(() => null);
+			if (!body) {
+				return badRequest('invalid json body');
+			}
+			try {
+				const result = await updateBrowserControlJob(env, jobId, (current) =>
+					upsertBrowserRemoteSession(current, {
+						session_id: typeof body.session_id === 'string' ? body.session_id : null,
+						agent_name: typeof body.agent_name === 'string' ? body.agent_name : auth.email,
+						page_url: typeof body.page_url === 'string' ? body.page_url : null,
+						page_title: typeof body.page_title === 'string' ? body.page_title : null,
+						browser_name: typeof body.browser_name === 'string' ? body.browser_name : null,
+						cdp_origin: typeof body.cdp_origin === 'string' ? body.cdp_origin : null,
+					}),
+				);
+				return jsonResponse(ok({ browser_control: result.browserControl }));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return jsonResponse(fail('browser_control_session_failed', message), message.includes('not found') ? 404 : 409);
+			}
+		}
+
+		if (request.method === 'POST' && parts.length === 7 && parts[5] === 'session' && parts[6] === 'disconnect') {
+			try {
+				const result = await updateBrowserControlJob(env, jobId, (current) => disconnectBrowserRemoteSession(current));
+				return jsonResponse(ok({ browser_control: result.browserControl }));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return jsonResponse(fail('browser_control_disconnect_failed', message), message.includes('not found') ? 404 : 409);
+			}
+		}
+
+		if (request.method === 'POST' && parts.length === 6 && parts[5] === 'commands') {
+			const body = await readJsonBody(request).catch(() => null);
+			if (!body) {
+				return badRequest('invalid json body');
+			}
+			const kind = parseBrowserCommandKind(body.kind);
+			if (!kind) {
+				return badRequest('kind must be one of click_continue, send_prompt, auto_continue_run');
+			}
+			try {
+				const result = await updateBrowserControlJob(env, jobId, (current) =>
+					enqueueBrowserRemoteCommand(current, {
+						kind,
+						label: typeof body.label === 'string' ? body.label : null,
+						prompt: typeof body.prompt === 'string' ? body.prompt : null,
+						page_url_hint: typeof body.page_url_hint === 'string' ? body.page_url_hint : null,
+						created_by: auth.email,
+					}),
+				);
+				return jsonResponse(ok({ browser_control: result.browserControl }));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return jsonResponse(fail('browser_control_enqueue_failed', message), message.includes('pending') ? 409 : 400);
+			}
+		}
+
+		if (request.method === 'GET' && parts.length === 7 && parts[5] === 'commands' && parts[6] === 'next') {
+			const sessionId = url.searchParams.get('session_id')?.trim();
+			if (!sessionId) {
+				return badRequest('session_id is required');
+			}
+			try {
+				const result = await updateBrowserControlJob(env, jobId, (current) => {
+					const claimed = claimBrowserRemoteCommand(current, { session_id: sessionId });
+					return claimed.control;
+				});
+				const command = isRecord(result.browserControl) ? result.browserControl.pending_command ?? null : null;
+				return jsonResponse(ok({ browser_control: result.browserControl, command }));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return jsonResponse(fail('browser_control_claim_failed', message), message.includes('not found') ? 404 : 409);
+			}
+		}
+
+		if (request.method === 'POST' && parts.length === 8 && parts[5] === 'commands' && parts[7] === 'complete') {
+			const commandId = decodeURIComponent(parts[6] ?? '').trim();
+			if (!commandId) {
+				return badRequest('command_id is required');
+			}
+			const body = await readJsonBody(request).catch(() => null);
+			if (!body) {
+				return badRequest('invalid json body');
+			}
+			try {
+				const result = await updateBrowserControlJob(env, jobId, (current) =>
+					completeBrowserRemoteCommand(current, {
+						command_id: commandId,
+						ok: body.ok === true,
+						summary: typeof body.summary === 'string' ? body.summary : null,
+						error: typeof body.error === 'string' ? body.error : null,
+						matched_actions: Array.isArray(body.matched_actions)
+							? body.matched_actions.map((item) => String(item))
+							: [],
+						page_url: typeof body.page_url === 'string' ? body.page_url : null,
+						page_title: typeof body.page_title === 'string' ? body.page_title : null,
+					}),
+				);
+				return jsonResponse(ok({ browser_control: result.browserControl }));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return jsonResponse(fail('browser_control_complete_failed', message), message.includes('not found') ? 404 : 409);
+			}
+		}
 	}
 
 	if (request.method === 'GET' && parts.length === 3 && parts[2] === 'jobs') {

@@ -15,6 +15,7 @@ import {
 	RunAttentionStatus,
 	RunSummary,
 } from './types';
+import { normalizeBrowserRemoteControl } from './browser-remote-control';
 
 function asRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -582,6 +583,7 @@ export function buildJobProgressSnapshot(job: JobRecord, recentAudits: AuditReco
 		notification_counts: eventFeed.counts,
 		control_state: getControlManifest(job.worker_manifest),
 		approval_request: getApprovalManifest(job.worker_manifest),
+		browser_control: normalizeBrowserRemoteControl(job.worker_manifest?.browser?.remote_control),
 		last_transition_at: job.last_transition_at,
 		last_reconciled_at: job.last_reconciled_at ?? null,
 		last_webhook_event_at: job.last_webhook_event_at ?? null,

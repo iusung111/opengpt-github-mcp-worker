@@ -15,6 +15,7 @@ import { buildBlockingState, buildJobEventFeed, buildRunSummary, computeRunAtten
 import { jsonResponse, fail, ok, nowIso } from './utils';
 import { buildWorkspaceRecord } from './queue-workspaces';
 import { ensureSafeWorkspacePath } from './queue-helpers';
+import { normalizeBrowserRemoteControl } from './browser-remote-control';
 import {
 	getControlState,
 	getDispatchRequest,
@@ -588,6 +589,7 @@ async function handleJobsList(context: QueueRequestContext, payload: QueueEnvelo
 				notification_counts: feed.counts,
 				control_state: job.worker_manifest?.control ?? null,
 				approval_request: job.worker_manifest?.attention?.approval ?? null,
+				browser_control: normalizeBrowserRemoteControl(job.worker_manifest?.browser?.remote_control),
 			};
 		}),
 	);

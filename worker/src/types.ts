@@ -158,7 +158,56 @@ export interface JobBrowserManifest {
 	session_id?: string | null;
 	target?: string | null;
 	artifacts?: string[];
+	remote_control?: JobBrowserRemoteControlState | null;
 	updated_at?: string;
+}
+
+export type BrowserRemoteCommandKind = 'click_continue' | 'send_prompt' | 'auto_continue_run';
+export type BrowserRemoteCommandStatus = 'pending' | 'claimed';
+export type BrowserRemoteSessionStatus = 'connected' | 'stale' | 'disconnected';
+
+export interface JobBrowserRemoteSession {
+	session_id: string;
+	agent_name: string | null;
+	mode: 'chatgpt_cdp_attach';
+	status: BrowserRemoteSessionStatus;
+	connected_at: string;
+	last_seen_at: string;
+	page_url?: string | null;
+	page_title?: string | null;
+	browser_name?: string | null;
+	cdp_origin?: string | null;
+}
+
+export interface JobBrowserRemoteCommand {
+	command_id: string;
+	kind: BrowserRemoteCommandKind;
+	status: BrowserRemoteCommandStatus;
+	label?: string | null;
+	prompt?: string | null;
+	page_url_hint?: string | null;
+	created_at: string;
+	created_by?: string | null;
+	claimed_at?: string | null;
+	claimed_by?: string | null;
+}
+
+export interface JobBrowserRemoteCommandResult {
+	command_id: string;
+	kind: BrowserRemoteCommandKind;
+	ok: boolean;
+	summary: string | null;
+	error?: string | null;
+	matched_actions?: string[];
+	page_url?: string | null;
+	page_title?: string | null;
+	completed_at: string;
+}
+
+export interface JobBrowserRemoteControlState {
+	session?: JobBrowserRemoteSession | null;
+	pending_command?: JobBrowserRemoteCommand | null;
+	last_result?: JobBrowserRemoteCommandResult | null;
 }
 
 export interface JobDesktopManifest {
@@ -452,6 +501,7 @@ export interface JobProgressSnapshot {
 	notification_counts: NotificationCounts;
 	control_state: JobControlManifest | null;
 	approval_request: JobApprovalManifest | null;
+	browser_control: JobBrowserRemoteControlState | null;
 	last_transition_at: string;
 	last_reconciled_at: string | null;
 	last_webhook_event_at: string | null;

@@ -85,6 +85,7 @@ function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, u
 			blocking_state: data.progress.blocking_state ?? null,
 			latest_notification: data.progress.latest_notification ?? null,
 			notification_counts: data.progress.notification_counts ?? null,
+			browser_control: hasRecord(data.progress.browser_control) ? data.progress.browser_control : null,
 			resume_strategy: typeof data.resume_strategy === 'string' ? data.resume_strategy : undefined,
 			workflow_cancel: hasRecord(data.workflow_cancel) ? data.workflow_cancel : null,
 		};

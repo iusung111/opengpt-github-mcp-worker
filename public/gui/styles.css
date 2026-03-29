@@ -1159,6 +1159,35 @@ input[type="number"],
 	min-height: 180px;
 }
 
+.future-status-row,
+.future-preview {
+	display: grid;
+	gap: 8px;
+}
+
+.remote-state-card {
+	display: grid;
+	gap: 6px;
+}
+
+.remote-state-card strong {
+	font-size: 0.8rem;
+}
+
+.remote-state-card.error {
+	border-color: rgba(220, 38, 38, 0.24);
+}
+
+.remote-command-preview {
+	max-height: 160px;
+	white-space: pre-wrap;
+}
+
+.future-status-copy {
+	font-size: 0.72rem;
+	color: var(--muted);
+}
+
 .detail-overview-grid,
 .detail-stack {
 	display: grid;
