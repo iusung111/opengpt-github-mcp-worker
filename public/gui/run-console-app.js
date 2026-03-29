@@ -2225,10 +2225,17 @@ async function refreshStandaloneSession(options = {}) {
 			render();
 		}
 	} catch (error) {
+		const errorStatus = typeof error?.status === 'number' ? error.status : null;
 		state.session.ready = false;
 		state.session.email = null;
 		state.session.authType = null;
-		state.session.error = error instanceof Error ? error.message : String(error);
+		if (errorStatus === 401) {
+			state.session.error = state.standaloneToken.trim()
+				? 'Saved operator token was rejected (401). Log in again or paste a fresh bearer token to load runs.'
+				: 'Operator login is required before the web console can load runs.';
+		} else {
+			state.session.error = error instanceof Error ? error.message : String(error);
+		}
 		state.store.host.source = openaiBridge() ? 'window.openai fallback' : 'standalone';
 		state.store.browserControl = null;
 		stopPolling();
@@ -3869,9 +3876,14 @@ function renderDashboardJobs() {
 	const jobs = dashboardJobs();
 	const selectedJobId = currentRouteJobId();
 	if (!jobs.length) {
+		const showStandaloneAuth = !window.parent || window.parent === window;
+		const emptyMessage =
+			showStandaloneAuth && !state.session.ready
+				? state.session.error || 'Log in or paste a bearer token to load runs from the web control API.'
+				: 'No runs matched the current search or filter.';
 		return `
 			<section class="panel info-panel">
-				<article class="empty-card">No runs matched the current search or filter.</article>
+				<article class="empty-card">${escapeHtml(emptyMessage)}</article>
 			</section>
 		`;
 	}
@@ -4432,6 +4444,7 @@ function render() {
 			${state.error ? `<div class="banner error">${escapeHtml(state.error)}</div>` : ''}
 			<div class="workspace-shell${job ? ' has-selection' : ''}">
 				<div class="workspace-main">
+					${renderStandaloneAccessPanel()}
 					${renderDashboardJobs()}
 				</div>
 				${renderWorkspaceDetailPane(job, host)}

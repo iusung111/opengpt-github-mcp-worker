@@ -48,11 +48,29 @@ const CONTINUE_EXCLUDE_PATTERNS = [
 ];
 const STREAMING_PATTERNS = [/stop streaming/i, /\uC2A4\uD2B8\uB9AC\uBC0D \uC911\uC9C0/, /generating/i, /\uC0DD\uC131 \uC911/];
 
+function sanitizeToken(value) {
+	if (typeof value !== 'string') {
+		return '';
+	}
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return '';
+	}
+	if (
+		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+		(trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+		(trimmed.startsWith('`') && trimmed.endsWith('`'))
+	) {
+		return trimmed.slice(1, -1).trim();
+	}
+	return trimmed;
+}
+
 function readArgs(argv) {
 	const options = {
 		appOrigin: process.env.OPEN_GPT_APP_ORIGIN || '',
-		queueToken: process.env.QUEUE_API_TOKEN || '',
-		bearerToken: process.env.OPEN_GPT_BEARER_TOKEN || '',
+		queueToken: sanitizeToken(process.env.QUEUE_API_TOKEN || ''),
+		bearerToken: sanitizeToken(process.env.OPEN_GPT_BEARER_TOKEN || ''),
 		cdpUrl: process.env.OPEN_GPT_CDP_URL || DEFAULT_CDP_URL,
 		pollMs: Number(process.env.OPEN_GPT_POLL_MS || DEFAULT_POLL_MS),
 		matchUrl: process.env.OPEN_GPT_MATCH_URL || 'chatgpt.com',
@@ -70,11 +88,11 @@ function readArgs(argv) {
 				index += 1;
 				break;
 			case '--queue-token':
-				options.queueToken = value;
+				options.queueToken = sanitizeToken(value);
 				index += 1;
 				break;
 			case '--bearer-token':
-				options.bearerToken = value;
+				options.bearerToken = sanitizeToken(value);
 				index += 1;
 				break;
 			case '--cdp-url':
