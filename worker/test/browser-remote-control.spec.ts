@@ -29,14 +29,20 @@ describe('browser remote control helpers', () => {
 	it('queues, claims, and completes a browser command', () => {
 		const queued = enqueueBrowserRemoteCommand(null, {
 			kind: 'click_continue',
+			job_id: 'job-123',
+			job_title: 'Mirror deploy verification',
+			repo: 'iusung111/OpenGPT',
+			run_status: 'pending_approval',
 			label: 'Click Continue',
 			created_by: 'operator@example.com',
 		}, '2026-03-29T00:00:00.000Z');
 		expect(queued.pending_command?.status).toBe('pending');
+		expect(queued.active_job?.job_id).toBe('job-123');
 
 		const claimed = claimBrowserRemoteCommand(queued, { session_id: 'session-1' }, '2026-03-29T00:00:05.000Z');
 		expect(claimed.command?.status).toBe('claimed');
 		expect(claimed.command?.claimed_by).toBe('session-1');
+		expect(claimed.command?.job_id).toBe('job-123');
 
 		const completed = completeBrowserRemoteCommand(
 			claimed.control,
@@ -51,6 +57,7 @@ describe('browser remote control helpers', () => {
 		);
 		expect(completed.pending_command).toBeNull();
 		expect(completed.last_result?.ok).toBe(true);
+		expect(completed.last_result?.job_id).toBe('job-123');
 		expect(completed.last_result?.matched_actions).toEqual(['Continue']);
 	});
 
@@ -63,7 +70,7 @@ describe('browser remote control helpers', () => {
 			enqueueBrowserRemoteCommand(queued, {
 				kind: 'click_continue',
 			}),
-		).toThrow(/already pending/i);
+		).toThrow(/already pending for the console/i);
 
 		const connected = upsertBrowserRemoteSession(queued, {
 			session_id: 'session-1',

@@ -1,4 +1,5 @@
 import {
+	BrowserRemoteActiveJob,
 	BrowserRemoteCommandKind,
 	JobBrowserRemoteCommand,
 	JobBrowserRemoteCommandResult,
@@ -8,6 +9,7 @@ import {
 import { nowIso, parseIsoMs } from './utils';
 
 const DEFAULT_STALE_AFTER_MS = 45_000;
+export const GLOBAL_BROWSER_REMOTE_CONTROL_STORAGE_KEY = 'browser-remote-control:global';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -54,6 +56,34 @@ function normalizeSession(value: unknown, nowMs: number, staleAfterMs: number): 
 	};
 }
 
+function normalizeRunStatus(value: unknown): BrowserRemoteActiveJob['run_status'] {
+	if (
+		value === 'idle' ||
+		value === 'pending_approval' ||
+		value === 'running' ||
+		value === 'paused' ||
+		value === 'cancelled' ||
+		value === 'interrupted' ||
+		value === 'completed' ||
+		value === 'failed'
+	) {
+		return value;
+	}
+	return null;
+}
+
+function normalizeActiveJob(value: unknown): BrowserRemoteActiveJob | null {
+	if (!isRecord(value)) return null;
+	const jobId = normalizeString(value.job_id);
+	if (!jobId) return null;
+	return {
+		job_id: jobId,
+		job_title: normalizeString(value.job_title),
+		repo: normalizeString(value.repo),
+		run_status: normalizeRunStatus(value.run_status),
+	};
+}
+
 function normalizeCommand(value: unknown): JobBrowserRemoteCommand | null {
 	if (!isRecord(value)) return null;
 	const commandId = normalizeString(value.command_id);
@@ -64,6 +94,10 @@ function normalizeCommand(value: unknown): JobBrowserRemoteCommand | null {
 		command_id: commandId,
 		kind,
 		status: normalizeCommandStatus(value.status),
+		job_id: normalizeString(value.job_id),
+		job_title: normalizeString(value.job_title),
+		repo: normalizeString(value.repo),
+		run_status: normalizeRunStatus(value.run_status),
 		label: normalizeString(value.label),
 		prompt: normalizeString(value.prompt),
 		page_url_hint: normalizeString(value.page_url_hint),
@@ -84,6 +118,10 @@ function normalizeResult(value: unknown): JobBrowserRemoteCommandResult | null {
 		command_id: commandId,
 		kind,
 		ok: value.ok === true,
+		job_id: normalizeString(value.job_id),
+		job_title: normalizeString(value.job_title),
+		repo: normalizeString(value.repo),
+		run_status: normalizeRunStatus(value.run_status),
 		summary: normalizeString(value.summary),
 		error: normalizeString(value.error),
 		matched_actions: Array.isArray(value.matched_actions) ? value.matched_actions.map((item) => String(item)) : [],
@@ -101,11 +139,13 @@ export function normalizeBrowserRemoteControl(
 	const nowMs = options.nowMs ?? Date.now();
 	const staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
 	const session = normalizeSession(value.session, nowMs, staleAfterMs);
+	const activeJob = normalizeActiveJob(value.active_job);
 	const pendingCommand = normalizeCommand(value.pending_command);
 	const lastResult = normalizeResult(value.last_result);
-	if (!session && !pendingCommand && !lastResult) return null;
+	if (!session && !activeJob && !pendingCommand && !lastResult) return null;
 	return {
 		session,
+		active_job: activeJob,
 		pending_command: pendingCommand,
 		last_result: lastResult,
 	};
@@ -147,6 +187,26 @@ export function upsertBrowserRemoteSession(
 	};
 }
 
+function nextActiveJob(
+	control: JobBrowserRemoteControlState,
+	input: {
+		job_id?: string | null;
+		job_title?: string | null;
+		repo?: string | null;
+		run_status?: BrowserRemoteActiveJob['run_status'];
+	},
+): BrowserRemoteActiveJob | null {
+	const currentActiveJob = control.active_job ?? null;
+	const nextJobId = normalizeString(input.job_id) ?? currentActiveJob?.job_id ?? null;
+	if (!nextJobId) return currentActiveJob;
+	return {
+		job_id: nextJobId,
+		job_title: normalizeString(input.job_title) ?? currentActiveJob?.job_title ?? null,
+		repo: normalizeString(input.repo) ?? currentActiveJob?.repo ?? null,
+		run_status: normalizeRunStatus(input.run_status) ?? currentActiveJob?.run_status ?? null,
+	};
+}
+
 export function disconnectBrowserRemoteSession(current: unknown, timestamp = nowIso()): JobBrowserRemoteControlState {
 	const control = normalizeBrowserRemoteControl(current) ?? {};
 	if (!control.session) return control;
@@ -164,6 +224,10 @@ export function enqueueBrowserRemoteCommand(
 	current: unknown,
 	input: {
 		kind: BrowserRemoteCommandKind;
+		job_id?: string | null;
+		job_title?: string | null;
+		repo?: string | null;
+		run_status?: BrowserRemoteActiveJob['run_status'];
 		label?: string | null;
 		prompt?: string | null;
 		page_url_hint?: string | null;
@@ -173,14 +237,19 @@ export function enqueueBrowserRemoteCommand(
 ): JobBrowserRemoteControlState {
 	const control = normalizeBrowserRemoteControl(current) ?? {};
 	if (control.pending_command && (control.pending_command.status === 'pending' || control.pending_command.status === 'claimed')) {
-		throw new Error('A browser control command is already pending for this run.');
+		throw new Error('A browser control command is already pending for the console.');
 	}
 	return {
 		...control,
+		active_job: nextActiveJob(control, input),
 		pending_command: {
 			command_id: crypto.randomUUID(),
 			kind: input.kind,
 			status: 'pending',
+			job_id: normalizeString(input.job_id),
+			job_title: normalizeString(input.job_title),
+			repo: normalizeString(input.repo),
+			run_status: normalizeRunStatus(input.run_status),
 			label: normalizeString(input.label),
 			prompt: normalizeString(input.prompt),
 			page_url_hint: normalizeString(input.page_url_hint),
@@ -240,11 +309,21 @@ export function completeBrowserRemoteCommand(
 	}
 	return {
 		...control,
+		active_job: nextActiveJob(control, {
+			job_id: pendingCommand.job_id,
+			job_title: pendingCommand.job_title,
+			repo: pendingCommand.repo,
+			run_status: pendingCommand.run_status,
+		}),
 		pending_command: null,
 		last_result: {
 			command_id: pendingCommand.command_id,
 			kind: pendingCommand.kind,
 			ok: input.ok === true,
+			job_id: pendingCommand.job_id ?? null,
+			job_title: pendingCommand.job_title ?? null,
+			repo: pendingCommand.repo ?? null,
+			run_status: pendingCommand.run_status ?? null,
 			summary: normalizeString(input.summary),
 			error: normalizeString(input.error),
 			matched_actions: Array.isArray(input.matched_actions) ? input.matched_actions.map((item) => String(item)) : [],

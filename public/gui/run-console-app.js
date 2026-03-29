@@ -337,6 +337,7 @@ const state = {
 function createStore() {
 	return {
 		jobs: {},
+		browserControl: null,
 		host: {
 			context: null,
 			capabilities: null,
@@ -759,6 +760,7 @@ async function disconnectStandaloneBrowserLogin() {
 	state.session.email = null;
 	state.session.authType = null;
 	state.session.error = '';
+	state.store.browserControl = null;
 	state.message = 'Stored bearer token cleared from this browser.';
 	state.error = '';
 	stopPolling();
@@ -1500,6 +1502,14 @@ function normalizeApprovalState(value) {
 
 function normalizeBrowserControl(value) {
 	if (!hasRecord(value)) return null;
+	const activeJob = hasRecord(value.active_job)
+		? {
+				jobId: typeof value.active_job.job_id === 'string' ? value.active_job.job_id : null,
+				jobTitle: typeof value.active_job.job_title === 'string' ? value.active_job.job_title : null,
+				repo: typeof value.active_job.repo === 'string' ? value.active_job.repo : null,
+				runStatus: typeof value.active_job.run_status === 'string' ? value.active_job.run_status : null,
+		  }
+		: null;
 	const session = hasRecord(value.session)
 		? {
 				sessionId: typeof value.session.session_id === 'string' ? value.session.session_id : null,
@@ -1519,6 +1529,10 @@ function normalizeBrowserControl(value) {
 				commandId: typeof value.pending_command.command_id === 'string' ? value.pending_command.command_id : null,
 				kind: typeof value.pending_command.kind === 'string' ? value.pending_command.kind : null,
 				status: typeof value.pending_command.status === 'string' ? value.pending_command.status : 'pending',
+				jobId: typeof value.pending_command.job_id === 'string' ? value.pending_command.job_id : null,
+				jobTitle: typeof value.pending_command.job_title === 'string' ? value.pending_command.job_title : null,
+				repo: typeof value.pending_command.repo === 'string' ? value.pending_command.repo : null,
+				runStatus: typeof value.pending_command.run_status === 'string' ? value.pending_command.run_status : null,
 				label: typeof value.pending_command.label === 'string' ? value.pending_command.label : null,
 				prompt: typeof value.pending_command.prompt === 'string' ? value.pending_command.prompt : null,
 				pageUrlHint: typeof value.pending_command.page_url_hint === 'string' ? value.pending_command.page_url_hint : null,
@@ -1533,6 +1547,10 @@ function normalizeBrowserControl(value) {
 				commandId: typeof value.last_result.command_id === 'string' ? value.last_result.command_id : null,
 				kind: typeof value.last_result.kind === 'string' ? value.last_result.kind : null,
 				ok: value.last_result.ok === true,
+				jobId: typeof value.last_result.job_id === 'string' ? value.last_result.job_id : null,
+				jobTitle: typeof value.last_result.job_title === 'string' ? value.last_result.job_title : null,
+				repo: typeof value.last_result.repo === 'string' ? value.last_result.repo : null,
+				runStatus: typeof value.last_result.run_status === 'string' ? value.last_result.run_status : null,
 				summary: typeof value.last_result.summary === 'string' ? value.last_result.summary : null,
 				error: typeof value.last_result.error === 'string' ? value.last_result.error : null,
 				matchedActions: Array.isArray(value.last_result.matched_actions)
@@ -1543,8 +1561,9 @@ function normalizeBrowserControl(value) {
 				completedAt: typeof value.last_result.completed_at === 'string' ? value.last_result.completed_at : null,
 		  }
 		: null;
-	if (!session && !pendingCommand && !lastResult) return null;
+	if (!activeJob && !session && !pendingCommand && !lastResult) return null;
 	return {
+		activeJob,
 		session,
 		pendingCommand,
 		lastResult,
@@ -2157,6 +2176,7 @@ async function refreshStandaloneSession(options = {}) {
 		state.session.authType = typeof session.auth_type === 'string' ? session.auth_type : 'none';
 		state.session.error = '';
 		state.store.host.source = 'standalone-api';
+		await refreshBrowserControl({ skipRender: true }).catch(() => null);
 		if (!options.skipRender) {
 			render();
 		}
@@ -2166,6 +2186,7 @@ async function refreshStandaloneSession(options = {}) {
 		state.session.authType = null;
 		state.session.error = error instanceof Error ? error.message : String(error);
 		state.store.host.source = openaiBridge() ? 'window.openai fallback' : 'standalone';
+		state.store.browserControl = null;
 		stopPolling();
 		if (!options.skipRender) {
 			render();
@@ -2203,6 +2224,9 @@ async function refreshConsoleData(options = {}) {
 	state.pollInFlight = true;
 	try {
 		await loadJobs({ ...options, silent: true, keepSection: true, skipRender: true });
+		if (externalBrowserControlAvailable()) {
+			await refreshBrowserControl({ ...options, skipRender: true });
+		}
 		if (currentPage() === 'detail' && currentJob()) {
 			await refreshCurrentRun({ ...options, silent: true, keepSection: true, skipRender: true });
 			await loadFeed({ ...options, silent: true, keepSection: true, skipRender: true });
@@ -3556,7 +3580,7 @@ function canRunQuickAction(job) {
 	if (!job) return false;
 	const shortcut = attentionShortcutLabel(job);
 	if (shortcut === 'Running...' || shortcut === 'Completed' || shortcut === 'Run') return false;
-	if (browserControlConnected(job) && externalBrowserControlAvailable() && !browserControlPending(job)) {
+	if (browserControlConnected() && externalBrowserControlAvailable() && !browserControlPending()) {
 		return true;
 	}
 	return canRunAttentionShortcut(job);
@@ -3564,14 +3588,22 @@ function canRunQuickAction(job) {
 
 function quickActionReason(job) {
 	if (!job) return 'Select a run to continue.';
-	if (browserControlPending(job)) {
-		return `${browserControlPending(job).label || browserControlCommandLabel(browserControlPending(job).kind)} is queued for the local browser companion.`;
+	if (browserControlPendingForJob(job)) {
+		const pending = browserControlPendingForJob(job);
+		return `${pending.label || browserControlCommandLabel(pending.kind)} is queued for the global browser companion.`;
 	}
-	if (browserControlConnected(job) && externalBrowserControlAvailable()) {
-		const pageUrl = currentBrowserControl(job)?.session?.pageUrl || '';
+	if (browserControlBusyWithOtherJob(job)) {
+		const pending = browserControlPending();
+		const targetLabel = browserControlTargetLabel(pending);
+		return targetLabel
+			? `The global browser companion is busy with ${targetLabel}.`
+			: 'The global browser companion is busy with another run.';
+	}
+	if (browserControlConnected() && externalBrowserControlAvailable()) {
+		const pageUrl = currentBrowserControl()?.session?.pageUrl || '';
 		return pageUrl
-			? `A local browser companion is attached to ${pageUrl}. Quick action will use real ChatGPT clicks.`
-			: 'A local browser companion is connected. Quick action will use real ChatGPT clicks.';
+			? `A global browser companion is attached to ${pageUrl}. Quick action will use real ChatGPT clicks.`
+			: 'A global browser companion is connected. Quick action will use real ChatGPT clicks.';
 	}
 	const attention = jobAttentionStatus(job);
 	if (job.approval && job.approval.pending && job.approval.requestId) {
@@ -3665,16 +3697,32 @@ function externalBrowserControlAvailable() {
 	return window.parent === window && state.session.ready;
 }
 
-function currentBrowserControl(job = currentJob()) {
-	return job && job.browserControl ? job.browserControl : null;
+function currentBrowserControl() {
+	return state.store.browserControl || null;
 }
 
-function browserControlConnected(job = currentJob()) {
-	return Boolean(currentBrowserControl(job)?.session && currentBrowserControl(job).session.status === 'connected');
+function browserControlConnected() {
+	return Boolean(currentBrowserControl()?.session && currentBrowserControl().session.status === 'connected');
 }
 
-function browserControlPending(job = currentJob()) {
-	return currentBrowserControl(job)?.pendingCommand || null;
+function browserControlPending() {
+	return currentBrowserControl()?.pendingCommand || null;
+}
+
+function browserControlPendingForJob(job = currentJob()) {
+	if (!job) return null;
+	const pending = browserControlPending();
+	return pending && pending.jobId === job.jobId ? pending : null;
+}
+
+function browserControlBusyWithOtherJob(job = currentJob()) {
+	const pending = browserControlPending();
+	return Boolean(pending && job && pending.jobId && pending.jobId !== job.jobId);
+}
+
+function browserControlTargetLabel(target) {
+	if (!target) return '';
+	return target.jobTitle || target.jobId || target.repo || '';
 }
 
 function browserControlCommandLabel(kind) {
@@ -3683,25 +3731,23 @@ function browserControlCommandLabel(kind) {
 	return 'Click continue';
 }
 
-function browserCompanionCommand(job = currentJob(), options = {}) {
-	if (!job) return '';
+function browserCompanionCommand(options = {}) {
 	const includeToken = options.includeToken === true;
 	const authPart = state.standaloneToken.trim()
 		? includeToken
 			? `--bearer-token "${state.standaloneToken.trim()}"`
 			: '--bearer-token <saved-token>'
 		: '--queue-token <queue-token>';
-	return `npm run browser:companion -- --app-origin ${config.appOrigin} --job-id ${job.jobId} ${authPart} --cdp-url http://127.0.0.1:9222`;
+	return `npm run browser:companion -- --app-origin ${config.appOrigin} ${authPart} --cdp-url http://127.0.0.1:9222`;
 }
 
-async function refreshBrowserControl(jobId = currentJob()?.jobId || '') {
-	if (!jobId || !externalBrowserControlAvailable()) return null;
-	const payload = await apiRequest(`/gui/api/jobs/${encodeURIComponent(jobId)}/browser-control`);
-	const job = ensureJob(jobId);
-	if (job) {
-		job.browserControl = normalizeBrowserControl(payload.data && payload.data.browser_control ? payload.data.browser_control : null);
+async function refreshBrowserControl(options = {}) {
+	if (!externalBrowserControlAvailable()) return null;
+	const payload = await apiRequest('/gui/api/browser-control');
+	state.store.browserControl = normalizeBrowserControl(payload.data && payload.data.browser_control ? payload.data.browser_control : null);
+	if (!options.skipRender) {
+		render();
 	}
-	render();
 	return payload;
 }
 
@@ -3720,20 +3766,21 @@ async function enqueueBrowserControlCommand(jobId, input = {}) {
 	state.message = `Queueing ${input.label || browserControlCommandLabel(input.kind)}...`;
 	render();
 	try {
-		const payload = await apiRequest(`/gui/api/jobs/${encodeURIComponent(jobId)}/browser-control/commands`, {
+		const job = ensureJob(jobId);
+		const payload = await apiRequest('/gui/api/browser-control/commands', {
 			method: 'POST',
 			body: {
+				job_id: jobId,
+				job_title: job && job.run ? job.run.title : jobId,
+				repo: job ? job.repo : null,
 				kind: input.kind,
 				label: input.label,
 				prompt: input.prompt,
 				page_url_hint: typeof config.chatUiUrl === 'string' ? config.chatUiUrl : null,
 			},
 		});
-		const job = ensureJob(jobId);
-		if (job) {
-			job.browserControl = normalizeBrowserControl(payload.data && payload.data.browser_control ? payload.data.browser_control : null);
-		}
-		state.message = `${input.label || browserControlCommandLabel(input.kind)} queued for the browser companion.`;
+		state.store.browserControl = normalizeBrowserControl(payload.data && payload.data.browser_control ? payload.data.browser_control : null);
+		state.message = `${input.label || browserControlCommandLabel(input.kind)} queued for the global browser companion.`;
 		render();
 		return payload;
 	} catch (error) {
@@ -3960,33 +4007,36 @@ function renderDetailFuture(job) {
 }
 
 function renderBrowserControlCard(job) {
-	const control = currentBrowserControl(job);
+	const control = currentBrowserControl();
 	const session = control && control.session ? control.session : null;
 	const pending = control && control.pendingCommand ? control.pendingCommand : null;
 	const lastResult = control && control.lastResult ? control.lastResult : null;
-	const connected = browserControlConnected(job);
-	const canQueue = connected && externalBrowserControlAvailable() && !pending;
-	const canCopyCommand = Boolean(job);
-	const launchCommand = browserCompanionCommand(job);
+	const activeJob = control && control.activeJob ? control.activeJob : null;
+	const connected = browserControlConnected();
+	const canQueue = Boolean(job) && connected && externalBrowserControlAvailable() && !pending;
+	const canCopyCommand = window.parent === window;
+	const launchCommand = browserCompanionCommand();
 	return `
 		<div class="detail-card simple-card">
 			<div class="stack-header">
 				<p class="panel-kicker">Remote</p>
 				<h3>Browser companion</h3>
-				<p class="supporting-copy">Attach a local Chrome or Edge session via CDP so approvals, resume prompts, and retry gates use real ChatGPT clicks.</p>
+				<p class="supporting-copy">Attach one local Chrome or Edge session via CDP so the console can drive any selected run with real ChatGPT clicks.</p>
 			</div>
 			${renderKeyValueList([
 				{ label: 'Status', value: session ? session.status : 'disconnected' },
 				{ label: 'Agent', value: session && session.agentName ? session.agentName : '' },
 				{ label: 'Last seen', value: session && session.lastSeenAt ? formatRelativeTime(session.lastSeenAt) : '' },
 				{ label: 'Page', value: session && session.pageUrl ? session.pageUrl : '' },
-				{ label: 'Pending', value: pending && pending.label ? pending.label : '' },
-				{ label: 'Last result', value: lastResult ? (lastResult.ok ? 'success' : 'failed') : '' },
-			], 'Open the full-page console, sign in, then attach a local browser companion to enable real-click ChatGPT control.')}
+				{ label: 'Active run', value: browserControlTargetLabel(activeJob) },
+				{ label: 'Pending', value: pending ? `${pending.label || browserControlCommandLabel(pending.kind)}${pending.jobId ? ` (${pending.jobId})` : ''}` : '' },
+				{ label: 'Last result', value: lastResult ? `${lastResult.ok ? 'success' : 'failed'}${lastResult.jobId ? ` (${lastResult.jobId})` : ''}` : '' },
+			], 'Open the full-page console, sign in, then attach the global browser companion to enable real-click ChatGPT control.')}
 			${
 				pending
 					? `<article class="empty-card remote-state-card">
 						<strong>${escapeHtml(pending.label || browserControlCommandLabel(pending.kind))}</strong>
+						${pending.jobId ? `<p>${escapeHtml(`Target run: ${browserControlTargetLabel(pending) || pending.jobId}`)}</p>` : ''}
 						<p>${escapeHtml(pending.claimedAt ? `Claimed ${formatRelativeTime(pending.claimedAt)} by ${pending.claimedBy || 'the companion'}.` : `Queued ${formatRelativeTime(pending.createdAt)}.`)}</p>
 					</article>`
 					: ''
@@ -3995,6 +4045,7 @@ function renderBrowserControlCard(job) {
 				lastResult
 					? `<article class="empty-card remote-state-card${lastResult.ok ? '' : ' error'}">
 						<strong>${escapeHtml(lastResult.ok ? 'Last command passed' : 'Last command failed')}</strong>
+						${lastResult.jobId ? `<p>${escapeHtml(`Target run: ${browserControlTargetLabel(lastResult) || lastResult.jobId}`)}</p>` : ''}
 						<p>${escapeHtml(lastResult.summary || lastResult.error || 'No summary was recorded.')}</p>
 					</article>`
 					: ''
@@ -4011,12 +4062,12 @@ function renderBrowserControlCard(job) {
 				}
 			</div>
 			<div class="action-row">
-				<button type="button" class="mini-button" data-action="refresh-browser-control" data-job-id="${escapeHtml(job ? job.jobId : '')}"${buttonDisabledAttr(!job || !externalBrowserControlAvailable())}>Refresh remote state</button>
-				<button type="button" class="mini-button" data-action="copy-browser-companion-command" data-job-id="${escapeHtml(job ? job.jobId : '')}"${buttonDisabledAttr(!canCopyCommand)}>Copy launch command</button>
+				<button type="button" class="mini-button" data-action="refresh-browser-control"${buttonDisabledAttr(!externalBrowserControlAvailable())}>Refresh remote state</button>
+				<button type="button" class="mini-button" data-action="copy-browser-companion-command"${buttonDisabledAttr(!canCopyCommand)}>Copy launch command</button>
 			</div>
 			<div class="future-preview">
 				<p class="panel-kicker">Launch</p>
-				<pre class="detail-json remote-command-preview">${escapeHtml(launchCommand || 'Select a run to generate the companion command.')}</pre>
+				<pre class="detail-json remote-command-preview">${escapeHtml(launchCommand || 'Open the full-page console to generate the companion command.')}</pre>
 			</div>
 		</div>
 	`;
@@ -4572,7 +4623,7 @@ root.addEventListener('click', (event) => {
 				void refreshCurrentRun({ silent: true, keepSection: true });
 				void loadFeed({ silent: true, keepSection: true });
 				if (externalBrowserControlAvailable()) {
-					void refreshBrowserControl(target.dataset.jobId).catch((error) => console.warn(error));
+					void refreshBrowserControl().catch((error) => console.warn(error));
 				}
 			}
 			break;
@@ -4583,22 +4634,17 @@ root.addEventListener('click', (event) => {
 			navigateToList();
 			break;
 		case 'job-shortcut':
-			if (browserControlConnected(ensureJob(target.dataset.jobId || currentJob()?.jobId || '')) && externalBrowserControlAvailable()) {
+			if (browserControlConnected() && externalBrowserControlAvailable()) {
 				void runExternalBrowserShortcut(target.dataset.jobId || currentJob()?.jobId || '');
 			} else {
 				void runAttentionShortcut(target.dataset.jobId || currentJob()?.jobId || '');
 			}
 			break;
 		case 'refresh-browser-control':
-			void refreshBrowserControl(target.dataset.jobId || currentJob()?.jobId || '');
+			void refreshBrowserControl();
 			break;
 		case 'copy-browser-companion-command': {
-			const text = browserCompanionCommand(ensureJob(target.dataset.jobId || currentJob()?.jobId || ''), { includeToken: true });
-			if (!text) {
-				state.error = 'Select a run before copying the browser companion command.';
-				render();
-				break;
-			}
+			const text = browserCompanionCommand({ includeToken: true });
 			if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
 				state.error = 'Clipboard API unavailable.';
 				state.message = '';

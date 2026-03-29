@@ -18,14 +18,15 @@
 		"ops:status": "node worker/scripts/check-self-hosts.mjs",
 		"docs:tool-surface": "node worker/scripts/generate-tool-surface-doc.mjs",
 		"docs:tool-surface:check": "node worker/scripts/generate-tool-surface-doc.mjs --check"
-		},
+	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
 		"@types/node": "^25.5.0",
+		"playwright": "^1.58.2",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.76.0"
-		},
+	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.27.1",
 		"agents": "^0.7.6",

@@ -183,6 +183,10 @@ export interface JobBrowserRemoteCommand {
 	command_id: string;
 	kind: BrowserRemoteCommandKind;
 	status: BrowserRemoteCommandStatus;
+	job_id?: string | null;
+	job_title?: string | null;
+	repo?: string | null;
+	run_status?: RunAttentionStatus | null;
 	label?: string | null;
 	prompt?: string | null;
 	page_url_hint?: string | null;
@@ -196,6 +200,10 @@ export interface JobBrowserRemoteCommandResult {
 	command_id: string;
 	kind: BrowserRemoteCommandKind;
 	ok: boolean;
+	job_id?: string | null;
+	job_title?: string | null;
+	repo?: string | null;
+	run_status?: RunAttentionStatus | null;
 	summary: string | null;
 	error?: string | null;
 	matched_actions?: string[];
@@ -204,8 +212,16 @@ export interface JobBrowserRemoteCommandResult {
 	completed_at: string;
 }
 
+export interface BrowserRemoteActiveJob {
+	job_id: string;
+	job_title?: string | null;
+	repo?: string | null;
+	run_status?: RunAttentionStatus | null;
+}
+
 export interface JobBrowserRemoteControlState {
 	session?: JobBrowserRemoteSession | null;
+	active_job?: BrowserRemoteActiveJob | null;
 	pending_command?: JobBrowserRemoteCommand | null;
 	last_result?: JobBrowserRemoteCommandResult | null;
 }

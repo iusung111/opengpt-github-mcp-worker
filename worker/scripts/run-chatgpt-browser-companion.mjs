@@ -7,7 +7,6 @@ const DEFAULT_CHAT_URL = 'https://chatgpt.com/';
 function readArgs(argv) {
 	const options = {
 		appOrigin: process.env.OPEN_GPT_APP_ORIGIN || '',
-		jobId: process.env.OPEN_GPT_JOB_ID || '',
 		queueToken: process.env.QUEUE_API_TOKEN || '',
 		bearerToken: process.env.OPEN_GPT_BEARER_TOKEN || '',
 		cdpUrl: process.env.OPEN_GPT_CDP_URL || DEFAULT_CDP_URL,
@@ -24,10 +23,6 @@ function readArgs(argv) {
 		switch (key) {
 			case '--app-origin':
 				options.appOrigin = value;
-				index += 1;
-				break;
-			case '--job-id':
-				options.jobId = value;
 				index += 1;
 				break;
 			case '--queue-token':
@@ -69,7 +64,6 @@ function usage() {
 	console.log(`Usage:
   node worker/scripts/run-chatgpt-browser-companion.mjs \\
     --app-origin https://opengpt-github-mcp-worker.iusung111.workers.dev \\
-    --job-id <job-id> \\
     --queue-token <queue-token> \\
     --cdp-url http://127.0.0.1:9222
 
@@ -294,7 +288,7 @@ async function pageMetadata(page) {
 
 async function main() {
 	const options = readArgs(process.argv.slice(2));
-	if (!options.appOrigin || !options.jobId || (!options.queueToken && !options.bearerToken)) {
+	if (!options.appOrigin || (!options.queueToken && !options.bearerToken)) {
 		usage();
 		process.exitCode = 1;
 		return;
@@ -308,7 +302,7 @@ async function main() {
 	const stop = async () => {
 		stopping = true;
 		try {
-			await apiRequest(options, `/gui/api/jobs/${encodeURIComponent(options.jobId)}/browser-control/session/disconnect`, {
+			await apiRequest(options, '/gui/api/browser-control/session/disconnect', {
 				method: 'POST',
 			});
 		} catch (error) {
@@ -333,10 +327,11 @@ async function main() {
 
 	while (!stopping) {
 		let page = null;
+		let command = null;
 		try {
 			page = await choosePage(browser, options, null);
 			const meta = page ? await pageMetadata(page) : { page_url: null, page_title: null };
-			await apiRequest(options, `/gui/api/jobs/${encodeURIComponent(options.jobId)}/browser-control/session`, {
+			await apiRequest(options, '/gui/api/browser-control/session', {
 				method: 'POST',
 				body: {
 					session_id: sessionId,
@@ -348,11 +343,8 @@ async function main() {
 				},
 			});
 
-			const nextPayload = await apiRequest(
-				options,
-				`/gui/api/jobs/${encodeURIComponent(options.jobId)}/browser-control/commands/next?session_id=${encodeURIComponent(sessionId)}`,
-			);
-			const command = nextPayload?.data?.command;
+			const nextPayload = await apiRequest(options, `/gui/api/browser-control/commands/next?session_id=${encodeURIComponent(sessionId)}`);
+			command = nextPayload?.data?.command;
 			if (!command || typeof command.command_id !== 'string') {
 				await sleep(options.pollMs);
 				continue;
@@ -363,7 +355,7 @@ async function main() {
 			const finalMeta = await pageMetadata(page);
 			await apiRequest(
 				options,
-				`/gui/api/jobs/${encodeURIComponent(options.jobId)}/browser-control/commands/${encodeURIComponent(command.command_id)}/complete`,
+				`/gui/api/browser-control/commands/${encodeURIComponent(command.command_id)}/complete`,
 				{
 					method: 'POST',
 					body: {
@@ -376,22 +368,19 @@ async function main() {
 					},
 				},
 			);
-			console.log(`[browser-companion] completed ${command.kind}: ${result.summary}`);
+			console.log(
+				`[browser-companion] completed ${command.kind}${command.job_id ? ` for ${command.job_id}` : ''}: ${result.summary}`,
+			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.warn(`[browser-companion] ${message}`);
-			try {
-				const currentPage = page ?? (await choosePage(browser, options, null));
-				const meta = currentPage ? await pageMetadata(currentPage) : { page_url: null, page_title: null };
-				const nextPayload = await apiRequest(
-					options,
-					`/gui/api/jobs/${encodeURIComponent(options.jobId)}/browser-control/commands/next?session_id=${encodeURIComponent(sessionId)}`,
-				).catch(() => null);
-				const commandId = nextPayload?.data?.command?.command_id;
-				if (commandId) {
+			if (command && typeof command.command_id === 'string') {
+				try {
+					const currentPage = page ?? (await choosePage(browser, options, command));
+					const meta = currentPage ? await pageMetadata(currentPage) : { page_url: null, page_title: null };
 					await apiRequest(
 						options,
-						`/gui/api/jobs/${encodeURIComponent(options.jobId)}/browser-control/commands/${encodeURIComponent(commandId)}/complete`,
+						`/gui/api/browser-control/commands/${encodeURIComponent(command.command_id)}/complete`,
 						{
 							method: 'POST',
 							body: {
@@ -404,8 +393,8 @@ async function main() {
 							},
 						},
 					).catch(() => {});
-				}
-			} catch {}
+				} catch {}
+			}
 			await sleep(options.pollMs);
 		}
 	}
