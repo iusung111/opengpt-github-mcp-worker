@@ -2941,6 +2941,27 @@ function futureInstructionsStatus() {
 	};
 }
 
+function syncFutureDraftUi() {
+	const status = futureInstructionsStatus();
+	const statusPill = root.querySelector('[data-future-status-pill]');
+	const statusCopy = root.querySelector('[data-future-status-copy]');
+	const saveButton = root.querySelector('[data-action="save-future-instructions"]');
+	const clearButton = root.querySelector('[data-action="clear-future-instructions"]');
+	if (statusPill instanceof HTMLElement) {
+		statusPill.className = `status-pill ${status.tone}`;
+		statusPill.textContent = status.label;
+	}
+	if (statusCopy instanceof HTMLElement) {
+		statusCopy.textContent = status.description;
+	}
+	if (saveButton instanceof HTMLButtonElement) {
+		saveButton.disabled = !futureInstructionsDirty();
+	}
+	if (clearButton instanceof HTMLButtonElement) {
+		clearButton.disabled = !state.futureInstructionsDraft && !state.futureInstructions;
+	}
+}
+
 function aggregateRunCounts() {
 	const counts = createEmptyCounts();
 	for (const job of sortedJobs()) {
@@ -3975,8 +3996,8 @@ function renderDetailFuture(job) {
 					<h3>Future instructions</h3>
 					<p class="supporting-copy">These instructions are synced into GPT model context so the run can continue with fewer manual restarts when the web session interrupts.</p>
 					<div class="future-status-row">
-						<span class="status-pill ${escapeHtml(status.tone)}">${escapeHtml(status.label)}</span>
-						<span class="future-status-copy">${escapeHtml(status.description)}</span>
+						<span class="status-pill ${escapeHtml(status.tone)}" data-future-status-pill>${escapeHtml(status.label)}</span>
+						<span class="future-status-copy" data-future-status-copy>${escapeHtml(status.description)}</span>
 					</div>
 				</div>
 				<div class="field-stack">
@@ -4853,7 +4874,7 @@ function handleMutableInput(target) {
 			break;
 		case 'future-instructions':
 			state.futureInstructionsDraft = target.value;
-			shouldRerender = true;
+			syncFutureDraftUi();
 			break;
 		case 'standalone-token':
 			state.standaloneToken = target.value;
