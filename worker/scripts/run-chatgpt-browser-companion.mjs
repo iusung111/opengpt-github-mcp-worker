@@ -3,6 +3,50 @@
 const DEFAULT_POLL_MS = 2500;
 const DEFAULT_CDP_URL = 'http://127.0.0.1:9222';
 const DEFAULT_CHAT_URL = 'https://chatgpt.com/';
+const INTERACTIVE_SELECTOR = 'button, [role="button"], a, div[role="button"]';
+const CONTINUE_PATTERNS = [
+	/continue generating/i,
+	/continue response/i,
+	/^continue$/i,
+	/^resume$/i,
+	/^retry$/i,
+	/try again/i,
+	/^approve$/i,
+	/^allow$/i,
+	/always allow/i,
+	/^confirm$/i,
+	/grant access/i,
+	/grant permission/i,
+	/\uACC4\uC18D \uC0DD\uC131/,
+	/\uC751\uB2F5 \uACC4\uC18D/,
+	/^\uACC4\uC18D$/,
+	/^\uACC4\uC18D\uD558\uAE30$/,
+	/^\uC7AC\uAC1C$/,
+	/^\uB2E4\uC2DC \uC2DC\uB3C4$/,
+	/^\uB2E4\uC2DC \uC0DD\uC131$/,
+	/^\uC2B9\uC778$/,
+	/^\uD5C8\uC6A9$/,
+	/\uD56D\uC0C1 \uD5C8\uC6A9/,
+	/^\uD655\uC778$/,
+	/\uC561\uC138\uC2A4\s*(\uAD8C\uD55C\s*)?\uBD80\uC5EC(?!\uB428)/,
+	/\uAD8C\uD55C\s*\uD5C8\uC6A9/,
+	/\uC811\uADFC\s*\uD5C8\uC6A9/,
+];
+const CONTINUE_EXCLUDE_PATTERNS = [
+	/\uBD80\uC5EC\uB428/,
+	/granted/i,
+	/\uC694\uCCAD \uC644\uB8CC/,
+	/request complete/i,
+	/\uB3C4\uAD6C \uC694\uCCAD \uC644\uB8CC/,
+	/completed/i,
+	/\bthought\b/i,
+	/thinking/i,
+	/\uC798 \uC0DD\uAC01\uD558\uAE30/,
+	/\uD655\uC7A5 \uCD94\uB860/,
+	/\uC2A4\uD2B8\uB9AC\uBC0D \uC911\uC9C0/,
+	/stop streaming/i,
+];
+const STREAMING_PATTERNS = [/stop streaming/i, /\uC2A4\uD2B8\uB9AC\uBC0D \uC911\uC9C0/, /generating/i, /\uC0DD\uC131 \uC911/];
 
 function readArgs(argv) {
 	const options = {
@@ -170,44 +214,147 @@ async function firstVisibleLocator(page, selectors) {
 	return null;
 }
 
-async function clickByPatterns(page, patterns) {
-	const selectors = ['button', '[role="button"]', 'a', 'div[role="button"]'];
+function normalizeCandidateText(value) {
+	return String(value || '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function testPattern(pattern, value) {
+	const expression = new RegExp(pattern.source, pattern.flags);
+	return expression.test(value);
+}
+
+function candidatePriority(candidate) {
+	let score = 0;
+	if (candidate.inDialog) score += 40;
+	if (candidate.inForm) score += 30;
+	if (candidate.inMain) score += 20;
+	if (candidate.tag === 'button') score += 10;
+	if (!candidate.inNav) score += 5;
+	if (candidate.testid) score += 2;
+	return score;
+}
+
+async function collectInteractiveCandidates(page) {
+	const locator = page.locator(INTERACTIVE_SELECTOR);
+	const total = Math.min(await locator.count(), 250);
+	const candidates = [];
+	for (let index = 0; index < total; index += 1) {
+		const candidate = locator.nth(index);
+		try {
+			if (!(await candidate.isVisible({ timeout: 500 }).catch(() => false))) {
+				continue;
+			}
+			const meta = await candidate.evaluate((element) => {
+				const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
+				const aria = element.getAttribute('aria-label') || '';
+				const title = element.getAttribute('title') || '';
+				const testid = element.getAttribute('data-testid') || '';
+				const name = element.getAttribute('name') || '';
+				const label = aria || text || title || testid || name || element.tagName.toLowerCase();
+				return {
+					tag: element.tagName.toLowerCase(),
+					text,
+					aria,
+					title,
+					testid,
+					name,
+					label,
+					fields: [aria, text, title, testid, name].filter(Boolean),
+					searchText: [aria, text, title, testid, name].filter(Boolean).join(' ').toLowerCase(),
+					disabled: element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true',
+					inDialog: Boolean(element.closest('[role="dialog"], dialog')),
+					inMain: Boolean(element.closest('main')),
+					inForm: Boolean(element.closest('form')),
+					inNav: Boolean(element.closest('nav, aside')),
+				};
+			});
+			candidates.push({
+				...meta,
+				index,
+				locator: candidate,
+				label: normalizeCandidateText(meta.label),
+				fields: Array.isArray(meta.fields) ? meta.fields.map((value) => normalizeCandidateText(value.toLowerCase())) : [],
+				searchText: normalizeCandidateText(meta.searchText),
+			});
+		} catch {}
+	}
+	return candidates.sort((left, right) => candidatePriority(right) - candidatePriority(left));
+}
+
+async function visibleActionSummary(page, limit = 8) {
+	const candidates = await collectInteractiveCandidates(page);
+	return candidates
+		.filter((candidate) => !candidate.disabled)
+		.slice(0, limit)
+		.map((candidate) => {
+			const suffix = [candidate.testid, candidate.aria].filter(Boolean).slice(0, 1).join(' | ');
+			return suffix ? `${candidate.label} [${suffix}]` : candidate.label;
+		});
+}
+
+async function clickByPatterns(page, patterns, options = {}) {
+	const excludePatterns = Array.isArray(options.excludePatterns) ? options.excludePatterns : [];
+	const candidates = await collectInteractiveCandidates(page);
 	for (const pattern of patterns) {
-		for (const selector of selectors) {
-			const locator = page.locator(selector).filter({ hasText: pattern }).first();
+		for (const candidate of candidates) {
+			if (candidate.disabled || !candidate.searchText) {
+				continue;
+			}
+			if (
+				excludePatterns.some(
+					(entry) => testPattern(entry, candidate.searchText) || candidate.fields.some((field) => testPattern(entry, field)),
+				)
+			) {
+				continue;
+			}
+			if (!testPattern(pattern, candidate.searchText) && !candidate.fields.some((field) => testPattern(pattern, field))) {
+				continue;
+			}
 			try {
-				if ((await locator.count()) === 0) continue;
-				if (!(await locator.isVisible({ timeout: 1000 }).catch(() => false))) continue;
-				const label = ((await locator.textContent({ timeout: 1000 })) || pattern.toString()).trim();
-				await locator.click({ timeout: 3000 });
-				return label;
+				await candidate.locator.click({ timeout: 3000 });
+				return candidate.label || pattern.toString();
 			} catch {}
 		}
 	}
 	return null;
 }
 
+async function chatGptBusy(page) {
+	const candidates = await collectInteractiveCandidates(page);
+	return candidates.some(
+		(candidate) =>
+			!candidate.disabled &&
+			STREAMING_PATTERNS.some((pattern) => testPattern(pattern, candidate.searchText) || candidate.fields.some((field) => testPattern(pattern, field))),
+	);
+}
+
 async function runClickContinue(page) {
 	const matched = [];
-	const patterns = [
-		/continue generating/i,
-		/^continue$/i,
-		/^resume$/i,
-		/^retry$/i,
-		/try again/i,
-		/^approve$/i,
-		/^allow$/i,
-		/always allow/i,
-		/^confirm$/i,
-	];
+	const deadline = Date.now() + 20000;
 	for (let attempts = 0; attempts < 3; attempts += 1) {
-		const label = await clickByPatterns(page, patterns);
+		const label = await clickByPatterns(page, CONTINUE_PATTERNS, { excludePatterns: CONTINUE_EXCLUDE_PATTERNS });
 		if (!label) break;
 		matched.push(label);
 		await page.waitForTimeout(900);
 	}
 	if (!matched.length) {
-		throw new Error('No visible continue/approve/resume button was found on the target ChatGPT page.');
+		while (Date.now() < deadline && (await chatGptBusy(page))) {
+			await page.waitForTimeout(1500);
+			const label = await clickByPatterns(page, CONTINUE_PATTERNS, { excludePatterns: CONTINUE_EXCLUDE_PATTERNS });
+			if (!label) {
+				continue;
+			}
+			matched.push(label);
+			await page.waitForTimeout(900);
+			break;
+		}
+	}
+	if (!matched.length) {
+		const visibleActions = await visibleActionSummary(page);
+		const detail = visibleActions.length ? ` Visible actions: ${visibleActions.join(' | ')}.` : '';
+		throw new Error(`No visible continue/approve/resume button was found on the target ChatGPT page.${detail}`);
 	}
 	return matched;
 }
@@ -231,7 +378,14 @@ async function fillPrompt(page, prompt) {
 	} else {
 		await page.keyboard.insertText(prompt);
 	}
-	const sendLabel = await clickByPatterns(page, [/^send$/i, /send message/i, /submit/i]);
+	const sendLabel = await clickByPatterns(page, [
+		/^send$/i,
+		/send message/i,
+		/submit/i,
+		/\uBCF4\uB0B4\uAE30/,
+		/\uBA54\uC2DC\uC9C0 \uBCF4\uB0B4\uAE30/,
+		/\uC804\uC1A1/,
+	]);
 	if (!sendLabel) {
 		await page.keyboard.press('Enter');
 		return ['Send'];

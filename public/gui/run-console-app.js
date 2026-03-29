@@ -332,6 +332,7 @@ const state = {
 	alertSignatures: {},
 	alertBaselineReady: false,
 	alertPermissionRequested: false,
+	alertPermissionState: browserAlertsSupported() ? window.Notification.permission : 'unsupported',
 };
 
 function createStore() {
@@ -914,11 +915,17 @@ function browserAlertsSupported() {
 	return typeof window.Notification === 'function';
 }
 
+function currentBrowserAlertPermission() {
+	return browserAlertsSupported() ? window.Notification.permission : 'unsupported';
+}
+
 async function requestBrowserAlertsPermission() {
 	if (!browserAlertsSupported()) {
 		throw new Error('Browser notifications are unavailable in this environment.');
 	}
-	return window.Notification.requestPermission();
+	const permission = await window.Notification.requestPermission();
+	syncBrowserAlertPermissionState(sortedJobs());
+	return permission;
 }
 
 function browserAlertDetail(job, attention = jobAttentionStatus(job)) {
@@ -979,20 +986,65 @@ function jobAlertSignature(job) {
 	return `${attention}:${latestCursor}`;
 }
 
+function captureJobAlertSignatures(jobs) {
+	const nextSignatures = {};
+	for (const job of jobs) {
+		nextSignatures[job.jobId] = jobAlertSignature(job);
+	}
+	return nextSignatures;
+}
+
+function emitBrowserAlert(job, attention = jobAttentionStatus(job)) {
+	if (!job || !browserAlertsSupported() || currentBrowserAlertPermission() !== 'granted') {
+		return false;
+	}
+	const detail = browserAlertDetail(job, attention);
+	try {
+		new window.Notification(detail.title, {
+			body: `[${statusLabel(attention)}] ${detail.body}`,
+			tag: `job-alert-${job.jobId}`,
+		});
+		return true;
+	} catch (error) {
+		console.warn(error);
+		return false;
+	}
+}
+
+function syncBrowserAlertPermissionState(jobs = sortedJobs(), nextSignatures = captureJobAlertSignatures(jobs)) {
+	const permission = currentBrowserAlertPermission();
+	const previous = state.alertPermissionState;
+	state.alertPermissionState = permission;
+	if (permission !== 'granted' || previous === 'granted') {
+		return false;
+	}
+	const visibleJobIds = new Set(buildNotificationCenterItems().map((item) => item.jobId));
+	for (const job of jobs) {
+		const attention = jobAttentionStatus(job);
+		if (!actionableStatus(attention) || !visibleJobIds.has(job.jobId)) {
+			continue;
+		}
+		emitBrowserAlert(job, attention);
+	}
+	state.alertSignatures = nextSignatures;
+	state.alertBaselineReady = Object.keys(nextSignatures).length > 0;
+	return true;
+}
+
 function maybeEmitBrowserAlerts(jobs) {
 	if (!Array.isArray(jobs) || !jobs.length) {
 		return;
 	}
-	const nextSignatures = {};
-	for (const job of jobs) {
-		nextSignatures[job.jobId] = jobAlertSignature(job);
+	const nextSignatures = captureJobAlertSignatures(jobs);
+	if (syncBrowserAlertPermissionState(jobs, nextSignatures)) {
+		return;
 	}
 	if (!state.alertBaselineReady) {
 		state.alertSignatures = nextSignatures;
 		state.alertBaselineReady = true;
 		return;
 	}
-	if (!browserAlertsSupported() || window.Notification.permission !== 'granted') {
+	if (!browserAlertsSupported() || currentBrowserAlertPermission() !== 'granted') {
 		state.alertSignatures = nextSignatures;
 		return;
 	}
@@ -1006,15 +1058,7 @@ function maybeEmitBrowserAlerts(jobs) {
 		if (!actionableStatus(attention)) {
 			continue;
 		}
-		const detail = browserAlertDetail(job, attention);
-		try {
-			new window.Notification(detail.title, {
-				body: `[${statusLabel(attention)}] ${detail.body}`,
-				tag: `job-alert-${job.jobId}`,
-			});
-		} catch (error) {
-			console.warn(error);
-		}
+		emitBrowserAlert(job, attention);
 	}
 	state.alertSignatures = nextSignatures;
 }
