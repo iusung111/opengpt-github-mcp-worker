@@ -32,7 +32,7 @@ const ATTENTION_STATUSES = ['idle', 'pending_approval', 'running', 'paused', 'ca
 const SOURCE_LAYERS = ['gpt', 'mcp', 'cloudflare', 'repo', 'system'];
 const POLL_INTERVAL_MS = 20000;
 const DASHBOARD_SORTS = ['recent', 'status', 'name'];
-const DETAIL_SECTIONS = ['logs', 'inputs', 'info'];
+const DETAIL_SECTIONS = ['logs', 'inputs', 'info', 'future'];
 
 const DEMO_ENVELOPES = [
 	{
@@ -281,6 +281,7 @@ const state = {
 	approvalNote: '',
 	controlNote: '',
 	chatDraft: '',
+	futureInstructions: '',
 	feedFilters: {
 		status: '',
 		sourceLayer: '',
@@ -324,8 +325,11 @@ const state = {
 	},
 	standaloneToken: '',
 	pollTimer: null,
+	pollInFlight: false,
+	modelContextTimer: null,
 	alertSignatures: {},
 	alertBaselineReady: false,
+	alertPermissionRequested: false,
 };
 
 function createStore() {
@@ -911,11 +915,62 @@ async function requestBrowserAlertsPermission() {
 	return window.Notification.requestPermission();
 }
 
+function browserAlertDetail(job, attention = jobAttentionStatus(job)) {
+	if (!job) {
+		return { title: 'Run update', body: 'The run state changed.' };
+	}
+	const notification = job.latestNotification;
+	const interrupt = currentInterrupt(job);
+	const title = job.run && job.run.title ? job.run.title : job.jobId;
+	if (attention === 'pending_approval') {
+		return {
+			title,
+			body:
+				notification?.body ||
+				job.blockingState?.reason ||
+				job.run?.approvalReason ||
+				'Approval is required before the run can continue.',
+		};
+	}
+	if (attention === 'interrupted') {
+		return {
+			title,
+			body:
+				notification?.body ||
+				interrupt?.message ||
+				job.blockingState?.reason ||
+				job.run?.lastEvent ||
+				'The run was interrupted and needs attention.',
+		};
+	}
+	if (attention === 'failed') {
+		return {
+			title,
+			body: notification?.body || job.blockingState?.reason || job.run?.lastEvent || 'The run failed and needs attention.',
+		};
+	}
+	if (attention === 'completed') {
+		return {
+			title,
+			body: notification?.body || job.run?.lastEvent || 'The run completed successfully.',
+		};
+	}
+	return {
+		title,
+		body: notification?.body || job.run?.lastEvent || 'The run state changed.',
+	};
+}
+
 function jobAlertSignature(job) {
 	if (!job) return '';
 	const attention = jobAttentionStatus(job);
-	const latestId = job.latestNotification && job.latestNotification.id ? job.latestNotification.id : 'none';
-	return `${attention}:${latestId}`;
+	const latestCursor =
+		(job.latestNotification && job.latestNotification.id) ||
+		(job.latestNotification && job.latestNotification.createdAt) ||
+		(job.run && job.run.updatedAt) ||
+		job.updatedAt ||
+		'none';
+	return `${attention}:${latestCursor}`;
 }
 
 function maybeEmitBrowserAlerts(jobs) {
@@ -942,18 +997,13 @@ function maybeEmitBrowserAlerts(jobs) {
 		if (previous === current) {
 			continue;
 		}
-		if (attention !== 'pending_approval' && attention !== 'interrupted' && attention !== 'failed') {
+		if (!actionableStatus(attention)) {
 			continue;
 		}
-		const title = job.run && job.run.title ? job.run.title : job.jobId;
-		const detail =
-			(job.latestNotification && job.latestNotification.body) ||
-			(job.blockingState && job.blockingState.reason) ||
-			(job.run && job.run.lastEvent) ||
-			'Operator attention is required.';
+		const detail = browserAlertDetail(job, attention);
 		try {
-			new window.Notification(title, {
-				body: `[${statusLabel(attention)}] ${detail}`,
+			new window.Notification(detail.title, {
+				body: `[${statusLabel(attention)}] ${detail.body}`,
 				tag: `job-alert-${job.jobId}`,
 			});
 		} catch (error) {
@@ -1113,7 +1163,7 @@ function runIcon(className = 'icon') {
 }
 
 function actionableStatus(status) {
-	return status === 'pending_approval' || status === 'interrupted' || status === 'failed';
+	return status === 'pending_approval' || status === 'interrupted' || status === 'failed' || status === 'completed';
 }
 
 function buildNotificationCenterItems() {
@@ -1160,6 +1210,12 @@ function buildNotificationCenterItems() {
 			body = notification?.body || job.blockingState?.reason || job.run?.lastEvent || 'The run failed and needs operator attention.';
 			createdAt = notification?.createdAt || job.run?.updatedAt || '';
 			key = `failed:${job.jobId}:${notification?.id || createdAt || 'failed'}`;
+		} else if (attention === 'completed') {
+			section = 'info';
+			title = notification?.title || 'Run completed';
+			body = notification?.body || job.run?.lastEvent || 'The run completed successfully.';
+			createdAt = notification?.createdAt || job.run?.updatedAt || '';
+			key = `completed:${job.jobId}:${notification?.id || createdAt || 'completed'}`;
 		}
 		const hidden =
 			Boolean(state.dismissedAlertKeys[key]) ||
@@ -2064,24 +2120,56 @@ function stopPolling() {
 	}
 }
 
+function hasRecentInFlightToolSession(maxAgeMs = 8000) {
+	const now = Date.now();
+	return Object.values(state.store.toolSessions).some((session) => {
+		if (session.phase !== 'pending' && session.phase !== 'waiting') {
+			return false;
+		}
+		const timestamp = new Date(session.updatedAt || session.createdAt || 0).getTime();
+		return Number.isFinite(timestamp) && now - timestamp < maxAgeMs;
+	});
+}
+
+function canAutoRefresh() {
+	const host = currentHostApi();
+	return host.canCallTools() && toolAvailable('jobs_list');
+}
+
+async function refreshConsoleData(options = {}) {
+	if (!canAutoRefresh() || state.pollInFlight) {
+		return;
+	}
+	state.pollInFlight = true;
+	try {
+		await loadJobs({ ...options, silent: true, keepSection: true, skipRender: true });
+		if (currentPage() === 'detail' && currentJob()) {
+			await refreshCurrentRun({ ...options, silent: true, keepSection: true, skipRender: true });
+			await loadFeed({ ...options, silent: true, keepSection: true, skipRender: true });
+		}
+	} finally {
+		state.pollInFlight = false;
+		render();
+		void syncModelContext(false).catch((error) => console.warn(error));
+	}
+}
+
 function startPolling() {
 	stopPolling();
-	if (window.parent && window.parent !== window) {
+	if (!canAutoRefresh()) {
 		return;
 	}
-	if (!state.session.ready) {
-		return;
-	}
-	state.pollTimer = window.setInterval(() => {
-		if (document.hidden || !state.session.ready) {
+	const tick = () => {
+		if (document.hidden || !canAutoRefresh()) {
 			return;
 		}
-		void loadJobs({ silent: true, keepSection: true });
-		if (currentPage() === 'detail' && currentJob()) {
-			void refreshCurrentRun({ silent: true, keepSection: true });
-			void loadFeed({ silent: true, keepSection: true });
+		if (hasRecentInFlightToolSession()) {
+			return;
 		}
-	}, POLL_INTERVAL_MS);
+		void refreshConsoleData({ keepSection: true });
+	};
+	void refreshConsoleData({ keepSection: true });
+	state.pollTimer = window.setInterval(tick, POLL_INTERVAL_MS);
 }
 
 function coerceToolEnvelope(value) {
@@ -2217,6 +2305,7 @@ function buildContextSnapshot() {
 					next_step: latestSession.nextStep,
 				}
 			: null,
+		future_instructions: state.futureInstructions.trim() || null,
 		host: {
 			display_mode: state.store.host.context && state.store.host.context.displayMode ? state.store.host.context.displayMode : null,
 			platform: state.store.host.context && state.store.host.context.platform ? state.store.host.context.platform : null,
@@ -2233,6 +2322,16 @@ async function syncModelContext(force = false) {
 	if (!force && key === state.lastModelContextKey) return;
 	state.lastModelContextKey = key;
 	await host.updateModelContext(snapshot);
+}
+
+function scheduleModelContextSync(force = false) {
+	if (state.modelContextTimer) {
+		window.clearTimeout(state.modelContextTimer);
+	}
+	state.modelContextTimer = window.setTimeout(() => {
+		state.modelContextTimer = null;
+		void syncModelContext(force).catch((error) => console.warn(error));
+	}, 250);
 }
 
 function approvalPresetForAction(blockedAction) {
@@ -2323,11 +2422,11 @@ async function runTool(name, args = {}, nextSection = state.focusSection, option
 async function refreshCurrentRun(options = {}) {
 	const job = currentJob();
 	if (!job) return;
-	await runTool('job_progress', { job_id: job.jobId }, 'overview', options);
+	await runTool('job_progress', { job_id: job.jobId }, 'info', options);
 }
 
 async function loadJobs(options = {}) {
-	await runTool('jobs_list', {}, 'overview', options);
+	await runTool('jobs_list', {}, 'logs', options);
 }
 
 async function loadFeed(options = {}) {
@@ -2341,13 +2440,13 @@ async function loadFeed(options = {}) {
 			source_layer: state.feedFilters.sourceLayer || undefined,
 			limit: state.feedFilters.limit,
 		},
-		'activity',
+		'logs',
 		options,
 	);
 }
 
 async function loadHostStatus() {
-	await runTool('self_host_status', { include_healthz: true }, 'overview');
+	await runTool('self_host_status', { include_healthz: true }, 'info');
 }
 
 async function autoloadHostStatus() {
@@ -2490,6 +2589,7 @@ function currentChatDraft(job = currentJob()) {
 		job.approval && job.approval.pending && job.approval.requestId
 			? `Approval request: ${job.approval.requestId}`
 			: '',
+		state.futureInstructions.trim() ? `Future instructions: ${state.futureInstructions.trim()}` : '',
 		'Next step:',
 	];
 	return lines.filter(Boolean).join('\n');
@@ -2640,6 +2740,7 @@ function restoreViewState() {
 		if (typeof saved.approvalNote === 'string') state.approvalNote = saved.approvalNote;
 		if (typeof saved.controlNote === 'string') state.controlNote = saved.controlNote;
 		if (typeof saved.chatDraft === 'string') state.chatDraft = saved.chatDraft;
+		if (typeof saved.futureInstructions === 'string') state.futureInstructions = saved.futureInstructions;
 		if (typeof saved.dashboardSearch === 'string') state.dashboardSearch = saved.dashboardSearch;
 		if (typeof saved.dashboardStatus === 'string') state.dashboardStatus = saved.dashboardStatus;
 		if (typeof saved.dashboardSort === 'string' && DASHBOARD_SORTS.includes(saved.dashboardSort)) state.dashboardSort = saved.dashboardSort;
@@ -2665,6 +2766,7 @@ function persistViewState() {
 				approvalNote: state.approvalNote,
 				controlNote: state.controlNote,
 				chatDraft: state.chatDraft,
+				futureInstructions: state.futureInstructions,
 				dashboardSearch: state.dashboardSearch,
 				dashboardStatus: state.dashboardStatus,
 				dashboardSort: state.dashboardSort,
@@ -3329,13 +3431,16 @@ function renderControl(job, host) {
 }
 
 function attentionShortcutLabel(job) {
-	if (!job) return 'Open';
+	if (!job) return 'Run';
 	const attention = jobAttentionStatus(job);
 	const controlState = job.control && job.control.state ? job.control.state : job.run?.controlState || 'active';
-	if (job.approval && job.approval.pending && job.approval.requestId) return 'Approve & Continue';
-	if (controlState === 'paused') return 'Resume';
-	if (attention === 'interrupted' || attention === 'failed') return 'Retry';
-	return 'Open';
+	if (job.approval && job.approval.pending && job.approval.requestId) return 'Resolve Approval';
+	if (controlState === 'paused') return 'Resume Paused';
+	if (attention === 'interrupted') return 'Retry Interrupted';
+	if (attention === 'failed') return 'Retry Failed';
+	if (attention === 'completed') return 'Completed';
+	if (attention === 'running') return 'Running...';
+	return 'Run';
 }
 
 function canRunAttentionShortcut(job) {
@@ -3348,16 +3453,38 @@ function canRunAttentionShortcut(job) {
 
 function quickActionLabel(job) {
 	if (!job) return 'Run';
-	if (jobAttentionStatus(job) === 'running') return 'Running...';
-	const shortcut = attentionShortcutLabel(job);
-	if (shortcut === 'Approve & Continue') return 'Approve';
-	return shortcut === 'Open' ? 'Run' : shortcut;
+	return attentionShortcutLabel(job);
 }
 
 function canRunQuickAction(job) {
 	if (!job) return false;
-	if (jobAttentionStatus(job) === 'running') return false;
-	return canRunAttentionShortcut(job) && attentionShortcutLabel(job) !== 'Open';
+	const shortcut = attentionShortcutLabel(job);
+	if (shortcut === 'Running...' || shortcut === 'Completed' || shortcut === 'Run') return false;
+	return canRunAttentionShortcut(job);
+}
+
+function quickActionReason(job) {
+	if (!job) return 'Select a run to continue.';
+	const attention = jobAttentionStatus(job);
+	if (job.approval && job.approval.pending && job.approval.requestId) {
+		return job.blockingState?.reason || 'Approval is required before continuing.';
+	}
+	if (attention === 'interrupted') {
+		return currentInterrupt(job)?.message || job.blockingState?.reason || 'The run was interrupted.';
+	}
+	if (attention === 'failed') {
+		return job.blockingState?.reason || job.run?.lastEvent || 'The run failed and can be retried.';
+	}
+	if (attention === 'completed') {
+		return job.run?.lastEvent || 'The run has already completed.';
+	}
+	if (attention === 'running') {
+		return job.run?.lastEvent || 'The run is still active.';
+	}
+	if (job.control && job.control.state === 'paused') {
+		return job.control.reason || job.blockingState?.reason || 'The run is paused.';
+	}
+	return job.run?.lastEvent || 'No follow-up action is required yet.';
 }
 
 function renderStandaloneAuthAction() {
@@ -3444,6 +3571,7 @@ function renderDashboardJobs() {
 					const isSelected = selectedJobId === job.jobId;
 					const canRun = canRunQuickAction(job);
 					const quickLabel = quickActionLabel(job);
+					const quickReason = quickActionReason(job);
 					const categories = [job.repo, job.nextActor ? `next:${job.nextActor}` : ''].filter(Boolean);
 					return `
 						<article class="job-card${isSelected ? ' is-selected' : ''}" data-select-job="${escapeHtml(job.jobId)}" data-card-state="${escapeHtml(attention)}" tabindex="0" role="button" aria-label="${escapeHtml(job.run ? job.run.title : job.jobId)}">
@@ -3462,6 +3590,7 @@ function renderDashboardJobs() {
 								</div>
 								<div class="job-card-actions">
 									<button type="button" class="card-run-button" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRun)}>${runIcon('inline-icon')}${escapeHtml(quickLabel)}</button>
+									<p class="action-reason">${escapeHtml(quickReason)}</p>
 								</div>
 							</div>
 							<div class="job-card-footer">
@@ -3588,6 +3717,30 @@ function renderDetailInputs(job) {
 	`;
 }
 
+function renderDetailFuture(job) {
+	return `
+		<section class="detail-tab-panel">
+			<div class="detail-card simple-card">
+				<div class="stack-header">
+					<p class="panel-kicker">Future</p>
+					<h3>Future instructions</h3>
+					<p class="supporting-copy">These instructions are synced into GPT model context so the run can continue with fewer manual restarts when the web session interrupts.</p>
+				</div>
+				<div class="field-stack">
+					<label for="future-instructions">Future instructions</label>
+					<textarea
+						id="future-instructions"
+						class="command-textarea future-textarea"
+						name="future-instructions"
+						placeholder="Describe what GPT should verify before ending the task and how it should continue if the session reconnects."
+					>${escapeHtml(state.futureInstructions)}</textarea>
+				</div>
+				${job ? `<p class="supporting-copy">Current run: ${escapeHtml(job.run ? job.run.title : job.jobId)}</p>` : ''}
+			</div>
+		</section>
+	`;
+}
+
 function renderChat(job, host) {
 	const draft = currentChatDraft(job);
 	const primaryActionLabel = host.canSendMessage() ? 'Send to ChatGPT' : 'Copy + Open ChatGPT';
@@ -3689,6 +3842,7 @@ function renderNavigation() {
 		['logs', 'Logs'],
 		['inputs', 'Inputs'],
 		['info', 'Info'],
+		['future', 'Future'],
 	];
 	return `
 		<nav class="tab-row detail-tab-row" aria-label="Run console sections">
@@ -3721,6 +3875,7 @@ function renderDashboard() {
 function renderDetailSection(job, host) {
 	if (state.focusSection === 'logs') return renderDetailLogs(job);
 	if (state.focusSection === 'inputs') return renderDetailInputs(job);
+	if (state.focusSection === 'future') return renderDetailFuture(job);
 	return renderDetailOverview(job);
 }
 
@@ -3767,6 +3922,7 @@ function renderNotificationCenter() {
 function renderDashboardHeader() {
 	const filteredRuns = dashboardJobs().length;
 	const totalRuns = sortedJobs().length;
+	const autoRefreshLabel = canAutoRefresh() ? `Auto ${Math.round(POLL_INTERVAL_MS / 1000)}s` : 'Manual';
 	return `
 		<header class="topbar dashboard-topbar">
 			<div class="topbar-main">
@@ -3778,7 +3934,7 @@ function renderDashboardHeader() {
 					</div>
 				</div>
 				<div class="topbar-side">
-					<span class="run-counter">${escapeHtml(filteredRuns)}/${escapeHtml(totalRuns)} runs</span>
+					<span class="run-counter">${escapeHtml(filteredRuns)}/${escapeHtml(totalRuns)} runs · ${escapeHtml(autoRefreshLabel)}</span>
 					${renderNotificationCenter()}
 				</div>
 			</div>
@@ -3826,6 +3982,7 @@ function renderWorkspaceDetailPane(job, host) {
 	const runStatus = job ? jobAttentionStatus(job) : 'idle';
 	const canRun = job ? canRunQuickAction(job) : false;
 	const actionLabel = job ? quickActionLabel(job) : 'Run';
+	const actionReason = job ? quickActionReason(job) : 'Select a run to continue.';
 	return `
 		${isOpen ? '<button type="button" class="drawer-backdrop" data-action="close-detail" aria-label="Close detail panel"></button>' : ''}
 		<aside class="workspace-side${isOpen ? ' is-open' : ''}">
@@ -3848,7 +4005,10 @@ function renderWorkspaceDetailPane(job, host) {
 							</div>
 							<div class="detail-pane-actions">
 								<button type="button" class="detail-primary-button" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRun)}>${runIcon('inline-icon')}${escapeHtml(actionLabel)}</button>
-								<span class="detail-meta-text">Updated ${escapeHtml(job.run.updatedAt ? formatRelativeTime(job.run.updatedAt) : 'Unknown')}</span>
+								<div class="detail-meta-copy">
+									<span class="detail-meta-text">${escapeHtml(actionReason)}</span>
+									<span class="detail-meta-subtext">Updated ${escapeHtml(job.run.updatedAt ? formatRelativeTime(job.run.updatedAt) : 'Unknown')}</span>
+								</div>
 							</div>
 							${renderNavigation()}
 							<div class="detail-pane-body">${renderDetailSection(job, host)}</div>
@@ -3939,13 +4099,6 @@ async function connectStandardBridge() {
 		await refreshStandaloneAuthConfig({ skipRender: true });
 		await completeStandaloneBrowserLogin({ skipRender: true });
 		await refreshStandaloneSession({ skipRender: true });
-		if (state.session.ready) {
-			await loadJobs({ silent: true, keepSection: true });
-			if (currentPage() === 'detail' && currentJob()) {
-				await refreshCurrentRun({ silent: true, keepSection: true });
-				await loadFeed({ silent: true, keepSection: true });
-			}
-		}
 		startPolling();
 		render();
 		return;
@@ -3960,6 +4113,7 @@ async function connectStandardBridge() {
 				hasRecord(result) && typeof result.protocolVersion === 'string' ? result.protocolVersion : state.store.host.protocolVersion;
 			state.store.host.source = 'mcp-apps';
 			applyHostContextToDocument(hostContext);
+			startPolling();
 			render();
 		},
 		onRequestStateChanged(session) {
@@ -3999,6 +4153,7 @@ async function connectStandardBridge() {
 			render();
 		},
 		onRequestTeardown() {
+			stopPolling();
 			state.error = 'The host requested widget teardown. Reopen the widget to continue.';
 			render();
 		},
@@ -4021,7 +4176,7 @@ async function connectStandardBridge() {
 		}
 		currentHostApi().setOpenInAppUrl();
 		state.message = 'Connected to the MCP Apps host.';
-		stopPolling();
+		startPolling();
 		render();
 		await syncModelContext(true);
 		void autoloadHostStatus().catch((error) => console.warn(error));
@@ -4037,6 +4192,10 @@ async function connectStandardBridge() {
 root.addEventListener('click', (event) => {
 	const target = event.target instanceof Element ? event.target.closest('[data-focus-section],[data-select-job],[data-select-notification],[data-select-log],[data-action]') : null;
 	if (!(target instanceof HTMLElement)) return;
+	if (!state.alertPermissionRequested && browserAlertsSupported() && window.Notification.permission === 'default') {
+		state.alertPermissionRequested = true;
+		void requestBrowserAlertsPermission().catch((error) => console.warn(error));
+	}
 	if (target.dataset.focusSection) {
 		state.focusSection = normalizeDetailSection(target.dataset.focusSection);
 		if (currentPage() === 'detail' && currentJob()) {
@@ -4053,6 +4212,8 @@ root.addEventListener('click', (event) => {
 		state.notificationMenuOpen = false;
 		state.utilityMenuOpen = false;
 		navigateToJob(target.dataset.selectJob, 'logs');
+		void refreshCurrentRun({ silent: true, keepSection: true });
+		void loadFeed({ silent: true, keepSection: true });
 		void syncModelContext(false).catch((error) => console.warn(error));
 		return;
 	}
@@ -4281,6 +4442,10 @@ function handleMutableInput(target) {
 			break;
 		case 'chat-draft':
 			state.chatDraft = target.value;
+			break;
+		case 'future-instructions':
+			state.futureInstructions = target.value;
+			scheduleModelContextSync(true);
 			break;
 		case 'standalone-token':
 			state.standaloneToken = target.value;

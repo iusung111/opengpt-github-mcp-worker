@@ -536,6 +536,7 @@ describe('gui widget bridge helpers', () => {
 				phase: 'waiting',
 				next_step: 'The host is still processing the request. Keep the widget open.',
 			},
+			future_instructions: 'Before ending, verify the queue is clear and continue if approval is granted.',
 			host: {
 				display_mode: 'inline',
 				platform: 'web',
@@ -552,5 +553,6 @@ describe('gui widget bridge helpers', () => {
 		expect(text).toContain('Approval request: Approve one MCP permission bundle for workflow dispatch.');
 		expect(text).toContain('Latest tool request: tool-7');
 		expect(text).toContain('Latest tool phase: waiting');
+		expect(text).toContain('Future instructions: Before ending, verify the queue is clear and continue if approval is granted.');
 	});
 });

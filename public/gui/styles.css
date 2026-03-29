@@ -512,7 +512,7 @@ textarea {
 
 .detail-pane-actions {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	gap: 12px;
 	padding: 12px 16px;
 	border-bottom: 1px solid var(--border);
@@ -543,8 +543,19 @@ textarea {
 }
 
 .detail-meta-text {
-	margin-left: auto;
 	font-size: 0.72rem;
+	color: var(--muted);
+}
+
+.detail-meta-copy {
+	display: grid;
+	gap: 4px;
+	margin-left: auto;
+	min-width: 0;
+}
+
+.detail-meta-subtext {
+	font-size: 0.68rem;
 	color: var(--muted);
 }
 
@@ -556,6 +567,7 @@ textarea {
 	gap: 14px;
 	background: var(--surface-muted);
 	min-width: 0;
+	scrollbar-gutter: stable both-edges;
 }
 
 .detail-pane-empty {
@@ -699,6 +711,13 @@ textarea {
 
 .job-card-actions {
 	align-items: flex-start;
+}
+
+.action-reason {
+	font-size: 0.68rem;
+	line-height: 1.45;
+	color: var(--muted);
+	max-width: 168px;
 }
 
 .job-card-copy > .supporting-copy {
@@ -1102,6 +1121,7 @@ input[type="number"],
 	line-height: 1.55;
 	max-height: 460px;
 	overflow: auto;
+	scrollbar-gutter: stable both-edges;
 }
 
 .console-line {
@@ -1133,6 +1153,10 @@ input[type="number"],
 	margin: 0;
 	color: var(--muted);
 	font-style: italic;
+}
+
+.future-textarea {
+	min-height: 180px;
 }
 
 .detail-overview-grid,
@@ -1192,8 +1216,10 @@ input[type="number"],
 @media (min-width: 1024px) {
 	.workspace-side {
 		display: flex;
-		width: 460px;
-		flex: 0 0 460px;
+		width: clamp(440px, 31vw, 500px);
+		min-width: clamp(440px, 31vw, 500px);
+		max-width: clamp(440px, 31vw, 500px);
+		flex: 0 0 clamp(440px, 31vw, 500px);
 		position: sticky;
 		top: var(--header-offset);
 		height: calc(100vh - var(--header-offset));
@@ -1217,13 +1243,6 @@ input[type="number"],
 	.workspace-side .hero-panel,
 	.workspace-side .hero-side {
 		grid-template-columns: 1fr;
-	}
-}
-
-@media (min-width: 1280px) {
-	.workspace-side {
-		width: 500px;
-		flex-basis: 500px;
 	}
 }
 
@@ -1285,7 +1304,7 @@ input[type="number"],
 		flex-wrap: wrap;
 	}
 
-	.detail-meta-text {
+	.detail-meta-copy {
 		margin-left: 0;
 	}
 }

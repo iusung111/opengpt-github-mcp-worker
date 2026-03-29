@@ -184,6 +184,10 @@ export function buildModelContextText(snapshot) {
 			lines.push(`Latest tool next step: ${snapshot.latest_tool_session.next_step}`);
 		}
 	}
+	if (typeof snapshot.future_instructions === 'string' && snapshot.future_instructions.trim()) {
+		lines.push(`Future instructions: ${snapshot.future_instructions.trim()}`);
+		lines.push('Before concluding, check the future instructions and continue with them when safe.');
+	}
 	lines.push('Use this context to continue the current run or explain the next operator action.');
 	return lines.join('\n');
 }
