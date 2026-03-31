@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { AppEnv } from './types';
-import { getSelfCurrentUrl } from './utils';
+import { getSelfCurrentUrl, getSelfLiveUrl, getSelfMirrorUrl } from './utils';
 
 export const NOTIFICATION_WIDGET_URI = 'ui://widget/notification-center.html';
 
@@ -45,11 +45,6 @@ export function notificationWidgetToolMeta(meta: Record<string, unknown> = {}): 
 }
 
 export function registerWidgetResources(server: McpServer, env: AppEnv): void {
-	const origin = getSelfCurrentUrl(env);
-	if (!origin) {
-		return;
-	}
-
 	server.registerResource(
 		'notification-center',
 		NOTIFICATION_WIDGET_URI,
@@ -58,32 +53,35 @@ export function registerWidgetResources(server: McpServer, env: AppEnv): void {
 			description: 'Interactive queue run dashboard for notifications, approvals, and incident bundles.',
 			mimeType: 'text/html;profile=mcp-app',
 		},
-		async () => ({
-			contents: [
-				{
-					uri: NOTIFICATION_WIDGET_URI,
-					mimeType: 'text/html;profile=mcp-app',
-					text: buildNotificationWidgetHtml(origin),
-					_meta: {
-						ui: {
-							prefersBorder: true,
-							csp: {
-								connectDomains: [origin],
-								resourceDomains: [origin],
+		async () => {
+			const origin = getSelfCurrentUrl(env) || getSelfLiveUrl(env) || getSelfMirrorUrl(env) || '';
+			return {
+				contents: [
+					{
+						uri: NOTIFICATION_WIDGET_URI,
+						mimeType: 'text/html;profile=mcp-app',
+						text: buildNotificationWidgetHtml(origin),
+						_meta: {
+							ui: {
+								prefersBorder: true,
+								csp: origin ? {
+									connectDomains: [origin],
+									resourceDomains: [origin],
+								} : undefined,
+								domain: origin || undefined,
 							},
-							domain: origin,
+							'openai/widgetDescription':
+								'Inspect queue run status, approvals, event feeds, and incident bundles without extra assistant narration.',
+							'openai/widgetPrefersBorder': true,
+							'openai/widgetCSP': origin ? {
+								connect_domains: [origin],
+								resource_domains: [origin],
+							} : undefined,
+							'openai/widgetDomain': origin || undefined,
 						},
-						'openai/widgetDescription':
-							'Inspect queue run status, approvals, event feeds, and incident bundles without extra assistant narration.',
-						'openai/widgetPrefersBorder': true,
-						'openai/widgetCSP': {
-							connect_domains: [origin],
-							resource_domains: [origin],
-						},
-						'openai/widgetDomain': origin,
 					},
-				},
-			],
-		}),
+				],
+			};
+		},
 	);
 }

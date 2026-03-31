@@ -7,7 +7,7 @@ export interface InstallationToken {
 }
 
 const USER_AGENT = 'opengpt-github-mcp-worker';
-const GITHUB_FETCH_TIMEOUT_MS = 10_000;
+const GITHUB_FETCH_TIMEOUT_MS = 30_000;
 
 type AppEnv = Env & {
 	GITHUB_APP_PRIVATE_KEY_PEM?: string;
@@ -399,9 +399,9 @@ export async function githubRequestRaw(
 				continue;
 			}
 			const message = await response.text();
-			throw new Error(`github request failed: ${response.status} ${message}`.trim());
+			throw new Error(`github request failed: ${method} ${path} -> ${response.status} ${message}`.trim());
 		}
-		throw new Error('github request failed: exhausted retries');
+		throw new Error(`github request failed: ${method} ${path} -> exhausted retries`);
 	}
 
 	const fetchPromise = (async () => {
@@ -446,15 +446,16 @@ export async function githubRequestRaw(
 				continue;
 			}
 			const message = await response.text();
+			const fullMessage = `github request failed: ${method} ${path} -> ${response.status} ${message}`.trim();
 			if (cacheKey && (response.status === 403 || response.status === 404)) {
 				cachedGetErrors.set(cacheKey, {
 					expiresAt: Date.now() + errorCacheTtlMs(path),
-					message: `github request failed: ${response.status} ${message}`.trim(),
+					message: fullMessage,
 				});
 			}
-			throw new Error(`github request failed: ${response.status} ${message}`.trim());
+			throw new Error(fullMessage);
 		}
-		throw new Error('github request failed: exhausted retries');
+		throw new Error(`github request failed: ${method} ${path} -> exhausted retries`);
 	})();
 
 	if (cacheKey) {

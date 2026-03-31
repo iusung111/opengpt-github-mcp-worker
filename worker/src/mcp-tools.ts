@@ -14,7 +14,7 @@ import { registerWriteTools } from './mcp-write-tools';
 export function buildMcpServer(env: AppEnv): McpServer {
 	const server = new McpServer({
 		name: 'opengpt-github-mcp-worker',
-		version: '0.2.3',
+		version: '0.2.4',
 	});
 
 	const readAnnotations = { readOnlyHint: true, openWorldHint: false };

@@ -290,7 +290,7 @@ const state = {
 		limit: 50,
 	},
 	dashboardSearch: '',
-	dashboardStatus: 'all',
+	dashboardStatus: 'active',
 	dashboardSort: 'recent',
 	message: '',
 	error: '',
@@ -1164,7 +1164,14 @@ function dashboardJobs() {
 	const statusFilter = state.dashboardStatus;
 	const jobs = sortedJobs()
 		.filter((job) => matchesDashboardSearch(job, state.dashboardSearch))
-		.filter((job) => statusFilter === 'all' || jobAttentionStatus(job) === statusFilter);
+		.filter((job) => {
+			if (statusFilter === 'all') return true;
+			if (statusFilter === 'active') {
+				const status = jobAttentionStatus(job);
+				return status !== 'completed' && status !== 'cancelled';
+			}
+			return jobAttentionStatus(job) === statusFilter;
+		});
 	if (state.dashboardSort === 'name') {
 		return jobs.sort((left, right) => {
 			const leftLabel = left.run && left.run.title ? left.run.title : left.jobId;
@@ -4355,6 +4362,7 @@ function renderDashboardHeader() {
 				<div class="header-filters">
 					<select name="dashboard-status" aria-label="Filter runs by status">
 						<option value="all"${selectedAttr(state.dashboardStatus, 'all')}>All Status</option>
+						<option value="active"${selectedAttr(state.dashboardStatus, 'active')}>Active Only</option>
 						${ATTENTION_STATUSES.map((status) => `<option value="${escapeHtml(status)}"${selectedAttr(state.dashboardStatus, status)}>${escapeHtml(statusLabel(status))}</option>`).join('')}
 					</select>
 					<select name="dashboard-sort" aria-label="Sort runs">

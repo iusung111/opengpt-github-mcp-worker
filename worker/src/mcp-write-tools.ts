@@ -48,7 +48,7 @@ interface RepoFileWriteArgs {
 
 function isGitHubNotFoundError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
-	return message.includes('github request failed: 404');
+	return message.includes('github request failed:') && message.includes(' 404 ');
 }
 
 const batchWriteOperationSchema = z.object({
@@ -115,6 +115,12 @@ export function registerWriteTools(
 		ensureSafePath(path);
 		await activateRepoWorkspace(env, repoKey);
 		atob(content_b64);
+
+		if (content_b64.length > MAX_REPO_UPDATE_FILE_B64_BYTES) {
+			throw new Error(
+				`content_b64 too large for ${mode === 'create' ? 'repo_create_file' : mode === 'upsert' ? 'repo_upsert_file' : 'repo_update_file'}; use repo_upload_start/repo_upload_append/repo_upload_commit instead`,
+			);
+		}
 
 		let probedBlobSha: string | null = null;
 		if (shouldProbeExistingFile(mode)) {
@@ -528,52 +534,9 @@ export function registerWriteTools(
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, branch, path, message, content_b64, expected_blob_sha, content_kind, mime_type, validate_only }) => {
+		async (args) => {
 			try {
-				const repoKey = `${owner}/${repo}`;
-				ensureRepoAllowed(env, repoKey);
-				ensureBranchAllowed(env, branch);
-				ensureNotDefaultBranch(env, branch);
-				ensureSafePath(path);
-				await activateRepoWorkspace(env, repoKey);
-				atob(content_b64);
-				if (content_b64.length > MAX_REPO_UPDATE_FILE_B64_BYTES) {
-					throw new Error(
-						`content_b64 too large for repo_update_file; use repo_upload_start/repo_upload_append/repo_upload_commit instead`,
-					);
-				}
-
-				if (validate_only) {
-					return toolText(
-						ok(
-							{
-								validate_only: true,
-								repo_key: repoKey,
-								branch,
-								path,
-								content_kind: content_kind ?? null,
-								mime_type: mime_type ?? null,
-								expected_blob_sha: expected_blob_sha ?? null,
-							},
-							writeAnnotations,
-						),
-					);
-				}
-
-				const payload: Record<string, unknown> = {
-					message,
-					content: content_b64,
-					branch,
-				};
-				if (expected_blob_sha) {
-					payload.sha = expected_blob_sha;
-				}
-				const data = (await githubPut(
-					env,
-					`/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`,
-					payload,
-				)) as Record<string, unknown>;
-				return toolText(ok(data, writeAnnotations));
+				return toolText(await handleRepoFileWrite('update', args));
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'repo_update_file_failed'), error, writeAnnotations));
 			}

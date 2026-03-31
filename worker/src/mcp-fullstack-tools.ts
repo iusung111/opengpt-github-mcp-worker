@@ -4,11 +4,8 @@ import * as z from 'zod/v4';
 import { GUI_CAPTURE_WORKFLOW_ID, runGuiCaptureWorkflow } from './mcp-gui-tools';
 import { ToolAnnotations } from './mcp-overview-tools';
 import { notificationWidgetToolMeta } from './mcp-widget-resources';
-import { mergeWorkerManifest } from './job-manifest';
-import { computeRunAttentionStatus } from './queue-projections';
 import {
 	ProjectCapabilities,
-	renderPreviewUrlTemplate,
 	resolveProjectCapabilities,
 	resolveVerifyProfile,
 } from './project-capabilities';
@@ -23,18 +20,15 @@ import {
 	PreviewTokenPayload,
 	validateConfirmToken,
 } from './state-tokens';
-import { AppEnv, JobRecord, JobVerificationStepRecord, JobWorkerManifest } from './types';
+import { AppEnv } from './types';
 import {
 	dispatchStandardWorkflow,
 	downloadWorkflowArtifactEntries,
 	downloadWorkflowLogEntries,
 	listWorkflowArtifacts,
-	readSummaryArtifact,
 } from './workflow-execution';
 import {
 	activateRepoWorkspace,
-	decodeBase64Text,
-	encodeGitHubPath,
 	ensureBranchAllowed,
 	ensureRepoAllowed,
 	ensureWorkflowAllowed,
@@ -42,17 +36,37 @@ import {
 	fail,
 	getDefaultBaseBranch,
 	getSelfRepoKey,
-	githubGet,
 	ok,
 	nowIso,
-	queueJson,
 	sha256Hex,
 	toolText,
 } from './utils';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
+import {
+	getJobRecord,
+	isRecord,
+	resolveRunIdFromInput,
+	updateJobState,
+} from './fullstack/job-state';
+import {
+	findContractCandidates,
+	readRepoTextFile,
+	readRepoTree,
+} from './fullstack/repo-utils';
+import {
+	browserDiagnosticsFromSummary,
+	buildReleaseGates,
+	buildVerificationSteps,
+	derivePreviewUrls,
+	fetchRunSummary,
+	getSummaryOverallStatus,
+	normalizeContractValidation,
+	normalizeLogEntries,
+	previewStatusFromSummary,
+	runStatusFromConclusion,
+	summarizeRun,
+	buildErrorFingerprint,
+} from './fullstack/logic';
 
 function toIsoTimestamp(input: number): string {
 	return new Date(input).toISOString();
@@ -99,448 +113,6 @@ function firstObjectUrl(urls: Record<string, string>): string | null {
 	return null;
 }
 
-function previewStatusFromSummary(
-	conclusion: string | null,
-	urls: Record<string, string>,
-): 'creating' | 'ready' | 'failed' {
-	if (conclusion && conclusion !== 'success') {
-		return 'failed';
-	}
-	return Object.keys(urls).length > 0 ? 'ready' : 'creating';
-}
-
-function runStatusFromConclusion(conclusion: string | null): 'passed' | 'failed' | 'partial' {
-	if (conclusion === 'success') return 'passed';
-	if (conclusion === 'failure' || conclusion === 'cancelled' || conclusion === 'timed_out') return 'failed';
-	return 'partial';
-}
-
-function normalizeStepStatus(value: unknown): JobVerificationStepRecord['status'] {
-	if (
-		value === 'queued' ||
-		value === 'running' ||
-		value === 'passed' ||
-		value === 'failed' ||
-		value === 'skipped' ||
-		value === 'partial'
-	) {
-		return value;
-	}
-	if (value === 'success' || value === 'pass') return 'passed';
-	if (value === 'error' || value === 'fail') return 'failed';
-	return 'partial';
-}
-
-function buildVerificationSteps(
-	summary: Record<string, unknown> | null,
-	fallbackName: string,
-	conclusion: string | null,
-): JobVerificationStepRecord[] {
-	const summarySteps = Array.isArray(summary?.steps) ? summary.steps : [];
-	const steps: JobVerificationStepRecord[] = [];
-	for (let index = 0; index < summarySteps.length; index += 1) {
-		const entry = summarySteps[index];
-		if (!isRecord(entry)) {
-			continue;
-		}
-		steps.push({
-			name:
-				typeof entry.name === 'string' && entry.name.trim()
-					? entry.name.trim()
-					: `${fallbackName}-${index + 1}`,
-			status: normalizeStepStatus(entry.status),
-			duration_ms: typeof entry.duration_ms === 'number' ? entry.duration_ms : null,
-			artifact_ids: Array.isArray(entry.artifact_ids)
-				? entry.artifact_ids.filter(
-						(item): item is string => typeof item === 'string' && item.trim().length > 0,
-				  )
-				: undefined,
-			log_excerpt:
-				typeof entry.stderr_excerpt === 'string'
-					? entry.stderr_excerpt
-					: typeof entry.stdout_excerpt === 'string'
-						? entry.stdout_excerpt
-						: typeof entry.log_excerpt === 'string'
-							? entry.log_excerpt
-							: null,
-		});
-	}
-	if (steps.length > 0) {
-		return steps;
-	}
-	return [
-		{
-			name: fallbackName,
-			status: runStatusFromConclusion(conclusion),
-			log_excerpt: null,
-		},
-	];
-}
-
-async function getJobRecord(env: AppEnv, jobId: string): Promise<JobRecord | null> {
-	const result = await queueJson(env, { action: 'job_get', job_id: jobId });
-	if (!result.ok) {
-		throw new Error(result.error ?? `failed to load job ${jobId}`);
-	}
-	return (result.data?.job as JobRecord | undefined) ?? null;
-}
-
-async function queueJsonOrThrow(
-	env: AppEnv,
-	payload: Parameters<typeof queueJson>[1],
-	fallbackMessage: string,
-) {
-	const result = await queueJson(env, payload);
-	if (!result.ok) {
-		throw new Error(result.error ?? result.code ?? fallbackMessage);
-	}
-	return result;
-}
-
-function sourceLayerForManifestSection(section: keyof JobWorkerManifest): 'mcp' | 'cloudflare' {
-	return section === 'preview' ? 'cloudflare' : 'mcp';
-}
-
-function sectionStatusForAudit(manifest: Partial<JobWorkerManifest> | undefined, section: keyof JobWorkerManifest): string | null {
-	const sectionValue = manifest?.[section];
-	return isRecord(sectionValue) && typeof sectionValue.status === 'string' ? sectionValue.status : null;
-}
-
-function sectionMessageForAudit(section: keyof JobWorkerManifest, sectionStatus: string | null): string | null {
-	if (!sectionStatus) {
-		return null;
-	}
-	return `${section} is ${sectionStatus}.`;
-}
-
-async function updateJobState(
-	env: AppEnv,
-	input: {
-		jobId?: string;
-		repoKey: string;
-		workerManifest?: Partial<JobWorkerManifest>;
-		status?: JobRecord['status'];
-		nextActor?: JobRecord['next_actor'];
-		workflowRunId?: number | null;
-		lastError?: string;
-	},
-): Promise<void> {
-	if (!input.jobId) {
-		return;
-	}
-	const currentJob = await getJobRecord(env, input.jobId);
-	const approvalPending = currentJob?.worker_manifest?.attention?.approval?.pending === true;
-	const shouldClearApproval =
-		approvalPending &&
-		(input.status === 'working' || input.status === 'done' || input.status === 'failed');
-	const mergedManifest = mergeWorkerManifest(currentJob?.worker_manifest ?? {}, input.workerManifest ?? {});
-	if (shouldClearApproval) {
-		mergedManifest.attention = {
-			...(mergedManifest.attention ?? {}),
-			approval: {
-				...(mergedManifest.attention?.approval ?? {}),
-				pending: false,
-				cleared_at: nowIso(),
-			},
-		};
-	}
-	await queueJsonOrThrow(env, {
-		action: 'job_upsert',
-		job: {
-			job_id: input.jobId,
-			repo: input.repoKey,
-			status: input.status,
-			next_actor: input.nextActor,
-			workflow_run_id: input.workflowRunId ?? undefined,
-			last_error: input.lastError,
-			worker_manifest: mergedManifest,
-		},
-	}, `failed to update job state for ${input.jobId}`);
-	if (currentJob) {
-		const projectedJob: JobRecord = {
-			...currentJob,
-			status: input.status ?? currentJob.status,
-			next_actor: input.nextActor ?? currentJob.next_actor,
-			workflow_run_id: input.workflowRunId === undefined ? currentJob.workflow_run_id : input.workflowRunId ?? undefined,
-			last_error: input.lastError === undefined ? currentJob.last_error : input.lastError,
-			worker_manifest: mergedManifest,
-			updated_at: nowIso(),
-		};
-		if (input.status || input.nextActor || input.workflowRunId !== undefined || input.lastError !== undefined) {
-			await queueJsonOrThrow(env, {
-				action: 'audit_write',
-				event_type: 'job_update_status',
-				payload: {
-					job_id: input.jobId,
-					repo: input.repoKey,
-					status: projectedJob.status,
-					next_actor: projectedJob.next_actor,
-					workflow_run_id: projectedJob.workflow_run_id ?? null,
-					last_error: projectedJob.last_error ?? null,
-					source_layer: 'system',
-					attention_status: computeRunAttentionStatus(projectedJob),
-				},
-			}, `failed to write status audit for ${input.jobId}`);
-		}
-		for (const section of ['verification', 'preview', 'browser', 'desktop', 'runtime'] as Array<keyof JobWorkerManifest>) {
-			const sectionStatus = sectionStatusForAudit(input.workerManifest, section);
-			if (!sectionStatus) {
-				continue;
-			}
-			await queueJsonOrThrow(env, {
-				action: 'audit_write',
-				event_type: 'job_manifest_notification',
-				payload: {
-					job_id: input.jobId,
-					repo: input.repoKey,
-					section,
-					section_status: sectionStatus,
-					workflow_run_id: projectedJob.workflow_run_id ?? null,
-					preview_id: section === 'preview' ? projectedJob.worker_manifest.preview?.preview_id ?? null : null,
-					source_layer: sourceLayerForManifestSection(section),
-					attention_status: computeRunAttentionStatus(projectedJob),
-					message: sectionMessageForAudit(section, sectionStatus),
-					dedupe_key: `${input.jobId}:${section}:${sectionStatus}:${projectedJob.workflow_run_id ?? 'none'}`,
-				},
-			}, `failed to write ${section} audit for ${input.jobId}`);
-		}
-		if (shouldClearApproval) {
-			await queueJsonOrThrow(env, {
-				action: 'audit_write',
-				event_type: 'job_attention_approval_cleared',
-				payload: {
-					job_id: input.jobId,
-					repo: input.repoKey,
-					source_layer: 'gpt',
-					attention_status: computeRunAttentionStatus(projectedJob),
-					message: 'Approval requirement cleared and work resumed.',
-					dedupe_key: `approval_cleared:${input.jobId}:${projectedJob.updated_at}`,
-				},
-			}, `failed to write approval cleared audit for ${input.jobId}`);
-		}
-	}
-}
-
-async function resolveRunIdFromInput(
-	env: AppEnv,
-	jobId: string | undefined,
-	explicitRunId: number | undefined,
-	section: 'execution' | 'verification' | 'desktop' | 'browser' | 'runtime' = 'execution',
-): Promise<number> {
-	if (typeof explicitRunId === 'number' && Number.isFinite(explicitRunId)) {
-		return explicitRunId;
-	}
-	if (!jobId) {
-		throw new Error('run_id or job_id is required');
-	}
-	const job = await getJobRecord(env, jobId);
-	if (!job) {
-		throw new Error(`job not found: ${jobId}`);
-	}
-	const manifest = job.worker_manifest ?? {};
-	const scopedSection = isRecord(manifest[section]) ? manifest[section] : {};
-	const execution = isRecord(manifest.execution) ? manifest.execution : {};
-	const candidate =
-		scopedSection.run_id ??
-		execution.run_id ??
-		(isRecord(execution.last_workflow_run) ? execution.last_workflow_run.run_id : null) ??
-		job.workflow_run_id;
-	const runId =
-		typeof candidate === 'string' ? Number(candidate) : typeof candidate === 'number' ? candidate : NaN;
-	if (!Number.isFinite(runId) || runId <= 0) {
-		throw new Error(`workflow run id is not recorded for job ${jobId}`);
-	}
-	return runId;
-}
-
-async function readRepoTextFile(
-	env: AppEnv,
-	owner: string,
-	repo: string,
-	path: string,
-	ref: string,
-): Promise<string> {
-	const payload = (await githubGet(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, {
-		params: { ref },
-	})) as { content?: string; type?: string };
-	if (payload.type && payload.type !== 'file') {
-		throw new Error(`path is not a file: ${path}`);
-	}
-	const text = decodeBase64Text(payload.content);
-	if (text === null) {
-		throw new Error(`unable to decode file content: ${path}`);
-	}
-	return text;
-}
-
-async function readRepoTree(
-	env: AppEnv,
-	owner: string,
-	repo: string,
-	ref: string,
-): Promise<Array<Record<string, unknown>>> {
-	const result = (await githubGet(env, `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`, {
-		params: { recursive: true },
-	})) as { tree?: Array<Record<string, unknown>> };
-	return result.tree ?? [];
-}
-
-function findContractCandidates(
-	tree: Array<Record<string, unknown>>,
-	configuredSources: string[],
-): Array<Record<string, unknown>> {
-	const normalizedSources = configuredSources.map((source) => source.trim()).filter(Boolean);
-	const matches = tree.filter((entry) => {
-		const entryPath = String(entry.path ?? '');
-		if (!entryPath) {
-			return false;
-		}
-		if (normalizedSources.length === 0) {
-			return /(openapi|swagger|api)[^/]*\.(json|ya?ml)$/i.test(entryPath);
-		}
-		return normalizedSources.some((source) => entryPath === source || entryPath.startsWith(`${source}/`));
-	});
-	return matches.map((entry) => ({
-		path: entry.path ?? null,
-		type: entry.type ?? null,
-		sha: entry.sha ?? null,
-	}));
-}
-
-function derivePreviewUrls(
-	capabilities: ProjectCapabilities,
-	owner: string,
-	repo: string,
-	ref: string,
-	summary: Record<string, unknown> | null,
-	serviceOverride?: string,
-): Record<string, string> {
-	const result: Record<string, string> = {};
-	const summaryOutputs = isRecord(summary?.outputs) ? summary.outputs : null;
-	const summaryPreview = isRecord(summaryOutputs?.preview)
-		? summaryOutputs.preview
-		: isRecord(summary?.preview)
-			? summary.preview
-			: null;
-	const summaryUrls = isRecord(summaryPreview?.urls)
-		? summaryPreview.urls
-		: isRecord(summary?.urls)
-			? summary.urls
-			: null;
-	if (summaryUrls) {
-		for (const [key, value] of Object.entries(summaryUrls)) {
-			if (typeof value === 'string' && value.trim()) {
-				result[key] = value.trim();
-			}
-		}
-	}
-	if (Object.keys(result).length > 0) {
-		return result;
-	}
-	if (!capabilities.web_preview.url_template) {
-		return result;
-	}
-	const services = serviceOverride
-		? [serviceOverride]
-		: capabilities.web_preview.services.length > 0
-			? capabilities.web_preview.services
-			: ['web'];
-	for (const service of services) {
-		result[service] = renderPreviewUrlTemplate(capabilities.web_preview.url_template, {
-			owner,
-			repo,
-			ref,
-			service,
-		});
-	}
-	return result;
-}
-
-function getSummaryOverallStatus(summary: Record<string, unknown> | null): string | null {
-	const result = isRecord(summary?.result) ? summary.result : null;
-	if (typeof result?.overall_status === 'string' && result.overall_status.trim()) {
-		return result.overall_status.trim();
-	}
-	if (typeof summary?.status === 'string' && summary.status.trim()) {
-		return summary.status.trim();
-	}
-	return null;
-}
-
-function summarizeRun(
-	repoKey: string,
-	ref: string,
-	workflowId: string,
-	result: Awaited<ReturnType<typeof dispatchStandardWorkflow>>,
-): Record<string, unknown> {
-	return {
-		repo: repoKey,
-		ref,
-		workflow_id: workflowId,
-		run_id: result.run_id,
-		run_html_url: result.run_html_url,
-		status: result.status,
-		conclusion: result.conclusion,
-		summary: result.summary,
-		artifacts: result.artifacts,
-	};
-}
-
-async function fetchRunSummary(
-	env: AppEnv,
-	owner: string,
-	repo: string,
-	runId: number,
-): Promise<{ summary: Record<string, unknown> | null; artifacts: Array<Record<string, unknown>> }> {
-	const artifacts = await listWorkflowArtifacts(env, owner, repo, runId);
-	return {
-		artifacts,
-		summary: await readSummaryArtifact(env, owner, repo, runId, artifacts),
-	};
-}
-
-function normalizeLogEntries(
-	logEntries: Map<string, Uint8Array>,
-	query: string | undefined,
-	tailLines: number,
-	fileName?: string,
-	limit = 20,
-): Record<string, unknown> {
-	const normalizedQuery = query?.trim().toLowerCase() ?? '';
-	const entries: Array<Record<string, unknown>> = [];
-	for (const [name, bytes] of Array.from(logEntries.entries()).sort(([left], [right]) => left.localeCompare(right))) {
-		if (fileName && name !== fileName) {
-			continue;
-		}
-		const text = decodeBytes(bytes);
-		const lines = text.split(/\r?\n/);
-		const matchedLines = normalizedQuery
-			? lines.filter((line) => line.toLowerCase().includes(normalizedQuery))
-			: lines;
-		entries.push({
-			file_name: name,
-			line_count: lines.length,
-			match_count: matchedLines.length,
-			tail: matchedLines.slice(-tailLines),
-		});
-	}
-	return {
-		files: entries.slice(0, limit),
-		file_count: entries.length,
-	};
-}
-
-function buildErrorFingerprint(line: string): string {
-	return line
-		.toLowerCase()
-		.replace(/\b[0-9a-f]{7,40}\b/g, '<sha>')
-		.replace(/\b\d+\b/g, '<n>')
-		.replace(/https?:\/\/\S+/g, '<url>')
-		.replace(/\s+/g, ' ')
-		.trim()
-		.slice(0, 200);
-}
-
 async function collectRuntimeErrorClusters(
 	env: AppEnv,
 	owner: string,
@@ -577,16 +149,6 @@ async function collectRuntimeErrorClusters(
 		.slice(0, limit);
 }
 
-function browserDiagnosticsFromSummary(summary: Record<string, unknown> | null): Record<string, unknown> {
-	const logs = isRecord(summary?.logs) ? summary.logs : {};
-	return {
-		overall_status: getSummaryOverallStatus(summary),
-		console_count: typeof logs.console_count === 'number' ? logs.console_count : 0,
-		page_error_count: typeof logs.page_error_count === 'number' ? logs.page_error_count : 0,
-		network_error_count: typeof logs.network_error_count === 'number' ? logs.network_error_count : 0,
-	};
-}
-
 async function readGuiCaptureDiagnosticFiles(env: AppEnv, runId: number): Promise<Record<string, unknown>> {
 	const repoKey = getSelfRepoKey(env);
 	const [owner, repo] = repoKey.split('/');
@@ -612,48 +174,6 @@ async function readGuiCaptureDiagnosticFiles(env: AppEnv, runId: number): Promis
 		console: [],
 		page_errors: [],
 		network_errors: [],
-	};
-}
-
-function normalizeContractValidation(path: string, text: string): Record<string, unknown> {
-	const lowerPath = path.toLowerCase();
-	const findings: string[] = [];
-	let format: 'json' | 'yaml' | 'text' = 'text';
-	let valid = true;
-	let openapiVersion: string | null = null;
-	if (lowerPath.endsWith('.json')) {
-		format = 'json';
-		try {
-			const parsed = JSON.parse(text) as Record<string, unknown>;
-			if (typeof parsed.openapi === 'string') {
-				openapiVersion = parsed.openapi;
-			} else if (typeof parsed.swagger === 'string') {
-				openapiVersion = parsed.swagger;
-			} else {
-				findings.push('json contract file does not declare openapi/swagger version');
-			}
-		} catch (error) {
-			valid = false;
-			findings.push(`invalid json: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	} else if (lowerPath.endsWith('.yml') || lowerPath.endsWith('.yaml')) {
-		format = 'yaml';
-		const match = text.match(/^\s*(openapi|swagger)\s*:\s*["']?([^"'\n]+)["']?/m);
-		if (match) {
-			openapiVersion = match[2].trim();
-		} else {
-			findings.push('yaml contract file does not declare openapi/swagger version');
-		}
-		if (!/^\s*paths\s*:/m.test(text)) {
-			findings.push('yaml contract file does not define paths');
-		}
-	}
-	return {
-		path,
-		format,
-		valid,
-		openapi_version: openapiVersion,
-		findings,
 	};
 }
 
@@ -685,20 +205,6 @@ async function fetchPreviewHealth(url: string, healthcheckPath?: string | null):
 		status: response.status,
 		ok: response.ok,
 	};
-}
-
-function buildReleaseGates(input: {
-	verifyStatus?: string | null;
-	previewStatus?: string | null;
-	browserStatus?: string | null;
-	desktopStatus?: string | null;
-}): Array<Record<string, unknown>> {
-	return [
-		{ id: 'verify_pass', ok: input.verifyStatus === 'passed' || input.verifyStatus === 'success', status: input.verifyStatus ?? 'missing' },
-		{ id: 'preview_healthy', ok: input.previewStatus === 'ready', status: input.previewStatus ?? 'missing' },
-		{ id: 'browser_smoke_pass', ok: input.browserStatus === 'passed' || input.browserStatus === 'success', status: input.browserStatus ?? 'missing' },
-		{ id: 'desktop_smoke_pass', ok: input.desktopStatus === 'passed' || input.desktopStatus === 'success', status: input.desktopStatus ?? 'missing' },
-	];
 }
 
 export function registerFullstackTools(

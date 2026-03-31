@@ -68,7 +68,7 @@ interface PreparedTreeChange {
 
 function isNotFoundError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
-	return message.includes('github request failed: 404');
+	return message.includes('github request failed:') && message.includes(' 404 ');
 }
 
 function defaultFileMode(mode?: string | null): string {

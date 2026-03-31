@@ -66,7 +66,7 @@ export function registerWorkflowDispatchTools(
 					}
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
-					if (message.includes('github request failed: 404')) {
+					if (message.includes('github request failed:') && message.includes(' 404 ')) {
 						throw new Error(`workflow not found: ${workflow_id}`);
 					}
 					throw error;
@@ -86,7 +86,7 @@ export function registerWorkflowDispatchTools(
 					if (message.includes('workflow does not support workflow_dispatch')) {
 						throw error;
 					}
-					if (message.includes('github request failed: 404')) {
+					if (message.includes('github request failed:') && message.includes(' 404 ')) {
 						throw new Error(`workflow not found on ref ${ref}: ${workflow_id}`);
 					}
 					throw error;

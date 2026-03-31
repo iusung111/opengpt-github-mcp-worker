@@ -57,10 +57,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isNotFoundError(error: unknown): boolean {
+function isGitHubNotFoundError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
-	return message.includes('github request failed: 404');
+	return message.includes('github request failed:') && message.includes(' 404 ');
 }
+
 
 function normalizeStringArray(value: unknown): string[] {
 	if (!Array.isArray(value)) {
