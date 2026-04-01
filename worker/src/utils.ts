@@ -3,7 +3,7 @@ export * from './utils_new';
 import { AppEnv } from './types';
 import { fail } from './utils_new/mcp';
 import { jsonResponse } from './utils_new/common';
-import { getChatgptMcpIssuer, normalizeWorkflowInputs } from './utils_new/env';
+import { normalizeWorkflowInputs } from './utils_new/env';
 import { sha256Hex } from './utils_new/crypto';
 import { queueJson as queueJsonInternal } from './utils_new/github';
 
@@ -23,9 +23,8 @@ export async function queueFetch(env: AppEnv, payload: object): Promise<Response
   );
 }
 
-export function getChatgptMcpDocumentationUrl(env: Partial<AppEnv>): string | null {
-  const issuer = getChatgptMcpIssuer(env as AppEnv);
-  return issuer ? issuer.replace(/\/$/, '') : null;
+export function getChatgptMcpDocumentationUrl(_env: Partial<AppEnv>): string | null {
+  return 'https://github.com/iusung111/opengpt-github-mcp-worker/blob/main/docs/CHATGPT_MCP.md';
 }
 
 function parseEnvMs(value: string | undefined, fallback: number): number {
