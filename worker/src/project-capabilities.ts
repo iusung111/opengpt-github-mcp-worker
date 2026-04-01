@@ -1,6 +1,11 @@
 import { AppEnv } from './types';
 import { decodeBase64Text, encodeGitHubPath, ensureRepoAllowed, getDefaultBaseBranch, githubGet } from './utils';
 
+function isNotFoundError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.includes('github request failed:') && message.includes(' 404 ');
+}
+
 export interface ProjectVerifyProfile {
 	id: string;
 	label: string;
