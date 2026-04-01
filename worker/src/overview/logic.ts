@@ -21,7 +21,6 @@ import {
 	selfRequiresMirrorForLive,
 	fail,
 	toolText,
-	mirrorConfigured,
 } from '../utils';
 
 export const permissionBundleStructuredSchema = z

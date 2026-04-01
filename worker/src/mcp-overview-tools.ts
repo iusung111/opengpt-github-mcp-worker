@@ -25,7 +25,6 @@ import {
 	selfRequiresMirrorForLive,
 	toolText,
 	ensureRepoAllowed,
-	mirrorConfigured,
 } from './utils';
 
 import {
