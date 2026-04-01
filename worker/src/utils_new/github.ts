@@ -32,7 +32,7 @@ export function decodeBase64Text(value: string | undefined): string | null {
 export async function queueJson(
 	env: AppEnv,
 	payload: Record<string, unknown>,
-): Promise<{ ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null }> {
+): Promise<{ ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null; meta?: unknown }> {
 	try {
 		const id = env.JOB_QUEUE.idFromName('global-job-queue');
 		const stub = env.JOB_QUEUE.get(id);
@@ -40,12 +40,41 @@ export async function queueJson(
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(payload),
-	});
+		});
+
+		const contentType = response.headers.get('content-type') ?? '';
+		if (contentType.includes('application/json')) {
+			const body = (await response.json()) as {
+				ok?: boolean;
+				code?: string | null;
+				error?: string | null;
+				data?: Record<string, unknown> | null;
+				meta?: unknown;
+			};
+			if (response.ok) {
+				return {
+					ok: body.ok ?? true,
+					code: body.code ?? null,
+					error: body.error ?? null,
+					data: body.data ?? null,
+					meta: body.meta ?? null,
+					};
+			}
+			return {
+				ok: body.ok ?? false,
+				code: body.code ?? 'queue_fetch_failed',
+				error: body.error ?? `queue api failed: ${response.status}`,
+				data: body.data ?? null,
+				meta: body.meta ?? null,
+			};
+		}
+
 		if (!response.ok) {
 			const text = await response.text();
 			return { ok: false, code: 'queue_fetch_failed', error: `queue api failed: ${response.status} ${text}` };
 		}
-		return (await response.json()) as { ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null };
+
+		return { ok: true, data: null };
 	} catch (error) {
 		return {
 			ok: false,
