@@ -32,7 +32,7 @@ export function decodeBase64Text(value: string | undefined): string | null {
 export async function queueJson(
 	env: AppEnv,
 	payload: Record<string, unknown>,
-): Promise<{ ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null; meta?: unknown }> {
+): Promise<{ ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null }> {
 	try {
 		const id = env.JOB_QUEUE.idFromName('global-job-queue');
 		const stub = env.JOB_QUEUE.get(id);
@@ -57,16 +57,14 @@ export async function queueJson(
 					code: body.code ?? null,
 					error: body.error ?? null,
 					data: body.data ?? null,
-					meta: body.meta ?? null,
-					};
+				};
 			}
 			return {
 				ok: body.ok ?? false,
 				code: body.code ?? 'queue_fetch_failed',
 				error: body.error ?? `queue api failed: ${response.status}`,
 				data: body.data ?? null,
-				meta: body.meta ?? null,
-			};
+				};
 		}
 
 		if (!response.ok) {
