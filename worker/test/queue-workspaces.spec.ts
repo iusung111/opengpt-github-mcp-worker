@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from '../src/queue-workspaces';
+import {
+	buildWorkspaceRecord,
+	findSimilarWorkspaceMatches,
+	normalizeWorkspaceRecord,
+	sortWorkspaces,
+	workspaceRecordNeedsNormalization,
+} from '../src/queue-workspaces';
 import { ensureSafeWorkspacePath } from '../src/queue-helpers';
 import type { WorkspaceRecord } from '../src/types';
 
@@ -21,6 +27,23 @@ describe('queue workspace helpers', () => {
 			aliases: [],
 			workspace_path: 'D:/VScode/projects/OpenGPT',
 			last_used_at: '2026-03-21T00:00:00.000Z',
+		});
+	});
+
+	it('normalizes legacy workspace records loaded from storage', () => {
+		const legacyWorkspace: WorkspaceRecord = {
+			repo_key: 'iusung111/OpenGPT',
+			repo_slug: 'opengpt',
+			display_name: 'OpenGPT',
+			aliases: [],
+			workspace_path: 'D:\\VScode\\projects\\OpenGPT\\',
+			created_at: '2026-03-21T00:00:00.000Z',
+			updated_at: '2026-03-21T00:00:00.000Z',
+		};
+
+		expect(workspaceRecordNeedsNormalization(legacyWorkspace)).toBe(true);
+		expect(normalizeWorkspaceRecord(legacyWorkspace)).toMatchObject({
+			workspace_path: 'D:/VScode/projects/OpenGPT',
 		});
 	});
 

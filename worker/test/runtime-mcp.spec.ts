@@ -1162,8 +1162,7 @@ describe('runtime mcp surface', () => {
 		const treeResult = await client.callTool({
 			name: 'repo_list_tree',
 			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo_key: 'iusung111/OpenGPT',
 				path: '',
 				recursive: false,
 			},
@@ -1176,8 +1175,7 @@ describe('runtime mcp surface', () => {
 		const fileResult = await client.callTool({
 			name: 'repo_get_file',
 			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo_key: 'iusung111/OpenGPT',
 				path: 'README.md',
 			},
 		});
@@ -1193,8 +1191,7 @@ describe('runtime mcp surface', () => {
 		const summaryResult = await client.callTool({
 			name: 'repo_get_file_summary',
 			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo_key: 'iusung111/OpenGPT',
 				path: 'README.md',
 			},
 		});
@@ -1260,8 +1257,7 @@ describe('runtime mcp surface', () => {
 		const workflowFileResult = await client.callTool({
 			name: 'repo_get_file',
 			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo_key: 'iusung111/OpenGPT',
 				path: '.github/workflows/test.yml',
 			},
 		});
@@ -1279,8 +1275,7 @@ describe('runtime mcp surface', () => {
 		const workflowUpdateResult = await client.callTool({
 			name: 'repo_update_file',
 			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo_key: 'iusung111/OpenGPT',
 				branch: 'agent/workflow-edit-test',
 				path: '.github/workflows/test.yml',
 				message: 'Update workflow from MCP',

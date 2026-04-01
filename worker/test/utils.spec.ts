@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveRepoIdentityInput } from '../src/mcp-repo-identity';
 import {
 	decodeBase64Text,
 	ensureWorkflowAllowed,
@@ -204,5 +205,25 @@ describe('normalizeWorkflowInputs', () => {
 				'mirror secret sync',
 			),
 		).toThrow(/requires the live self-host worker/);
+	});
+});
+
+describe('resolveRepoIdentityInput', () => {
+	it('accepts repo_key as the primary repo identity input', () => {
+		expect(resolveRepoIdentityInput({ repo_key: 'iusung111/OpenGPT' })).toEqual({
+			repo_key: 'iusung111/OpenGPT',
+			owner: 'iusung111',
+			repo: 'OpenGPT',
+		});
+	});
+
+	it('rejects mismatched repo_key and owner/repo combinations', () => {
+		expect(() =>
+			resolveRepoIdentityInput({
+				repo_key: 'iusung111/OpenGPT',
+				owner: 'other',
+				repo: 'OpenGPT',
+			}),
+		).toThrow(/invalid repo identity/i);
 	});
 });

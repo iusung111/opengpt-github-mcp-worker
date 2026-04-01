@@ -73,7 +73,12 @@ import {
 	shouldHandleReviewTimeout,
 } from './queue-reconcile';
 import { getDispatchRequest, isDryRunJob, pushJobNote, transitionJob } from './queue-state';
-import { findSimilarWorkspaceMatches, sortWorkspaces } from './queue-workspaces';
+import {
+	findSimilarWorkspaceMatches,
+	normalizeWorkspaceRecord,
+	sortWorkspaces,
+	workspaceRecordNeedsNormalization,
+} from './queue-workspaces';
 import {
 	claimBrowserRemoteCommand,
 	completeBrowserRemoteCommand,
@@ -325,7 +330,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			if (!value || typeof value !== 'object' || !('repo_key' in value) || !('workspace_path' in value)) {
 				continue;
 			}
-			workspaces.push(value);
+			const normalized = normalizeWorkspaceRecord(value);
+			workspaces.push(normalized);
+			if (workspaceRecordNeedsNormalization(value)) {
+				await this.putWorkspace(normalized);
+			}
 		}
 		const activeRepoKey = await this.getActiveWorkspaceRepoKey();
 

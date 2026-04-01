@@ -2,6 +2,21 @@ import { WorkspaceRecord } from './types';
 import { normalizeLookup, normalizeWorkspacePath } from './queue-helpers';
 import { parseIsoMs } from './utils';
 
+export function normalizeWorkspaceRecord(workspace: WorkspaceRecord): WorkspaceRecord {
+	return {
+		...workspace,
+		repo_slug: workspace.repo_slug || normalizeLookup(workspace.repo_key.split('/').pop()),
+		display_name: workspace.display_name || workspace.repo_key,
+		aliases: Array.isArray(workspace.aliases) ? workspace.aliases : [],
+		workspace_path: normalizeWorkspacePath(workspace.workspace_path),
+	};
+}
+
+export function workspaceRecordNeedsNormalization(workspace: WorkspaceRecord): boolean {
+	const normalized = normalizeWorkspaceRecord(workspace);
+	return JSON.stringify(normalized) !== JSON.stringify(workspace);
+}
+
 export function buildWorkspaceRecord(
 	input: Partial<WorkspaceRecord> & { repo_key: string; workspace_path: string },
 	existing: WorkspaceRecord | null,
@@ -27,7 +42,7 @@ export function sortWorkspaces(
 	activeRepoKey: string | null,
 ): Array<WorkspaceRecord & { is_active?: boolean }> {
 	const workspacesWithMeta = workspaces.map((workspace) => ({
-		workspace,
+		workspace: normalizeWorkspaceRecord(workspace),
 		isActive: workspace.repo_key === activeRepoKey,
 		usedMs: parseIsoMs(workspace.last_used_at) ?? 0,
 		updatedMs: parseIsoMs(workspace.updated_at) ?? 0,
@@ -61,12 +76,13 @@ export function findSimilarWorkspaceMatches(
 	const repoSlug = normalizeLookup((repoKey || '').split('/').pop() ?? '');
 	return workspaces
 		.map((workspace) => {
+			const normalizedWorkspace = normalizeWorkspaceRecord(workspace);
 			const candidates = [
-				workspace.repo_key,
-				workspace.repo_slug,
-				workspace.display_name,
-				workspace.workspace_path,
-				...(workspace.aliases ?? []),
+				normalizedWorkspace.repo_key,
+				normalizedWorkspace.repo_slug,
+				normalizedWorkspace.display_name,
+				normalizedWorkspace.workspace_path,
+				...(normalizedWorkspace.aliases ?? []),
 			].map(normalizeLookup);
 			let score = 0;
 			if (repoKey && candidates.includes(normalizeLookup(repoKey))) {
@@ -78,7 +94,7 @@ export function findSimilarWorkspaceMatches(
 			} else if (target && candidates.some((item) => item.includes(target))) {
 				score = 50;
 			}
-			return { workspace, score };
+			return { workspace: normalizedWorkspace, score };
 		})
 		.filter((match) => match.score > 0)
 		.sort((a, b) => b.score - a.score)

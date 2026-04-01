@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { seal } from 'tweetsodium';
 import * as z from 'zod/v4';
 import { cloudflarePut } from './cloudflare';
+import { repoIdentityInputSchema, withRepoIdentity } from './mcp-repo-identity';
 import { notificationWidgetToolMeta } from './mcp-widget-resources';
 import { listPermissionPresets, listToolGroups, buildPermissionBundleMessage } from './tool-catalog';
 import { AppEnv } from './types';
@@ -227,7 +228,7 @@ export function registerOverviewTools(
 			return toolText(fail(errorCodeFor(error, 'run_console_open_failed'), error, readAnnotations));
 		}
 	});
-	server.registerTool('repo_work_context', { description: 'Use the GitHub repository itself as the primary working context instead of a local folder. Returns open agent PRs, active queue jobs, and recent workflow runs so chat can continue work in stages.', inputSchema: { owner: z.string(), repo: z.string(), include_completed_jobs: z.boolean().default(false) }, annotations: readAnnotations }, async ({ owner, repo, include_completed_jobs }) => {
+	server.registerTool('repo_work_context', { description: 'Use the GitHub repository itself as the primary working context instead of a local folder. Returns open agent PRs, active queue jobs, and recent workflow runs so chat can continue work in stages.', inputSchema: { ...repoIdentityInputSchema, include_completed_jobs: z.boolean().default(false) }, annotations: readAnnotations }, withRepoIdentity(async ({ owner, repo, include_completed_jobs }) => {
 		const repoKey = `${owner}/${repo}`;
 		try {
 			ensureRepoAllowed(env, repoKey);
@@ -245,7 +246,7 @@ export function registerOverviewTools(
 			const recentRuns = (runsData.workflow_runs ?? []).slice(0, 5).map((item) => ({ id: item.id, name: item.name, event: item.event, status: item.status, conclusion: item.conclusion, html_url: item.html_url, created_at: item.created_at, head_branch: item.head_branch }));
 			return toolText(ok({ repo_key: repoKey, use_repo_as_workspace: true, repo_default_branch: repoData.default_branch ?? getDefaultBaseBranch(env), repo_html_url: repoData.html_url ?? null, open_agent_prs: openAgentPrs, active_jobs: repoJobs, recent_workflow_runs: recentRuns, registered_workspace: workspaceData.ok ? workspaceData.data?.workspace ?? null : null, recommended_next_step: openAgentPrs.length > 0 || repoJobs.length > 0 ? 'reuse_existing_repo_context' : 'start_new_repo_job' }, readAnnotations));
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'repo_work_context_failed'), error, readAnnotations)); }
-	});
+	}));
 	server.registerTool('workspace_activate', { description: 'Mark one registered repository workspace as the current active repo context so recent workspace ordering stays unified around the repo you are actively working in.', inputSchema: { repo_key: z.string() }, annotations: writeAnnotations }, async ({ repo_key }) => { try { return toolText(await queueJson(env, { action: 'workspace_activate', repo_key })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_activate_failed'), error, writeAnnotations)); } });
 	server.registerTool('workspace_resolve', { description: 'Resolve repo-first workspace guidance for a repository. Returns any registered local workspace as secondary metadata plus a project-relative recommendation instead of a host-specific absolute path.', inputSchema: { repo_key: z.string() }, annotations: readAnnotations }, async ({ repo_key }) => {
 		try {

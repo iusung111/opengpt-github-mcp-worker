@@ -12,6 +12,12 @@ import {
 	preparePatchsetChanges,
 	type RepoBatchWriteOperation,
 } from './repo-batch-write';
+import {
+	repoIdentityInputSchema,
+	resolveRepoIdentityInput,
+	type RepoIdentityInput,
+	withRepoIdentity,
+} from './mcp-repo-identity';
 import { AppEnv } from './types';
 import { ToolAnnotations } from './mcp-overview-tools';
 import { abortUploadSession, appendUploadChunk, commitUploadSession, createUploadSession } from './upload-session-client';
@@ -33,9 +39,9 @@ import {
 } from './utils';
 import { MAX_REPO_UPDATE_FILE_B64_BYTES } from './upload-session';
 
-interface RepoFileWriteArgs {
-	owner: string;
-	repo: string;
+interface RepoFileWriteArgs extends RepoIdentityInput {
+	owner?: string;
+	repo?: string;
 	branch: string;
 	path: string;
 	message: string;
@@ -106,8 +112,10 @@ export function registerWriteTools(
 
 	async function handleRepoFileWrite(
 		mode: Phase2FileWriteMode,
-		{ owner, repo, branch, path, message, content_b64, expected_blob_sha, content_kind, mime_type, validate_only }: RepoFileWriteArgs,
+		args: RepoFileWriteArgs,
 	) {
+		const { owner, repo } = resolveRepoIdentityInput(args);
+		const { branch, path, message, content_b64, expected_blob_sha, content_kind, mime_type, validate_only } = args;
 		const repoKey = `${owner}/${repo}`;
 		ensureRepoAllowed(env, repoKey);
 		ensureBranchAllowed(env, branch);
@@ -171,14 +179,13 @@ export function registerWriteTools(
 		{
 			description: 'Create an agent branch from the default base branch in an allowlisted repository.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				branch_name: z.string(),
 				base_branch: z.string().optional(),
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, branch_name, base_branch }) => {
+		withRepoIdentity(async ({ owner, repo, branch_name, base_branch }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
@@ -200,7 +207,7 @@ export function registerWriteTools(
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'repo_create_branch_failed'), error, writeAnnotations));
 			}
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -209,8 +216,7 @@ export function registerWriteTools(
 			description:
 				'Create a new file on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts, including workflow files under .github/workflows/.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				branch: z.string(),
 				path: z.string(),
 				message: z.string(),
@@ -237,8 +243,7 @@ export function registerWriteTools(
 			description:
 				'Create or update a file on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts. When expected_blob_sha is omitted, existing file sha is probed automatically.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				branch: z.string(),
 				path: z.string(),
 				message: z.string(),
@@ -265,8 +270,7 @@ export function registerWriteTools(
 			description:
 				'Start a streamed file upload session on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts. Use this instead of repo_update_file for larger files or ChatGPT web uploads.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				branch: z.string(),
 				path: z.string(),
 				message: z.string(),
@@ -278,7 +282,7 @@ export function registerWriteTools(
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, branch, path, message, expected_blob_sha, content_kind, mime_type, total_bytes, validate_only }) => {
+		withRepoIdentity(async ({ owner, repo, branch, path, message, expected_blob_sha, content_kind, mime_type, total_bytes, validate_only }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
@@ -318,7 +322,7 @@ export function registerWriteTools(
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'repo_upload_start_failed'), error, writeAnnotations));
 			}
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -387,8 +391,7 @@ export function registerWriteTools(
 			description:
 				'Preview or atomically apply multiple file operations on an agent branch using repo-relative POSIX paths, including create, update, delete, rename, and scaffold writes.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				branch: z.string(),
 				message: z.string(),
 				mode: z.enum(['preview', 'apply']).default('preview'),
@@ -396,7 +399,7 @@ export function registerWriteTools(
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, branch, message, mode, operations }) => {
+		withRepoIdentity(async ({ owner, repo, branch, message, mode, operations }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
@@ -446,7 +449,7 @@ export function registerWriteTools(
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'repo_batch_write_failed'), error, writeAnnotations));
 			}
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -455,8 +458,7 @@ export function registerWriteTools(
 			description:
 				'Preview or atomically apply a multi-file unified patchset on an agent branch after validating each target blob. Patch paths must be repo-relative POSIX paths.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				branch: z.string(),
 				message: z.string(),
 				mode: z.enum(['preview', 'apply']).default('preview'),
@@ -464,7 +466,7 @@ export function registerWriteTools(
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, branch, message, mode, patches }) => {
+		withRepoIdentity(async ({ owner, repo, branch, message, mode, patches }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
@@ -512,7 +514,7 @@ export function registerWriteTools(
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'repo_apply_patchset_failed'), error, writeAnnotations));
 			}
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -521,8 +523,7 @@ export function registerWriteTools(
 			description:
 				'Update a file on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts, including workflow files under .github/workflows/.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				branch: z.string(),
 				path: z.string(),
 				message: z.string(),
@@ -548,8 +549,7 @@ export function registerWriteTools(
 		{
 			description: 'Create a pull request in an allowlisted repository.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				title: z.string(),
 				body: z.string(),
 				head: z.string(),
@@ -557,7 +557,7 @@ export function registerWriteTools(
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, title, body, head, base }) => {
+		withRepoIdentity(async ({ owner, repo, title, body, head, base }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
@@ -572,7 +572,7 @@ export function registerWriteTools(
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'pr_create_failed'), error, writeAnnotations));
 			}
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -580,8 +580,7 @@ export function registerWriteTools(
 		{
 			description: 'Merge an open pull request in an allowlisted repository when it is ready to land on the base branch.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				pull_number: z.number().int().positive(),
 				merge_method: z.enum(['merge', 'squash', 'rebase']).default('merge'),
 				commit_title: z.string().optional(),
@@ -593,7 +592,7 @@ export function registerWriteTools(
 				destructiveHint: true,
 			},
 		},
-		async ({ owner, repo, pull_number, merge_method, commit_title, commit_message, expected_head_sha }) => {
+		withRepoIdentity(async ({ owner, repo, pull_number, merge_method, commit_title, commit_message, expected_head_sha }) => {
 			try {
 				const repoKey = `${owner}/${repo}`;
 				ensureRepoAllowed(env, repoKey);
@@ -622,7 +621,7 @@ export function registerWriteTools(
 					}),
 				);
 			}
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -630,14 +629,13 @@ export function registerWriteTools(
 		{
 			description: 'Create an issue or PR comment in an allowlisted repository.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				issue_number: z.number().int().positive(),
 				body: z.string(),
 			},
 			annotations: writeAnnotations,
 		},
-		async ({ owner, repo, issue_number, body }) => {
+		withRepoIdentity(async ({ owner, repo, issue_number, body }) => {
 			try {
 				ensureRepoAllowed(env, `${owner}/${repo}`);
 				const data = (await githubPost(env, `/repos/${owner}/${repo}/issues/${issue_number}/comments`, {
@@ -647,6 +645,6 @@ export function registerWriteTools(
 			} catch (error) {
 				return toolText(fail(errorCodeFor(error, 'comment_create_failed'), error, writeAnnotations));
 			}
-		},
+		}),
 	);
 }

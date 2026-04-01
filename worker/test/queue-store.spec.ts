@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ensureJobIndexes, findJob, getActiveWorkspaceRepoKey, getJob, getWorkspace, persistJob } from '../src/queue-store';
 import { activeWorkspaceStorageKey, workspaceStorageKey } from '../src/queue-helpers';
 import { jobIndexReadyKey, jobRunIndexKey } from '../src/queue-index';
-import { JobRecord } from '../src/types';
+import { JobRecord, WorkspaceRecord } from '../src/types';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -61,6 +61,27 @@ describe('queue-store helpers', () => {
 			repo_key: 'iusung111/OpenGPT',
 		});
 		await expect(getActiveWorkspaceRepoKey(context)).resolves.toBe('iusung111/OpenGPT');
+	});
+
+	it('normalizes and self-heals legacy workspace records on read', async () => {
+		const { context, store } = createContext();
+		const legacyWorkspace: WorkspaceRecord = {
+			repo_key: 'iusung111/OpenGPT',
+			repo_slug: 'opengpt',
+			display_name: 'OpenGPT',
+			aliases: [],
+			workspace_path: 'D:\\VScode\\projects\\OpenGPT\\',
+			created_at: '2026-03-21T00:00:00.000Z',
+			updated_at: '2026-03-21T00:00:00.000Z',
+		};
+		store.set(workspaceStorageKey('iusung111/OpenGPT'), legacyWorkspace);
+
+		await expect(getWorkspace(context, 'iusung111/OpenGPT')).resolves.toMatchObject({
+			workspace_path: 'D:/VScode/projects/OpenGPT',
+		});
+		expect(store.get(workspaceStorageKey('iusung111/OpenGPT'))).toMatchObject({
+			workspace_path: 'D:/VScode/projects/OpenGPT',
+		});
 	});
 
 	it('backfills indexes once and marks the index ready flag', async () => {

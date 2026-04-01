@@ -13,6 +13,7 @@ import {
 	sliceFileChunk,
 } from './read-navigation';
 import { incrementReadCounter, recordToolMetric } from './read-observability';
+import { repoIdentityInputSchema, withRepoIdentity } from './mcp-repo-identity';
 import {
 	decodeBase64Text,
 	encodeGitHubPath,
@@ -194,12 +195,11 @@ export function registerRepoReadTools(
 		{
 			description: 'Return the repository navigation manifest. Use this before reading docs or tool files directly.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo }) =>
+		withRepoIdentity(async ({ owner, repo }) =>
 			measureTool('repo_navigation_manifest', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -209,6 +209,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_navigation_manifest_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -216,8 +217,7 @@ export function registerRepoReadTools(
 		{
 			description: 'Return a manifest-aware repository context snapshot with recommended next paths. Optional path filters must be repo-relative POSIX paths.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				ref: z.string().optional(),
 				path: z.string().optional(),
 				depth: z.number().int().min(1).max(6).default(2),
@@ -225,7 +225,7 @@ export function registerRepoReadTools(
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, ref, path, depth, max_entries }) =>
+		withRepoIdentity(async ({ owner, repo, ref, path, depth, max_entries }) =>
 			measureTool('repo_context_snapshot', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -278,6 +278,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_context_snapshot_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -285,14 +286,13 @@ export function registerRepoReadTools(
 		{
 			description: 'Look up documentation paths and anchors without reading full document bodies.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				query: z.string().optional(),
 				ref: z.string().optional(),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, query, ref }) =>
+		withRepoIdentity(async ({ owner, repo, query, ref }) =>
 			measureTool('repo_doc_index_lookup', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -321,6 +321,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_doc_index_lookup_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -328,14 +329,13 @@ export function registerRepoReadTools(
 		{
 			description: 'Look up MCP and tool-related entries without reading full source files.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				query: z.string().optional(),
 				ref: z.string().optional(),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, query, ref }) =>
+		withRepoIdentity(async ({ owner, repo, query, ref }) =>
 			measureTool('repo_tool_index_lookup', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -346,6 +346,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_tool_index_lookup_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -353,12 +354,11 @@ export function registerRepoReadTools(
 		{
 			description: 'Inspect current repository read budget usage and repeated path access.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo }) =>
+		withRepoIdentity(async ({ owner, repo }) =>
 			measureTool('repo_read_budget_status', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -368,6 +368,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_read_budget_status_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -375,15 +376,14 @@ export function registerRepoReadTools(
 		{
 			description: 'Return a structured diff between two refs, including per-file hunks and rename detection.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				base_ref: z.string(),
 				head_ref: z.string(),
 				paths: z.array(z.string()).default([]),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, base_ref, head_ref, paths }) =>
+		withRepoIdentity(async ({ owner, repo, base_ref, head_ref, paths }) =>
 			measureTool('repo_get_diff', async () => {
 				try {
 					ensureRepoAllowed(env, `${owner}/${repo}`);
@@ -445,6 +445,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_get_diff_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -452,14 +453,13 @@ export function registerRepoReadTools(
 		{
 			description: 'Read only the summary, headings, preview, and chunk guidance for a repository file using a repo-relative POSIX path such as worker/src/index.ts.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				path: z.string(),
 				ref: z.string().optional(),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, path, ref }) =>
+		withRepoIdentity(async ({ owner, repo, path, ref }) =>
 			measureTool('repo_get_file_summary', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -487,6 +487,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_get_file_summary_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -494,8 +495,7 @@ export function registerRepoReadTools(
 		{
 			description: 'Read only a selected line range or heading chunk from a repository file using a repo-relative POSIX path such as worker/src/index.ts.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				path: z.string(),
 				ref: z.string().optional(),
 				start_line: z.number().int().positive().optional(),
@@ -504,7 +504,7 @@ export function registerRepoReadTools(
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, path, ref, start_line, max_lines, anchor }) =>
+		withRepoIdentity(async ({ owner, repo, path, ref, start_line, max_lines, anchor }) =>
 			measureTool('repo_get_file_chunk', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -533,6 +533,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_get_file_chunk_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -541,14 +542,13 @@ export function registerRepoReadTools(
 			description:
 				'Read a file from an allowlisted GitHub repository using a repo-relative POSIX path such as worker/src/index.ts. Large docs, workflows, and tool files return summary-first responses with chunk guidance.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				path: z.string(),
 				ref: z.string().optional(),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, path, ref }) =>
+		withRepoIdentity(async ({ owner, repo, path, ref }) =>
 			measureTool('repo_get_file', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -596,6 +596,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_get_file_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -603,15 +604,14 @@ export function registerRepoReadTools(
 		{
 			description: 'List repository tree entries from an allowlisted GitHub repository. Optional path filters must be repo-relative POSIX paths.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				ref: z.string().optional(),
 				path: z.string().optional(),
 				recursive: z.boolean().default(false),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, ref, path, recursive }) =>
+		withRepoIdentity(async ({ owner, repo, ref, path, recursive }) =>
 			measureTool('repo_list_tree', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -629,6 +629,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_list_tree_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -637,8 +638,7 @@ export function registerRepoReadTools(
 			description:
 				'Summarize an allowlisted repository tree with navigation manifest hints, recommended paths, and top-level layout. Optional path filters must be repo-relative POSIX paths.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				ref: z.string().optional(),
 				path: z.string().optional(),
 				depth: z.number().int().min(1).max(6).default(2),
@@ -646,7 +646,7 @@ export function registerRepoReadTools(
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, ref, path, depth, max_entries }) =>
+		withRepoIdentity(async ({ owner, repo, ref, path, depth, max_entries }) =>
 			measureTool('repo_tree_snapshot', async () => {
 				try {
 					const repoKey = `${owner}/${repo}`;
@@ -693,6 +693,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_tree_snapshot_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -701,13 +702,12 @@ export function registerRepoReadTools(
 			description:
 				'Search for code in an allowlisted repository using GitHub search. Prefer manifest and index tools first; use this as a fallback.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				query: z.string(),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, query }) =>
+		withRepoIdentity(async ({ owner, repo, query }) =>
 			measureTool('repo_search_code', async () => {
 				try {
 					ensureRepoAllowed(env, `${owner}/${repo}`);
@@ -733,6 +733,7 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_search_code_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 
 	server.registerTool(
@@ -740,13 +741,12 @@ export function registerRepoReadTools(
 		{
 			description: 'Search for issues or pull requests in an allowlisted repository using GitHub search.',
 			inputSchema: {
-				owner: z.string(),
-				repo: z.string(),
+				...repoIdentityInputSchema,
 				query: z.string(),
 			},
 			annotations: readAnnotations,
 		},
-		async ({ owner, repo, query }) =>
+		withRepoIdentity(async ({ owner, repo, query }) =>
 			measureTool('repo_search_issues', async () => {
 				try {
 					ensureRepoAllowed(env, `${owner}/${repo}`);
@@ -758,5 +758,6 @@ export function registerRepoReadTools(
 					return toolText(fail(errorCodeFor(error, 'repo_search_issues_failed'), error, readAnnotations));
 				}
 			}),
+		),
 	);
 }

@@ -1,6 +1,7 @@
 import { JobRecord, WorkspaceRecord } from './types';
 import { activeWorkspaceStorageKey, jobStorageKey, workspaceStorageKey } from './queue-helpers';
 import { buildJobIndexEntries, jobIndexReadyKey } from './queue-index';
+import { normalizeWorkspaceRecord, workspaceRecordNeedsNormalization } from './queue-workspaces';
 
 export interface QueueStoreContext {
 	getStorage<T>(key: string): Promise<T | null>;
@@ -51,7 +52,15 @@ export async function persistJob(
 }
 
 export async function getWorkspace(context: QueueStoreContext, repoKey: string): Promise<WorkspaceRecord | null> {
-	return (await context.getStorage<WorkspaceRecord>(workspaceStorageKey(repoKey))) ?? null;
+	const stored = await context.getStorage<WorkspaceRecord>(workspaceStorageKey(repoKey));
+	if (!stored) {
+		return null;
+	}
+	const normalized = normalizeWorkspaceRecord(stored);
+	if (workspaceRecordNeedsNormalization(stored)) {
+		await context.putStorage(workspaceStorageKey(normalized.repo_key), normalized);
+	}
+	return normalized;
 }
 
 export async function getActiveWorkspaceRepoKey(context: QueueStoreContext): Promise<string | null> {
