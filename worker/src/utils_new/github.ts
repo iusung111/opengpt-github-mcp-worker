@@ -1,6 +1,5 @@
 import { AppEnv } from '../types';
-import { diagnosticLog, QUEUE_FETCH_TIMEOUT_MS } from './common';
-import { getSelfMirrorUrl } from './env';
+import { diagnosticLog } from './common';
 
 export function encodeGitHubPath(path: string): string {
 	return path.split('/').map(encodeURIComponent).join('/');
@@ -34,18 +33,13 @@ export async function queueJson(
 	env: AppEnv,
 	payload: Record<string, unknown>,
 ): Promise<{ ok: boolean; code?: string | null; error?: string | null; data?: Record<string, unknown> | null }> {
-	const mirrorUrl = getSelfMirrorUrl(env);
-	if (!mirrorUrl) {
-		return { ok: false, code: 'mirror_not_configured', error: 'Mirror URL is not configured' };
-	}
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), QUEUE_FETCH_TIMEOUT_MS);
 	try {
-		const response = await fetch(`${mirrorUrl}/gui/api`, {
+		const id = env.JOB_QUEUE.idFromName('global-job-queue');
+		const stub = env.JOB_QUEUE.get(id);
+		const response = await stub.fetch('https://queue.internal/', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(payload),
-			signal: controller.signal,
 		});
 		if (!response.ok) {
 			const text = await response.text();
@@ -58,8 +52,6 @@ export async function queueJson(
 			code: 'queue_fetch_error',
 			error: error instanceof Error ? error.message : String(error),
 		};
-	} finally {
-		clearTimeout(timeout);
 	}
 }
 
