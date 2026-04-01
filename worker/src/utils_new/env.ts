@@ -99,7 +99,7 @@ export function normalizeWorkflowList(workflows: unknown, context: string): stri
 	}
 	return workflows.map((item) => {
 		if (typeof item !== 'string' || !item.trim()) {
-			throw new Error(`${context} entries must be non-empty strings`);
+			throw new Error(${context} entries must be non-empty strings`);
 		}
 		return item.trim();
 	});
@@ -108,8 +108,8 @@ export function normalizeWorkflowList(workflows: unknown, context: string): stri
 export function getFileAllowedWorkflowsByRepo(): Record<string, string[]> {
 	const result: Record<string, string[]> = {};
 	for (const [repo, config] of Object.entries(workflowAllowlistConfig)) {
-		if (config && Array.isArray(config.workflows)) {
-			result[repo] = config.workflows;
+		if (Array.isArray(config)) {
+			result[repo] = normalizeWorkflowList(config, `workflowAllowlistConfig.${repo}`);
 		}
 	}
 	return result;
@@ -237,19 +237,19 @@ export function getDefaultAutoImproveMaxCycles(env: Partial<AppEnv>): number {
 }
 
 export function getBranchPrefix(env: AppEnv): string {
-	const value = env.GITHUB_BRANCH_PREFIX?.trim();
+	const value = env.AGENT_BRANCH_PREFIX?.trim();
 	return value || 'agent/';
 }
 
 export function getDefaultBaseBranch(env: AppEnv): string {
-	const value = env.GITHUB_DEFAULT_BASE_BRANCH?.trim();
+	const value = env.DEFAULT_BASE_BRANCH?.trim();
 	return value || 'main';
 }
 
 export function getSelfRepoKey(env: AppEnv): string {
-	const value = env.GITHUB_SELF_REPO?.trim();
+	const value = env.SELF_REPO_KEY?.trim();
 	if (!value) {
-		throw new Error('GITHUB_SELF_REPO environment variable is required');
+		throw new Error('SELF_REPO_KEY environment variable is required');
 	}
 	return value;
 }
