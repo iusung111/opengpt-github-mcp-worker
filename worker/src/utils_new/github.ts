@@ -24,7 +24,7 @@ export function decodeBase64Text(value: string | undefined): string | null {
 		return null;
 	}
 	try {
-		return new TextDecoder().decode(Uint8Array.from(atob(value.replace(/\n/g, '')), (char) => char.charCodeAt(0)));
+		return new TextDecoder().decode(Uint8Array.from(atob(value.replace(/\\n/g, '')), (char) => char.charCodeAt(0)));
 	} catch {
 		return null;
 	}
@@ -65,7 +65,32 @@ export async function queueJson(
 
 export async function activateRepoWorkspace(env: AppEnv, repoKey: string): Promise<void> {
 	try {
-		await queueJson(env, { action: 'workspace_activate', repo_key: repoKey });
+		const workspacePath = `/workspaces/${repoKey.replace(/[^/a-zA-Z0-9-_.]/g, '_')}`;
+		const registerResult = await queueJson(env, {
+			action: 'workspace_register',
+			workspace: {
+				repo_key: repoKey,
+				workspace_path: workspacePath,
+				display_name: repoKey,
+				aliases: [repoKey.split('/').pop() ?? repoKey],
+			},
+		});
+		if (!registerResult.ok) {
+			diagnosticLog('workspace_register_failed', {
+				repo_key: repoKey,
+				code: registerResult.code ?? null,
+				error: registerResult.error ?? null,
+			});
+			return;
+		}
+		const activateResult = await queueJson(env, { action: 'workspace_activate', repo_key: repoKey });
+		if (!activateResult.ok) {
+			diagnosticLog('workspace_activate_failed', {
+				repo_key: repoKey,
+				code: activateResult.code ?? null,
+				error: activateResult.error ?? null,
+			});
+		}
 	} catch (error) {
 		diagnosticLog('workspace_activate_error', {
 			repo_key: repoKey,
