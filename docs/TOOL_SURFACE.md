@@ -165,8 +165,6 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 - `job_update_status`
 - `job_append_note`
 - `job_submit_review`
-- `jobs_list_pending_review`
-- `jobs_list_pending_rework`
 
 ## Permission Presets
 

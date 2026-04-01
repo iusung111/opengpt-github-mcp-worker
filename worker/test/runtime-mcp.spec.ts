@@ -1,6 +1,7 @@
 import { SELF } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildDispatchFingerprint } from '../src/utils';
+import { getToolCatalog } from '../src/tool-catalog';
 import { createChatgptMcpClient, createDirectMcpBearerClient, createMcpClient, queueJsonHeaders } from './runtime-helpers';
 
 function buildStoredZip(entries: Array<{ name: string; text: string }>): Uint8Array {
@@ -186,7 +187,12 @@ describe('runtime mcp surface', () => {
 	it('serves MCP tools and queue actions over /mcp', async () => {
 		const client = await createMcpClient();
 		const tools = await client.listTools();
+		const catalogToolNames = Array.from(
+			new Set(getToolCatalog().groups.flatMap((group) => group.tools)),
+		).sort();
+		const runtimeToolNames = tools.tools.map((tool) => tool.name).sort();
 		const widgetUri = 'ui://widget/notification-center.html';
+		expect(runtimeToolNames).toEqual(catalogToolNames);
 		expect(tools.tools.some((tool) => tool.name === 'help')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'audit_list')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'branch_cleanup_candidates')).toBe(true);
