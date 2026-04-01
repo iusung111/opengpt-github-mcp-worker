@@ -1,7 +1,8 @@
 export * from './utils_new';
 
 import { AppEnv } from './types';
-import { fail, jsonResponse } from './utils_new/mcp';
+import { fail } from './utils_new/mcp';
+import { jsonResponse } from './utils_new/common';
 import { getChatgptMcpIssuer, normalizeWorkflowInputs } from './utils_new/env';
 import { sha256Hex } from './utils_new/crypto';
 import { queueJson as queueJsonInternal } from './utils_new/github';
@@ -9,7 +10,11 @@ import { queueJson as queueJsonInternal } from './utils_new/github';
 export const queueJson = queueJsonInternal;
 
 export async function queueFetch(env: AppEnv, payload: object): Promise<Response> {
-  const result = await queueJsonInternal(env, payload);
+  const recordPayload =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
+  const result = await queueJsonInternal(env, recordPayload);
   return jsonResponse(
     result.ok
       ? result
