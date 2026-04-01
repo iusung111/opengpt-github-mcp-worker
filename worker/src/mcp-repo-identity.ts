@@ -18,6 +18,23 @@ export const repoIdentityInputSchema = {
 	repo: z.string().optional(),
 };
 
+function ensureOptionalString(value: unknown, field: 'repo_key' | 'owner' | 'repo'): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== 'string') {
+		if (field === 'repo_key') {
+			throw new Error(
+				'invalid repo identity: repo_key must be a string in owner/repo form, or provide owner and repo as strings.',
+			);
+		}
+		throw new Error(
+			`invalid repo identity: ${field} must be a string. Provide repo_key in owner/repo form or provide both owner and repo as strings.`,
+		);
+	}
+	return value;
+}
+
 function parseRepoKey(repoKey: string): ResolvedRepoIdentity {
 	const trimmed = repoKey.trim();
 	const segments = trimmed.split('/').map((segment) => segment.trim()).filter(Boolean);
@@ -60,6 +77,14 @@ export function resolveRepoIdentityInput(input: RepoIdentityInput): ResolvedRepo
 	throw new Error(
 		'invalid repo identity: provide repo_key in owner/repo form or provide both owner and repo.',
 	);
+}
+
+export function resolveUnknownRepoIdentityInput(input: Record<string, unknown>): ResolvedRepoIdentity {
+	return resolveRepoIdentityInput({
+		repo_key: ensureOptionalString(input.repo_key, 'repo_key'),
+		owner: ensureOptionalString(input.owner, 'owner'),
+		repo: ensureOptionalString(input.repo, 'repo'),
+	});
 }
 
 export function withRepoIdentity<T extends RepoIdentityInput, TResult>(

@@ -6,6 +6,7 @@ import {
 	githubGet,
 	usingMirrorGitHubCredentials,
 } from './github';
+import { preflightMcpToolCallRequest } from './mcp-tool-contracts';
 import { buildMcpServer } from './mcp-tools';
 import { getReadObservabilitySnapshot } from './read-observability';
 import { AppEnv, JobRecord, JobStatus, NextActor } from './types';
@@ -268,7 +269,11 @@ export async function handleMcpRequest(
 		return jsonResponse(fail(auth.code ?? 'unauthorized', auth.error ?? 'unauthorized'), auth.status ?? 401);
 	}
 	const handler = getMcpHandler(env);
-	return handler(request, env, ctx);
+	const nextRequest = await preflightMcpToolCallRequest(request);
+	if (nextRequest instanceof Response) {
+		return nextRequest;
+	}
+	return handler(nextRequest, env, ctx);
 }
 
 export async function handleChatgptMcpRequest(
@@ -333,5 +338,9 @@ export async function handleChatgptMcpRequest(
 		email: auth.email ?? null,
 	});
 	const handler = getChatgptMcpHandler(env);
-	return handler(ensureChatgptMcpAcceptHeader(request), env, ctx);
+	const nextRequest = await preflightMcpToolCallRequest(ensureChatgptMcpAcceptHeader(request));
+	if (nextRequest instanceof Response) {
+		return nextRequest;
+	}
+	return handler(nextRequest, env, ctx);
 }

@@ -6,6 +6,7 @@ import { registerFullstackTools } from './mcp-fullstack-tools';
 import { registerOverviewTools } from './mcp-overview-tools';
 import { registerQueueTools } from './mcp-queue-tools';
 import { registerRepoReadTools } from './mcp-repo-read-tools';
+import { decorateToolRegistration } from './mcp-tool-contracts';
 import { registerWidgetResources } from './mcp-widget-resources';
 import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
@@ -16,6 +17,7 @@ export function buildMcpServer(env: AppEnv): McpServer {
 		name: 'opengpt-github-mcp-worker',
 		version: '0.2.4',
 	});
+	decorateToolRegistration(server);
 
 	const readAnnotations = { readOnlyHint: true, openWorldHint: false };
 	const writeAnnotations = {

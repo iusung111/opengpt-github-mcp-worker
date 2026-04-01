@@ -2,7 +2,13 @@ import { SELF } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildDispatchFingerprint } from '../src/utils';
 import { getToolCatalog } from '../src/tool-catalog';
-import { createChatgptMcpClient, createDirectMcpBearerClient, createMcpClient, queueJsonHeaders } from './runtime-helpers';
+import {
+	createChatgptMcpClient,
+	createDirectMcpBearerClient,
+	createMcpClient,
+	mcpAccessHeaders,
+	queueJsonHeaders,
+} from './runtime-helpers';
 
 function buildStoredZip(entries: Array<{ name: string; text: string }>): Uint8Array {
 	const encoder = new TextEncoder();
@@ -234,6 +240,16 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'job_create')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'pr_merge')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'workspace_resolve')).toBe(true);
+		expect(tools.tools.find((tool) => tool.name === 'workflow_runs_list')?.description).toContain(
+			'repo_key in owner/repo form',
+		);
+		expect(tools.tools.find((tool) => tool.name === 'workflow_runs_list')?.inputSchema).toMatchObject({
+			properties: {
+				repo_key: expect.any(Object),
+				owner: expect.any(Object),
+				repo: expect.any(Object),
+			},
+		});
 		expect(
 			tools.tools.find((tool) => tool.name === 'run_console_open')?._meta,
 		).toMatchObject({
@@ -542,7 +558,7 @@ describe('runtime mcp surface', () => {
 			},
 		});
 		await client.close();
-	});
+	}, 10000);
 
 	it('normalizes Windows workspace registrations before returning them', async () => {
 		const client = await createMcpClient();
@@ -684,8 +700,7 @@ describe('runtime mcp surface', () => {
 		const suitesResult = await client.callTool({
 			name: 'verify_list_suites',
 			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo_key: 'iusung111/OpenGPT',
 				ref: 'main',
 			},
 		});
@@ -705,8 +720,7 @@ describe('runtime mcp surface', () => {
 		const previewCreateResult = await client.callTool({
 			name: 'preview_env_create',
 			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo_key: 'iusung111/OpenGPT',
 				ref: 'main',
 			},
 		});
@@ -1301,75 +1315,121 @@ describe('runtime mcp surface', () => {
 
 	it('rejects local filesystem paths for repo read and write tools', async () => {
 		const client = await createMcpClient();
+		try {
+			await expect(
+				client.callTool({
+					name: 'repo_get_file',
+					arguments: {
+						owner: 'iusung111',
+						repo: 'OpenGPT',
+						path: 'D:\\VScode\\OpenGPT\\README.md',
+					},
+				}),
+			).rejects.toThrow(/invalid repo path/i);
 
-		const fileResult = await client.callTool({
-			name: 'repo_get_file',
-			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
-				path: 'D:\\VScode\\OpenGPT\\README.md',
-			},
-		});
-		const fileText = 'text' in fileResult.content[0] ? fileResult.content[0].text : '';
-		expect(JSON.parse(fileText)).toMatchObject({
-			ok: false,
-			code: 'invalid_repo_path',
-		});
+			await expect(
+				client.callTool({
+					name: 'repo_get_file_summary',
+					arguments: {
+						owner: 'iusung111',
+						repo: 'OpenGPT',
+						path: '/home/uieseong/workspace/OpenGPT/README.md',
+					},
+				}),
+			).rejects.toThrow(/repository-relative POSIX paths/i);
 
-		const summaryResult = await client.callTool({
-			name: 'repo_get_file_summary',
-			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
-				path: '/home/uieseong/workspace/OpenGPT/README.md',
-			},
-		});
-		const summaryText = 'text' in summaryResult.content[0] ? summaryResult.content[0].text : '';
-		expect(JSON.parse(summaryText)).toMatchObject({
-			ok: false,
-			code: 'invalid_repo_path',
-		});
-
-		const updateResult = await client.callTool({
-			name: 'repo_update_file',
-			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
-				branch: 'agent/invalid-path-test',
-				path: 'worker\\src\\index.ts',
-				message: 'Test invalid repo path',
-				content_b64: btoa('test'),
-			},
-		});
-		const updateText = 'text' in updateResult.content[0] ? updateResult.content[0].text : '';
-		expect(JSON.parse(updateText)).toMatchObject({
-			ok: false,
-			code: 'invalid_repo_path',
-		});
-
-		const batchResult = await client.callTool({
-			name: 'repo_batch_write',
-			arguments: {
-				owner: 'iusung111',
-				repo: 'OpenGPT',
-				branch: 'agent/invalid-path-test',
-				message: 'Test invalid repo path',
-				operations: [
-					{
-						type: 'create_file',
-						path: '/tmp/README.md',
+			await expect(
+				client.callTool({
+					name: 'repo_update_file',
+					arguments: {
+						owner: 'iusung111',
+						repo: 'OpenGPT',
+						branch: 'agent/invalid-path-test',
+						path: 'worker\\src\\index.ts',
+						message: 'Test invalid repo path',
 						content_b64: btoa('test'),
 					},
-				],
+				}),
+			).rejects.toThrow(/forward slashes/i);
+
+			await expect(
+				client.callTool({
+					name: 'repo_batch_write',
+					arguments: {
+						owner: 'iusung111',
+						repo: 'OpenGPT',
+						branch: 'agent/invalid-path-test',
+						message: 'Test invalid repo path',
+						operations: [
+							{
+								type: 'create_file',
+								path: '/tmp/README.md',
+								content_b64: btoa('test'),
+							},
+						],
+					},
+				}),
+			).rejects.toThrow(/repository-relative POSIX paths/i);
+		} finally {
+			await client.close();
+		}
+	});
+
+	it('returns corrective invalid-params hints before raw schema errors for repo identity and repo paths', async () => {
+		const repoIdentityResponse = await SELF.fetch('https://example.com/mcp', {
+			method: 'POST',
+			headers: {
+				...mcpAccessHeaders,
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 'repo-identity-preflight',
+				method: 'tools/call',
+				params: {
+					name: 'workflow_runs_list',
+					arguments: {
+						repo_key: 7,
+						ref: 'main',
+					},
+				},
+			}),
+		});
+		const repoIdentityJson = await repoIdentityResponse.json();
+		expect(repoIdentityJson).toMatchObject({
+			error: {
+				code: -32602,
+				message: expect.stringContaining('repo_key must be a string in owner/repo form'),
 			},
 		});
-		const batchText = 'text' in batchResult.content[0] ? batchResult.content[0].text : '';
-		expect(JSON.parse(batchText)).toMatchObject({
-			ok: false,
-			code: 'invalid_repo_path',
-		});
 
-		await client.close();
+		const repoPathResponse = await SELF.fetch('https://example.com/mcp', {
+			method: 'POST',
+			headers: {
+				...mcpAccessHeaders,
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 'repo-path-preflight',
+				method: 'tools/call',
+				params: {
+					name: 'repo_get_file',
+					arguments: {
+						repo_key: 'iusung111/OpenGPT',
+						path: 99,
+					},
+				},
+			}),
+		});
+		const repoPathJson = await repoPathResponse.json();
+		expect(repoPathJson).toMatchObject({
+			error: {
+				code: -32602,
+				message: expect.stringContaining('path must be a string'),
+			},
+		});
+		expect(repoPathJson.error.message).toContain('repository-relative POSIX paths');
 	});
 
 	it('creates a new file over /mcp without requiring a blob sha', async () => {

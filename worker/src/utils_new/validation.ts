@@ -32,29 +32,67 @@ export function ensureNotDefaultBranch(env: AppEnv, branch: string): void {
 	}
 }
 
-export function ensureSafeRepoPath(path: string): string {
-	const normalized = String(path ?? '').trim();
+export type RepoPathIssueKind =
+	| 'missing'
+	| 'type'
+	| 'absolute'
+	| 'separator'
+	| 'traversal';
+
+export type RepoPathIssue = {
+	kind: RepoPathIssueKind;
+	message: string;
+};
+
+export function classifyRepoPathIssue(
+	path: unknown,
+	field = 'path',
+	options?: { allowEmpty?: boolean },
+): RepoPathIssue | null {
+	if (typeof path !== 'string') {
+		return {
+			kind: 'type',
+			message: `invalid repo path: ${field} must be a string. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, not local filesystem paths.`,
+		};
+	}
+	const normalized = path.trim();
+	if (!normalized && options?.allowEmpty) {
+		return null;
+	}
 	if (!normalized) {
-		throw new Error(
-			'invalid repo path: path is empty. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, not local filesystem paths.',
-		);
+		return {
+			kind: 'missing',
+			message: `invalid repo path: ${field} is empty. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, not local filesystem paths.`,
+		};
 	}
 	if (normalized.startsWith('/') || normalized.startsWith('\\') || /^[A-Za-z]:/.test(normalized)) {
-		throw new Error(
-			`invalid repo path: ${path}. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, not local filesystem paths.`,
-		);
+		return {
+			kind: 'absolute',
+			message: `invalid repo path: ${path}. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, not local filesystem paths.`,
+		};
 	}
 	if (normalized.includes('\\')) {
-		throw new Error(
-			`invalid repo path: ${path}. Repo file paths must use forward slashes and stay repository-relative, for example worker/src/index.ts.`,
-		);
+		return {
+			kind: 'separator',
+			message: `invalid repo path: ${path}. Repo file paths must use forward slashes and stay repository-relative, for example worker/src/index.ts.`,
+		};
 	}
 	const segments = normalized.split('/');
 	if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
-		throw new Error(
-			`invalid repo path: ${path}. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, without traversal segments.`,
-		);
+		return {
+			kind: 'traversal',
+			message: `invalid repo path: ${path}. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, without traversal segments.`,
+		};
 	}
+	return null;
+}
+
+export function ensureSafeRepoPath(path: string): string {
+	const issue = classifyRepoPathIssue(path);
+	if (issue) {
+		throw new Error(issue.message);
+	}
+	const normalized = path.trim();
 	return normalized;
 }
 

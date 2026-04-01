@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { resolveRepoIdentityInput } from '../src/mcp-repo-identity';
+import { resolveRepoIdentityInput, resolveUnknownRepoIdentityInput } from '../src/mcp-repo-identity';
 import {
+	classifyRepoPathIssue,
 	decodeBase64Text,
 	ensureWorkflowAllowed,
 	ensureLiveSelfHostControl,
@@ -225,5 +226,33 @@ describe('resolveRepoIdentityInput', () => {
 				repo: 'OpenGPT',
 			}),
 		).toThrow(/invalid repo identity/i);
+	});
+
+	it('returns corrective repo identity hints for non-string raw inputs', () => {
+		expect(() =>
+			resolveUnknownRepoIdentityInput({
+				repo_key: 42,
+			}),
+		).toThrow(/repo_key must be a string in owner\/repo form/i);
+	});
+});
+
+describe('classifyRepoPathIssue', () => {
+	it('rejects absolute local filesystem paths with corrective guidance', () => {
+		expect(classifyRepoPathIssue('D:\\VScode\\OpenGPT\\README.md')).toMatchObject({
+			kind: 'absolute',
+			message: expect.stringContaining('repository-relative POSIX paths'),
+		});
+	});
+
+	it('rejects non-string path inputs with a schema-gate hint', () => {
+		expect(classifyRepoPathIssue(123, 'path')).toMatchObject({
+			kind: 'type',
+			message: expect.stringContaining('path must be a string'),
+		});
+	});
+
+	it('allows repository-relative POSIX paths', () => {
+		expect(classifyRepoPathIssue('worker/src/index.ts')).toBeNull();
 	});
 });
