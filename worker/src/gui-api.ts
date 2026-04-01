@@ -96,7 +96,7 @@ function parseExpectedState(value: unknown): QueueEnvelope['expected_state'] {
 		value === 'completed' ||
 		value === 'failed'
 	) {
-		return value;
+		return value === 'running' ? 'active' : value;
 	}
 	return undefined;
 }
