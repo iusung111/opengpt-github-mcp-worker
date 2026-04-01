@@ -9,6 +9,25 @@ import { queueJson as queueJsonInternal } from './utils_new/github';
 
 export const queueJson = queueJsonInternal;
 
+function mapQueueErrorStatus(code: string | null | undefined): number {
+  switch (code) {
+    case 'bad_request':
+      return 400;
+    case 'unauthorized':
+      return 401;
+    case 'forbidden':
+      return 403;
+    case 'not_found':
+    case 'workspace_not_found':
+      return 404;
+    case 'invalid_state':
+    case 'conflict':
+      return 409;
+    default:
+      return 500;
+  }
+}
+
 export async function queueFetch(env: AppEnv, payload: object): Promise<Response> {
   const recordPayload =
     payload && typeof payload === 'object' && !Array.isArray(payload)
@@ -19,7 +38,7 @@ export async function queueFetch(env: AppEnv, payload: object): Promise<Response
     result.ok
       ? result
       : fail(result.code ?? 'queue_fetch_failed', result.error ?? 'queue fetch failed'),
-    result.ok ? 200 : 500,
+    result.ok ? 200 : mapQueueErrorStatus(result.code),
   );
 }
 
