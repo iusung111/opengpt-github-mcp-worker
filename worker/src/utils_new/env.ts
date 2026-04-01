@@ -99,7 +99,7 @@ export function normalizeWorkflowList(workflows: unknown, context: string): stri
 	}
 	return workflows.map((item) => {
 		if (typeof item !== 'string' || !item.trim()) {
-			throw new Error(${context} entries must be non-empty strings`);
+			throw new Error(`${context} entries must be non-empty strings`);
 		}
 		return item.trim();
 	});
