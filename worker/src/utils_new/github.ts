@@ -36,11 +36,11 @@ export async function queueJson(
 	try {
 		const id = env.JOB_QUEUE.idFromName('global-job-queue');
 		const stub = env.JOB_QUEUE.get(id);
-		const response = await stub.fetch('https://queue.internal/', {
+		const response = await stub.fetch('https://queue.internal/queue', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(payload),
-		});
+	});
 		if (!response.ok) {
 			const text = await response.text();
 			return { ok: false, code: 'queue_fetch_failed', error: `queue api failed: ${response.status} ${text}` };
@@ -57,7 +57,7 @@ export async function queueJson(
 
 export async function activateRepoWorkspace(env: AppEnv, repoKey: string): Promise<void> {
 	try {
-		const workspacePath = `/workspaces/${repoKey.replace(/[^/a-zA-Z0-9-_.]/g, '_')}`;
+		const workspacePath = `/workspaces/${repoKey.replace(/[^/a-zA-Z0-9_.]/g, '_')}`;
 		const registerResult = await queueJson(env, {
 			action: 'workspace_register',
 			workspace: {
