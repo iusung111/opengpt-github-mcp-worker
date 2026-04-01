@@ -84,8 +84,21 @@ export async function queueJson(
 
 export async function activateRepoWorkspace(env: AppEnv, repoKey: string): Promise<void> {
 	try {
+		const activateFirstResult = await queueJson(env, { action: 'workspace_activate', repo_key: repoKey });
+		if (activateFirstResult.ok) {
+			return;
+		}
+		if ((activateFirstResult.code ?? '') !== 'workspace_not_found') {
+			diagnosticLog('workspace_activate_failed', {
+				repo_key: repoKey,
+				code: activateFirstResult.code ?? null,
+				error: activateFirstResult.error ?? null,
+			});
+			return;
+		}
+
 		const workspacePath = `/workspaces/${repoKey.replace(/[^/a-zA-Z0-9_.]/g, '_')}`;
-		const registerResult = await queueJson(env, {
+		const registerResult = await queueJson( env, {
 			action: 'workspace_register',
 			workspace: {
 				repo_key: repoKey,
