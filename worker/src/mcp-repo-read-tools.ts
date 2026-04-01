@@ -17,7 +17,7 @@ import {
 	decodeBase64Text,
 	encodeGitHubPath,
 	ensureRepoAllowed,
-	ensureSafePath,
+	ensureSafeRepoPath,
 	errorCodeFor,
 	fail,
 	getDefaultBaseBranch,
@@ -214,7 +214,7 @@ export function registerRepoReadTools(
 	server.registerTool(
 		'repo_context_snapshot',
 		{
-			description: 'Return a manifest-aware repository context snapshot with recommended next paths.',
+			description: 'Return a manifest-aware repository context snapshot with recommended next paths. Optional path filters must be repo-relative POSIX paths.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -231,7 +231,7 @@ export function registerRepoReadTools(
 					const repoKey = `${owner}/${repo}`;
 					ensureRepoAllowed(env, repoKey);
 					if (path) {
-						ensureSafePath(path);
+						ensureSafeRepoPath(path);
 					}
 					const effectiveRef = ref || getDefaultBaseBranch(env);
 					const treeResult = await getRepoTree(env, owner, repo, effectiveRef, true);
@@ -388,7 +388,7 @@ export function registerRepoReadTools(
 				try {
 					ensureRepoAllowed(env, `${owner}/${repo}`);
 					for (const path of paths) {
-						ensureSafePath(path);
+						ensureSafeRepoPath(path);
 					}
 					const data = (await githubGet(
 						env,
@@ -450,7 +450,7 @@ export function registerRepoReadTools(
 	server.registerTool(
 		'repo_get_file_summary',
 		{
-			description: 'Read only the summary, headings, preview, and chunk guidance for a repository file.',
+			description: 'Read only the summary, headings, preview, and chunk guidance for a repository file using a repo-relative POSIX path such as worker/src/index.ts.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -464,7 +464,7 @@ export function registerRepoReadTools(
 				try {
 					const repoKey = `${owner}/${repo}`;
 					ensureRepoAllowed(env, repoKey);
-					ensureSafePath(path);
+					ensureSafeRepoPath(path);
 					const data = await getRepoFile(env, owner, repo, path, ref);
 					const text = data.decoded_text;
 					if (text === null) {
@@ -492,7 +492,7 @@ export function registerRepoReadTools(
 	server.registerTool(
 		'repo_get_file_chunk',
 		{
-			description: 'Read only a selected line range or heading chunk from a repository file.',
+			description: 'Read only a selected line range or heading chunk from a repository file using a repo-relative POSIX path such as worker/src/index.ts.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -509,7 +509,7 @@ export function registerRepoReadTools(
 				try {
 					const repoKey = `${owner}/${repo}`;
 					ensureRepoAllowed(env, repoKey);
-					ensureSafePath(path);
+					ensureSafeRepoPath(path);
 					const data = await getRepoFile(env, owner, repo, path, ref);
 					const text = data.decoded_text;
 					if (text === null) {
@@ -539,7 +539,7 @@ export function registerRepoReadTools(
 		'repo_get_file',
 		{
 			description:
-				'Read a file from an allowlisted GitHub repository. Large docs, workflows, and tool files return summary-first responses with chunk guidance.',
+				'Read a file from an allowlisted GitHub repository using a repo-relative POSIX path such as worker/src/index.ts. Large docs, workflows, and tool files return summary-first responses with chunk guidance.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -553,7 +553,7 @@ export function registerRepoReadTools(
 				try {
 					const repoKey = `${owner}/${repo}`;
 					ensureRepoAllowed(env, repoKey);
-					ensureSafePath(path);
+					ensureSafeRepoPath(path);
 					const data = await getRepoFile(env, owner, repo, path, ref);
 					const text = data.decoded_text;
 					if (text === null) {
@@ -601,7 +601,7 @@ export function registerRepoReadTools(
 	server.registerTool(
 		'repo_list_tree',
 		{
-			description: 'List repository tree entries from an allowlisted GitHub repository.',
+			description: 'List repository tree entries from an allowlisted GitHub repository. Optional path filters must be repo-relative POSIX paths.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -617,7 +617,7 @@ export function registerRepoReadTools(
 					const repoKey = `${owner}/${repo}`;
 					ensureRepoAllowed(env, repoKey);
 					if (path) {
-						ensureSafePath(path);
+						ensureSafeRepoPath(path);
 					}
 					const effectiveRef = ref || getDefaultBaseBranch(env);
 					const treeResult = await getRepoTree(env, owner, repo, effectiveRef, recursive);
@@ -635,7 +635,7 @@ export function registerRepoReadTools(
 		'repo_tree_snapshot',
 		{
 			description:
-				'Summarize an allowlisted repository tree with navigation manifest hints, recommended paths, and top-level layout.',
+				'Summarize an allowlisted repository tree with navigation manifest hints, recommended paths, and top-level layout. Optional path filters must be repo-relative POSIX paths.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -652,7 +652,7 @@ export function registerRepoReadTools(
 					const repoKey = `${owner}/${repo}`;
 					ensureRepoAllowed(env, repoKey);
 					if (path) {
-						ensureSafePath(path);
+						ensureSafeRepoPath(path);
 					}
 					const effectiveRef = ref || getDefaultBaseBranch(env);
 					const treeResult = await getRepoTree(env, owner, repo, effectiveRef, true);

@@ -32,10 +32,30 @@ export function ensureNotDefaultBranch(env: AppEnv, branch: string): void {
 	}
 }
 
-export function ensureSafePath(path: string): void {
-	if (path.includes('..') || path.startsWith('/') || path.startsWith('\\')) {
-		throw new Error(`unsafe path: ${path}`);
+export function ensureSafeRepoPath(path: string): string {
+	const normalized = String(path ?? '').trim();
+	if (!normalized) {
+		throw new Error(
+			'invalid repo path: path is empty. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, not local filesystem paths.',
+		);
 	}
+	if (normalized.startsWith('/') || normalized.startsWith('\\') || /^[A-Za-z]:/.test(normalized)) {
+		throw new Error(
+			`invalid repo path: ${path}. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, not local filesystem paths.`,
+		);
+	}
+	if (normalized.includes('\\')) {
+		throw new Error(
+			`invalid repo path: ${path}. Repo file paths must use forward slashes and stay repository-relative, for example worker/src/index.ts.`,
+		);
+	}
+	const segments = normalized.split('/');
+	if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+		throw new Error(
+			`invalid repo path: ${path}. Repo file paths must be repository-relative POSIX paths like worker/src/index.ts, without traversal segments.`,
+		);
+	}
+	return normalized;
 }
 
 export function ensureWorkflowAllowed(env: AppEnv, repoKey: string, workflowId: string): void {
@@ -43,5 +63,15 @@ export function ensureWorkflowAllowed(env: AppEnv, repoKey: string, workflowId: 
 	if (!allowed.includes(workflowId)) {
 		diagnosticLog('workflow_not_allowlisted', { repo_key: repoKey, workflow_id: workflowId, allowed_count: allowed.length });
 		throw new Error(`workflow not allowlisted for ${repoKey}: ${workflowId}`);
+	}
+}
+
+export function validateWorkflowInputs(inputs: Record<string, unknown>): void {
+	if (typeof inputs.instructions_b64 === 'string') {
+		try {
+			JSON.parse(atob(inputs.instructions_b64));
+		} catch {
+			throw new Error('instructions_b64 must decode to valid JSON');
+		}
 	}
 }

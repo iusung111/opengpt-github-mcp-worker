@@ -651,13 +651,27 @@ async function handleWorkspaceRegister(
 	context: QueueRequestContext,
 	workspaceInput: Partial<WorkspaceRecord> & { repo_key?: string },
 ): Promise<QueueResponse> {
-	const timestamp = nowIso();
-	const existing = workspaceInput.repo_key ? await context.getWorkspace(workspaceInput.repo_key) : null;
-	const workspace = buildWorkspaceRecord(workspaceInput as WorkspaceRecord, existing, timestamp);
-	ensureSafeWorkspacePath(workspace.workspace_path);
-	await context.putWorkspace(workspace);
-	await context.setActiveWorkspace(workspace.repo_key);
-	return jsonResponse(ok({ workspace }));
+	try {
+		const timestamp = nowIso();
+		const existing = workspaceInput.repo_key ? await context.getWorkspace(workspaceInput.repo_key) : null;
+		const workspacePath = ensureSafeWorkspacePath(workspaceInput.workspace_path ?? '');
+		const workspace = buildWorkspaceRecord(
+			{
+				...(workspaceInput as WorkspaceRecord),
+				workspace_path: workspacePath,
+			},
+			existing,
+			timestamp,
+		);
+		await context.putWorkspace(workspace);
+		await context.setActiveWorkspace(workspace.repo_key);
+		return jsonResponse(ok({ workspace }));
+	} catch (error) {
+		return jsonResponse(
+			fail('invalid_workspace_path', error instanceof Error ? error.message : String(error)),
+			400,
+		);
+	}
 }
 
 async function handleWorkspaceActivate(context: QueueRequestContext, repoKey: string): Promise<QueueResponse> {

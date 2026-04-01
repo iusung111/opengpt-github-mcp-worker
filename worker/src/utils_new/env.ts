@@ -108,8 +108,8 @@ export function normalizeWorkflowList(workflows: unknown, context: string): stri
 export function getFileAllowedWorkflowsByRepo(): Record<string, string[]> {
 	const result: Record<string, string[]> = {};
 	for (const [repo, config] of Object.entries(workflowAllowlistConfig)) {
-		if (config && Array.isArray(config.workflows)) {
-			result[repo] = config.workflows;
+		if (Array.isArray(config)) {
+			result[repo] = config;
 		}
 	}
 	return result;
@@ -174,6 +174,14 @@ export function inspectAllowedWorkflowsForRepo(env: Partial<AppEnv>, repoKey: st
 		env_global_fallback: getAllowedWorkflows(env as AppEnv),
 		effective_allowlist: getAllowedWorkflowsForRepo(env, repoKey),
 		repo_specific_match_found: Boolean(fileBased[repoKey] || envBased[repoKey]),
+		precedence: {
+			rules: [
+				'Repo-managed workflow allowlist entries from worker/config/workflow-allowlist.json are loaded first.',
+				'GITHUB_ALLOWED_WORKFLOWS_BY_REPO entries are merged on top for the same repo and can add more workflow ids.',
+				'If any repo-specific entries exist after merging, they are the effective allowlist for that repo.',
+				'If no repo-specific entry exists, GITHUB_ALLOWED_WORKFLOWS is used as the fallback allowlist.',
+			],
+		},
 	};
 }
 
@@ -236,20 +244,49 @@ export function getDefaultAutoImproveMaxCycles(env: Partial<AppEnv>): number {
 	return Number.isFinite(value) && value >= 0 ? value : 10;
 }
 
+export function getAuditRetentionCount(env: AppEnv): number {
+	const value = Number(env.AUDIT_RETENTION_COUNT);
+	return Number.isFinite(value) && value > 0 ? value : 100;
+}
+
+export function getDeliveryRetentionCount(env: AppEnv): number {
+	const value = Number(env.DELIVERY_RETENTION_COUNT);
+	return Number.isFinite(value) && value > 0 ? value : 100;
+}
+
+export function getDispatchDedupeWindowMs(env: AppEnv): number {
+	const value = Number(env.DISPATCH_DEDUPE_WINDOW_MS);
+	return Number.isFinite(value) && value > 0 ? value : 60_000;
+}
+
+export function getReviewStaleAfterMs(env: AppEnv): number {
+	const value = Number(env.REVIEW_STALE_AFTER_MS);
+	return Number.isFinite(value) && value > 0 ? value : 3600_000 * 24;
+}
+
+export function getWorkingStaleAfterMs(env: AppEnv): number {
+	const value = Number(env.WORKING_STALE_AFTER_MS);
+	return Number.isFinite(value) && value > 0 ? value : 3600_000 * 2;
+}
+
+export function getChatgptMcpDocumentationUrl(_env: AppEnv): string {
+	return 'https://github.com/iusung111/opengpt-github-mcp-worker/blob/main/docs/CHATGPT_MCP.md';
+}
+
 export function getBranchPrefix(env: AppEnv): string {
-	const value = env.GITHUB_BRANCH_PREFIX?.trim();
+	const value = env.AGENT_BRANCH_PREFIX?.trim();
 	return value || 'agent/';
 }
 
 export function getDefaultBaseBranch(env: AppEnv): string {
-	const value = env.GITHUB_DEFAULT_BASE_BRANCH?.trim();
+	const value = env.DEFAULT_BASE_BRANCH?.trim();
 	return value || 'main';
 }
 
 export function getSelfRepoKey(env: AppEnv): string {
-	const value = env.GITHUB_SELF_REPO?.trim();
+	const value = env.SELF_REPO_KEY?.trim();
 	if (!value) {
-		throw new Error('GITHUB_SELF_REPO environment variable is required');
+		throw new Error('SELF_REPO_KEY environment variable is required');
 	}
 	return value;
 }

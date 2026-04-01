@@ -48,6 +48,10 @@ Use this connector as a GitHub operations MCP, not as a generic browser, shell, 
 ## Repo-First Workflow Rules
 
 - Start from the repo, not from a local path.
+- Distinguish these three concepts explicitly:
+  - repo identity: `owner/repo`
+  - repo file path: repository-relative POSIX path such as `worker/src/index.ts`
+  - optional local workspace path: absolute filesystem path such as `D:/VScode/projects/opengpt` or `/home/user/workspace/projects/opengpt`
 - The default staged flow is:
   1. `repo_work_context`
   2. decide whether to reuse an open PR or active job
@@ -57,14 +61,17 @@ Use this connector as a GitHub operations MCP, not as a generic browser, shell, 
 - Only use local workspace folder concepts as an optional convenience layer.
 - A registered workspace path may be shown, but it is secondary to the GitHub repo state.
 - When a local workspace path is needed, prefer `projects/<project-slug>` for real implementation work.
+- Do not pass a local filesystem path to `repo_*` tools. Those tools only accept repo file paths such as `worker/src/index.ts`.
 - Use sandbox repo paths only for workflow or MCP validation tasks.
 
 ## MCP Identifier Handling
 
 - Treat repo key, MCP route, and server-defined tool name as the stable identity of MCP operations.
+- Treat repo file paths as a separate input category from connector identity and local workspace paths.
 - Do not treat connector resource handles such as `link_<id>` or full connector paths like `/OpenGPT/link_<id>/...` as stable identifiers.
 - When a ChatGPT or MCP session shows a connector path with `link_<id>`, treat it as session-scoped connector state that may change across reconnects, approval refresh, mirror/live switching, or a new chat session.
 - When summarizing work, asking for permissions, or deciding whether an existing task should be reused, key the decision off `repo key + route + tool name`, not a previously copied connector path.
+- When reading or writing repository files, use repo-relative POSIX paths only, and do not reuse an absolute local workspace path as if it were a repo file path.
 - For operator-facing reference, keep `docs/chatgpt/MCP_IDENTIFIER_GUIDANCE.md` aligned with these rules.
 
 ## Incident Memory
@@ -152,6 +159,7 @@ If the user does not respond to a permission request, avoid repeating the full p
   - what repo is being used
   - whether an existing PR or job was reused
   - whether a registered workspace path exists as a secondary hint
+  - whether the current file path is repo-relative or local-workspace-only metadata
   - whether the system chose direct edit or workflow dispatch
   - whether a PR is being created or only a dry run is happening
 - During long read, triage, or investigation phases:
@@ -194,7 +202,7 @@ Assistant behavior:
 3. Reuse an existing PR or active job if it clearly matches
 4. If no active work matches, start a new job
 5. Create internal job id
-6. If local tracking is needed, place notes or artifacts under `projects/readme-cleanup`
+6. If local tracking is needed, place notes or artifacts under `projects/readme-cleanup` without treating that folder as the source of truth for repo file paths
 7. Make the change
 8. Validate
 9. Create branch and PR if this is a real change

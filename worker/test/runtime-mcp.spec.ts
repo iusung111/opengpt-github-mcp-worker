@@ -525,12 +525,56 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				repo_key: 'iusung111/OpenGPT',
-				default_workspace_path: '/home/uieseong/workspace/projects/OpenGPT',
 				existing_workspace: {
 					repo_key: 'iusung111/OpenGPT',
 					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 				requires_confirmation: true,
+				recommended_workspace_relative_path: 'projects/opengpt',
+				recommended_workspace_kind: 'project',
+				local_workspace_optional: true,
+			},
+		});
+		await client.close();
+	});
+
+	it('normalizes Windows workspace registrations before returning them', async () => {
+		const client = await createMcpClient();
+		const registerWorkspaceResult = await client.callTool({
+			name: 'workspace_register',
+			arguments: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+				workspace_path: 'D:\\VScode\\projects\\opengpt-github-mcp-worker\\',
+			},
+		});
+		const registerWorkspaceText =
+			'text' in registerWorkspaceResult.content[0] ? registerWorkspaceResult.content[0].text : '';
+		expect(JSON.parse(registerWorkspaceText)).toMatchObject({
+			ok: true,
+			data: {
+				workspace: {
+					repo_key: 'iusung111/opengpt-github-mcp-worker',
+					workspace_path: 'D:/VScode/projects/opengpt-github-mcp-worker',
+				},
+			},
+		});
+
+		const resolveWorkspaceResult = await client.callTool({
+			name: 'workspace_resolve',
+			arguments: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+			},
+		});
+		const resolveWorkspaceText =
+			'text' in resolveWorkspaceResult.content[0] ? resolveWorkspaceResult.content[0].text : '';
+		expect(JSON.parse(resolveWorkspaceText)).toMatchObject({
+			ok: true,
+			data: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+				existing_workspace: {
+					workspace_path: 'D:/VScode/projects/opengpt-github-mcp-worker',
+				},
+				recommended_workspace_relative_path: 'projects/opengpt-github-mcp-worker',
 			},
 		});
 		await client.close();
@@ -1251,6 +1295,79 @@ describe('runtime mcp surface', () => {
 				},
 			},
 		});
+		await client.close();
+	});
+
+	it('rejects local filesystem paths for repo read and write tools', async () => {
+		const client = await createMcpClient();
+
+		const fileResult = await client.callTool({
+			name: 'repo_get_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				path: 'D:\\VScode\\OpenGPT\\README.md',
+			},
+		});
+		const fileText = 'text' in fileResult.content[0] ? fileResult.content[0].text : '';
+		expect(JSON.parse(fileText)).toMatchObject({
+			ok: false,
+			code: 'invalid_repo_path',
+		});
+
+		const summaryResult = await client.callTool({
+			name: 'repo_get_file_summary',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				path: '/home/uieseong/workspace/OpenGPT/README.md',
+			},
+		});
+		const summaryText = 'text' in summaryResult.content[0] ? summaryResult.content[0].text : '';
+		expect(JSON.parse(summaryText)).toMatchObject({
+			ok: false,
+			code: 'invalid_repo_path',
+		});
+
+		const updateResult = await client.callTool({
+			name: 'repo_update_file',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				branch: 'agent/invalid-path-test',
+				path: 'worker\\src\\index.ts',
+				message: 'Test invalid repo path',
+				content_b64: btoa('test'),
+			},
+		});
+		const updateText = 'text' in updateResult.content[0] ? updateResult.content[0].text : '';
+		expect(JSON.parse(updateText)).toMatchObject({
+			ok: false,
+			code: 'invalid_repo_path',
+		});
+
+		const batchResult = await client.callTool({
+			name: 'repo_batch_write',
+			arguments: {
+				owner: 'iusung111',
+				repo: 'OpenGPT',
+				branch: 'agent/invalid-path-test',
+				message: 'Test invalid repo path',
+				operations: [
+					{
+						type: 'create_file',
+						path: '/tmp/README.md',
+						content_b64: btoa('test'),
+					},
+				],
+			},
+		});
+		const batchText = 'text' in batchResult.content[0] ? batchResult.content[0].text : '';
+		expect(JSON.parse(batchText)).toMatchObject({
+			ok: false,
+			code: 'invalid_repo_path',
+		});
+
 		await client.close();
 	});
 
@@ -2583,7 +2700,7 @@ describe('runtime mcp surface', () => {
 		const text = 'text' in result.content[0] ? result.content[0].text : '';
 		expect(JSON.parse(text)).toMatchObject({
 			ok: false,
-			code: 'queue_action_failed',
+			code: 'invalid_workspace_path',
 		});
 		await client.close();
 	});

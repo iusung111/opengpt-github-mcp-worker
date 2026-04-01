@@ -176,7 +176,7 @@ describe('runtime http surface', () => {
 			body: JSON.stringify({
 				action: 'pause',
 				reason: 'Pause from standalone GUI test',
-				expected_state: 'running',
+				expected_state: 'active',
 			}),
 		});
 		expect(pauseResponse.status).toBe(200);

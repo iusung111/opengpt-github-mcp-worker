@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildWorkspaceRecord, findSimilarWorkspaceMatches, sortWorkspaces } from '../src/queue-workspaces';
+import { ensureSafeWorkspacePath } from '../src/queue-helpers';
 import type { WorkspaceRecord } from '../src/types';
 
 describe('queue workspace helpers', () => {
@@ -7,7 +8,7 @@ describe('queue workspace helpers', () => {
 		const workspace = buildWorkspaceRecord(
 			{
 				repo_key: 'iusung111/OpenGPT',
-				workspace_path: '/tmp/OpenGPT',
+				workspace_path: 'D:\\VScode\\projects\\OpenGPT\\',
 			},
 			null,
 			'2026-03-21T00:00:00.000Z',
@@ -18,6 +19,7 @@ describe('queue workspace helpers', () => {
 			repo_slug: 'opengpt',
 			display_name: 'iusung111/OpenGPT',
 			aliases: [],
+			workspace_path: 'D:/VScode/projects/OpenGPT',
 			last_used_at: '2026-03-21T00:00:00.000Z',
 		});
 	});
@@ -58,7 +60,7 @@ describe('queue workspace helpers', () => {
 				repo_slug: 'opengpt',
 				display_name: 'OpenGPT',
 				aliases: ['webgpt'],
-				workspace_path: '/tmp/OpenGPT',
+				workspace_path: 'D:/tmp/OpenGPT',
 				created_at: '2026-03-21T00:00:00.000Z',
 				updated_at: '2026-03-21T00:00:00.000Z',
 			},
@@ -66,5 +68,14 @@ describe('queue workspace helpers', () => {
 
 		expect(findSimilarWorkspaceMatches(workspaces, 'webgpt')).toHaveLength(1);
 		expect(findSimilarWorkspaceMatches(workspaces, undefined, 'iusung111/OpenGPT')).toHaveLength(1);
+		expect(findSimilarWorkspaceMatches(workspaces, 'D:\\tmp\\OpenGPT\\')).toHaveLength(1);
+	});
+
+	it('accepts absolute workspace paths and rejects relative ones', () => {
+		expect(ensureSafeWorkspacePath('D:\\VScode\\projects\\opengpt\\')).toBe('D:/VScode/projects/opengpt');
+		expect(ensureSafeWorkspacePath('/home/uieseong/workspace/projects/opengpt')).toBe(
+			'/home/uieseong/workspace/projects/opengpt',
+		);
+		expect(() => ensureSafeWorkspacePath('../unsafe')).toThrow(/invalid workspace path/i);
 	});
 });

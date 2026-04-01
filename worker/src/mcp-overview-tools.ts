@@ -36,7 +36,6 @@ import {
 	fetchHealthSnapshot,
 	getWorkerScriptNameFromUrl,
 	jobsListStructuredSchema,
-	mirrorConfigured,
 	permissionBundleStructuredSchema,
 	queueActionResult,
 	selfHostStatusStructuredSchema,
@@ -248,17 +247,20 @@ export function registerOverviewTools(
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'repo_work_context_failed'), error, readAnnotations)); }
 	});
 	server.registerTool('workspace_activate', { description: 'Mark one registered repository workspace as the current active repo context so recent workspace ordering stays unified around the repo you are actively working in.', inputSchema: { repo_key: z.string() }, annotations: writeAnnotations }, async ({ repo_key }) => { try { return toolText(await queueJson(env, { action: 'workspace_activate', repo_key })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_activate_failed'), error, writeAnnotations)); } });
-	server.registerTool('workspace_resolve', { description: 'Resolve the preferred GitHub workspace folder for a repo. Returns a registered folder if one exists, otherwise a default project-first workspace path plus similar registered matches to review before creating a new folder.', inputSchema: { repo_key: z.string(), preferred_root: z.string().default('/home/uieseong/workspace/projects') }, annotations: readAnnotations }, async ({ repo_key, preferred_root }) => {
+	server.registerTool('workspace_resolve', { description: 'Resolve repo-first workspace guidance for a repository. Returns any registered local workspace as secondary metadata plus a project-relative recommendation instead of a host-specific absolute path.', inputSchema: { repo_key: z.string() }, annotations: readAnnotations }, async ({ repo_key }) => {
 		try {
 			const existing = await queueJson(env, { action: 'workspace_get', repo_key });
 			const similar = await queueJson(env, { action: 'workspace_find_similar', repo_key });
-			const repoSlug = repo_key.split('/').pop() ?? repo_key;
-			const defaultWorkspacePath = `${preferred_root.replace(/\/$/, '')}/${repoSlug}`;
-			return toolText(ok({ repo_key, default_workspace_path: defaultWorkspacePath, existing_workspace: existing.ok ? existing.data?.workspace ?? null : null, similar_workspaces: similar.data?.matches ?? [], requires_confirmation: Boolean(existing.ok && existing.data?.workspace) || (((similar.data?.matches as unknown[] | undefined)?.length ?? 0) > 0) }, readAnnotations));
+			const repoSlug = String(repo_key.split('/').pop() ?? repo_key)
+				.trim()
+				.toLowerCase()
+				.replace(/[\s_]+/g, '-');
+			const similarWorkspaces = (similar.data?.matches as unknown[] | undefined) ?? [];
+			return toolText(ok({ repo_key, existing_workspace: existing.ok ? existing.data?.workspace ?? null : null, similar_workspaces: similarWorkspaces, requires_confirmation: Boolean(existing.ok && existing.data?.workspace) || similarWorkspaces.length > 0, recommended_workspace_relative_path: `projects/${repoSlug}`, recommended_workspace_kind: 'project', local_workspace_optional: true }, readAnnotations));
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_resolve_failed'), error, readAnnotations)); }
 	});
-	server.registerTool('workspace_register', { description: 'Register or update the preferred GitHub workspace folder for a repo so future chat sessions can reuse it instead of creating a similar new folder.', inputSchema: { repo_key: z.string(), workspace_path: z.string(), display_name: z.string().optional(), aliases: z.array(z.string()).default([]) }, annotations: writeAnnotations }, async ({ repo_key, workspace_path, display_name, aliases }) => {
-		try { const result = await queueJson(env, { action: 'workspace_register', workspace: { repo_key, workspace_path, display_name, aliases } }); await activateRepoWorkspace(env, repo_key); return queueActionResult(result, writeAnnotations); } catch (error) { return toolText(fail('queue_action_failed', error, writeAnnotations)); }
+	server.registerTool('workspace_register', { description: 'Register or update an optional absolute local filesystem workspace path for a repo so future chat sessions can reuse it as secondary context.', inputSchema: { repo_key: z.string(), workspace_path: z.string(), display_name: z.string().optional(), aliases: z.array(z.string()).default([]) }, annotations: writeAnnotations }, async ({ repo_key, workspace_path, display_name, aliases }) => {
+		try { const result = await queueJson(env, { action: 'workspace_register', workspace: { repo_key, workspace_path, display_name, aliases } }); if (result.ok) await activateRepoWorkspace(env, repo_key); return queueActionResult(result, writeAnnotations); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_register_failed'), error, writeAnnotations)); }
 	});
 	server.registerTool('workspace_find_similar', { description: 'Find registered workspace folders similar to a repo or folder name before creating a new GitHub workspace folder.', inputSchema: { query: z.string().optional(), repo_key: z.string().optional() }, annotations: readAnnotations }, async ({ query, repo_key }) => { try { return toolText(await queueJson(env, { action: 'workspace_find_similar', query, repo_key })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_find_similar_failed'), error, readAnnotations)); } });
 	server.registerTool('workspace_list', { description: 'List registered GitHub workspace folders known to this MCP server.', annotations: readAnnotations }, async () => { try { return toolText(await queueJson(env, { action: 'workspace_list' })); } catch (error) { return toolText(fail(errorCodeFor(error, 'workspace_list_failed'), error, readAnnotations)); } });

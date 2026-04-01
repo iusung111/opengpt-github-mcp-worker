@@ -39,6 +39,8 @@ export function errorCodeFor(error: unknown, fallback: string): string {
 	if (message.includes('workflow not allowlisted')) return 'workflow_not_allowlisted';
 	if (message.includes('workflow not found')) return 'workflow_not_found';
 	if (message.includes('workflow does not support workflow_dispatch')) return 'workflow_missing_dispatch_trigger';
+	if (message.includes('invalid repo path')) return 'invalid_repo_path';
+	if (message.includes('invalid workspace path')) return 'invalid_workspace_path';
 	if (message.includes('unsafe path')) return 'unsafe_path';
 	if (message.includes('direct write to') && message.includes('forbidden')) return 'default_branch_forbidden';
 	if (message.includes('expected blob sha mismatch')) return 'expected_blob_sha_mismatch';

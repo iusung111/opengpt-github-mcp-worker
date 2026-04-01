@@ -23,6 +23,12 @@ Default workflow:
 6. validate when appropriate
 7. create or update a PR for real changes
 
+Path contract:
+- repo identity is `owner/repo`
+- repo file paths are repo-relative POSIX paths such as `worker/src/index.ts`
+- local workspace paths are optional absolute filesystem paths such as `D:/VScode/projects/opengpt`
+- never pass a local workspace path to `repo_*` tools
+
 Incident memory:
 - for runtime or connector failures, read `docs/incidents/` in `iusung111/opengpt-github-mcp-worker` first
 - after fixing a real failure, update or create a report under `docs/incidents/`

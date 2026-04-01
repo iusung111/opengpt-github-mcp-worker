@@ -21,7 +21,7 @@ import {
 	ensureBranchAllowed,
 	ensureNotDefaultBranch,
 	ensureRepoAllowed,
-	ensureSafePath,
+	ensureSafeRepoPath,
 	errorCodeFor,
 	fail,
 	getDefaultBaseBranch,
@@ -112,7 +112,7 @@ export function registerWriteTools(
 		ensureRepoAllowed(env, repoKey);
 		ensureBranchAllowed(env, branch);
 		ensureNotDefaultBranch(env, branch);
-		ensureSafePath(path);
+		ensureSafeRepoPath(path);
 		await activateRepoWorkspace(env, repoKey);
 		atob(content_b64);
 
@@ -207,7 +207,7 @@ export function registerWriteTools(
 		'repo_create_file',
 		{
 			description:
-				'Create a new file on an agent branch in an allowlisted repository, including workflow files under .github/workflows/.',
+				'Create a new file on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts, including workflow files under .github/workflows/.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -235,7 +235,7 @@ export function registerWriteTools(
 		'repo_upsert_file',
 		{
 			description:
-				'Create or update a file on an agent branch in an allowlisted repository. When expected_blob_sha is omitted, existing file sha is probed automatically.',
+				'Create or update a file on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts. When expected_blob_sha is omitted, existing file sha is probed automatically.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -263,7 +263,7 @@ export function registerWriteTools(
 		'repo_upload_start',
 		{
 			description:
-				'Start a streamed file upload session on an agent branch in an allowlisted repository. Use this instead of repo_update_file for larger files or ChatGPT web uploads.',
+				'Start a streamed file upload session on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts. Use this instead of repo_update_file for larger files or ChatGPT web uploads.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -284,7 +284,7 @@ export function registerWriteTools(
 				ensureRepoAllowed(env, repoKey);
 				ensureBranchAllowed(env, branch);
 				ensureNotDefaultBranch(env, branch);
-				ensureSafePath(path);
+				ensureSafeRepoPath(path);
 				await activateRepoWorkspace(env, repoKey);
 				if (validate_only) {
 					return toolText(
@@ -385,7 +385,7 @@ export function registerWriteTools(
 		'repo_batch_write',
 		{
 			description:
-				'Preview or atomically apply multiple file operations on an agent branch, including create, update, delete, rename, and scaffold writes.',
+				'Preview or atomically apply multiple file operations on an agent branch using repo-relative POSIX paths, including create, update, delete, rename, and scaffold writes.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -453,7 +453,7 @@ export function registerWriteTools(
 		'repo_apply_patchset',
 		{
 			description:
-				'Preview or atomically apply a multi-file unified patchset on an agent branch after validating each target blob.',
+				'Preview or atomically apply a multi-file unified patchset on an agent branch after validating each target blob. Patch paths must be repo-relative POSIX paths.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),
@@ -519,7 +519,7 @@ export function registerWriteTools(
 		'repo_update_file',
 		{
 			description:
-				'Update a file on an agent branch in an allowlisted repository, including workflow files under .github/workflows/.',
+				'Update a file on an agent branch in an allowlisted repository using a repo-relative POSIX path such as worker/src/index.ts, including workflow files under .github/workflows/.',
 			inputSchema: {
 				owner: z.string(),
 				repo: z.string(),

@@ -21,7 +21,6 @@ import {
 	selfRequiresMirrorForLive,
 	fail,
 	toolText,
-	mirrorConfigured,
 } from '../utils';
 
 export const permissionBundleStructuredSchema = z
@@ -79,7 +78,7 @@ export function queueActionResult(
 	if (result.ok) {
 		return toolText({ ...result, meta });
 	}
-	return toolText(fail('queue_action_failed', result.error ?? result.code ?? 'queue action failed', meta));
+	return toolText(fail(result.code ?? 'queue_action_failed', result.error ?? result.code ?? 'queue action failed', meta));
 }
 
 export function mirrorConfigured(env: AppEnv): boolean {
@@ -257,9 +256,8 @@ export function buildHelpPayload(query: string | undefined): Record<string, unkn
 		real_change: {
 			label: 'Real change with PR',
 			prompt: [
-				'Make a real change in the target repo and keep local planning or artifacts under projects/<project-slug>.',
+				'Make a real change in the target repo. If local planning or artifacts are needed, keep them under projects/<project-slug>.',
 				'- repo: <owner/repo>',
-				'- local_project_path: projects/<project-slug>',
 				'- job_id: change-001',
 				'- request: <exact user-facing or code-facing change>',
 				'- target_paths: <path>',
@@ -270,9 +268,8 @@ export function buildHelpPayload(query: string | undefined): Record<string, unkn
 		main_ready: {
 			label: 'Main-ready change',
 			prompt: [
-				'Prepare a real change in the target repo so it is ready for merge to main, with local project context stored under projects/<project-slug>.',
+				'Prepare a real change in the target repo so it is ready for merge to main. If local project context is needed, store it under projects/<project-slug>.',
 				'- repo: <owner/repo>',
-				'- local_project_path: projects/<project-slug>',
 				'- job_id: main-ready-001',
 				'- request: <exact user-facing or code-facing change>',
 				'- target_paths: <path>',
@@ -285,7 +282,6 @@ export function buildHelpPayload(query: string | undefined): Record<string, unkn
 			prompt: [
 				'Run a dry-run request for the target repo without creating a final branch or PR.',
 				'- repo: <owner/repo>',
-				'- local_project_path: projects/<project-slug>',
 				'- job_id: dry-run-001',
 				'- request: <exact user-facing or code-facing change>',
 				'- target_paths: <path>',
@@ -298,7 +294,6 @@ export function buildHelpPayload(query: string | undefined): Record<string, unkn
 			prompt: [
 				'Follow up on an existing PR review request.',
 				'- repo: <owner/repo>',
-				'- local_project_path: projects/<project-slug>',
 				'- branch or PR: <existing branch or PR>',
 				'- request: <review feedback summary>',
 				'- done_when: review findings are addressed and the PR is updated',

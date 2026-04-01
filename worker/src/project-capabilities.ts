@@ -130,7 +130,7 @@ async function getOptionalRepoTextFile(
 		}
 		return decodeBase64Text(data.content);
 	} catch (error) {
-		if (isNotFoundError(error)) {
+		if (isGitHubNotFoundError(error)) {
 			return null;
 		}
 		throw error;

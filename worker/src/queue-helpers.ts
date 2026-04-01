@@ -54,19 +54,58 @@ export function branchMatchScore(workBranch: string, job: JobRecord): number {
 export function normalizeLookup(value: unknown): string {
 	return String(value ?? '')
 		.trim()
+		.replace(/\\/g, '/')
+		.replace(/\/+/g, '/')
+		.replace(/\/+$/g, '')
 		.toLowerCase()
 		.replace(/[\s_]+/g, '-');
 }
 
-function isAbsoluteWorkspacePath(path: string): boolean {
-	return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
+export function normalizeWorkspacePath(path: string): string {
+	const trimmed = String(path ?? '').trim();
+	if (!trimmed) {
+		return '';
+	}
+	const withForwardSlashes = trimmed.replace(/\\/g, '/');
+	if (withForwardSlashes.startsWith('//')) {
+		const collapsed = `//${withForwardSlashes.slice(2).replace(/\/+/g, '/')}`;
+		return collapsed.length > 2 ? collapsed.replace(/\/+$/, '') : collapsed;
+	}
+	const collapsed = withForwardSlashes.replace(/\/+/g, '/');
+	if (/^[A-Za-z]:\/?$/.test(collapsed)) {
+		return collapsed.endsWith('/') ? collapsed : `${collapsed}/`;
+	}
+	return collapsed !== '/' ? collapsed.replace(/\/+$/, '') : collapsed;
 }
 
-export function ensureSafeWorkspacePath(path: string): void {
-	const normalized = String(path ?? '').trim();
-	if (!normalized || !isAbsoluteWorkspacePath(normalized) || normalized.includes('..')) {
-		throw new Error(`unsafe workspace path: ${path}`);
+function isAbsoluteWorkspacePath(path: string): boolean {
+	return path.startsWith('/') || /^[A-Za-z]:\//.test(path) || path.startsWith('//');
+}
+
+function workspacePathHasUnsafeSegments(path: string): boolean {
+	const normalized = normalizeWorkspacePath(path);
+	let relative = normalized;
+	if (normalized.startsWith('//')) {
+		relative = normalized.slice(2);
+	} else if (/^[A-Za-z]:\//.test(normalized)) {
+		relative = normalized.slice(3);
+	} else if (normalized.startsWith('/')) {
+		relative = normalized.slice(1);
 	}
+	return relative
+		.split('/')
+		.filter(Boolean)
+		.some((segment) => segment === '.' || segment === '..');
+}
+
+export function ensureSafeWorkspacePath(path: string): string {
+	const normalized = normalizeWorkspacePath(path);
+	if (!normalized || !isAbsoluteWorkspacePath(normalized) || workspacePathHasUnsafeSegments(normalized)) {
+		throw new Error(
+			`invalid workspace path: ${path}. Workspace paths must be absolute local filesystem paths like D:/VScode/projects/opengpt or /home/user/workspace/projects/opengpt.`,
+		);
+	}
+	return normalized;
 }
 
 async function sha256HmacHex(secret: string, payload: string): Promise<string> {

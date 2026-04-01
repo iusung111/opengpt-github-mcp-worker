@@ -1,5 +1,5 @@
 import { WorkspaceRecord } from './types';
-import { normalizeLookup } from './queue-helpers';
+import { normalizeLookup, normalizeWorkspacePath } from './queue-helpers';
 import { parseIsoMs } from './utils';
 
 export function buildWorkspaceRecord(
@@ -12,7 +12,7 @@ export function buildWorkspaceRecord(
 		...(existing ?? {}),
 		...input,
 		repo_key: input.repo_key,
-		workspace_path: input.workspace_path,
+		workspace_path: normalizeWorkspacePath(input.workspace_path),
 		repo_slug: repoSlug,
 		display_name: input.display_name || existing?.display_name || input.repo_key,
 		aliases: input.aliases ?? existing?.aliases ?? [],

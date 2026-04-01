@@ -6,7 +6,7 @@ import {
 	encodeBase64Text,
 	encodeGitHubPath,
 	encodeGitHubRef,
-	ensureSafePath,
+	ensureSafeRepoPath,
 	githubGet,
 	githubPost,
 } from './utils';
@@ -199,6 +199,27 @@ function buildScaffoldEntries(
 	});
 }
 
+function validateBatchWriteOperationPaths(operations: RepoBatchWriteOperation[]): void {
+	for (const operation of operations) {
+		if (operation.type === 'create_file' || operation.type === 'update_file' || operation.type === 'delete_file') {
+			ensureSafeRepoPath(operation.path ?? '');
+			continue;
+		}
+		if (operation.type === 'rename_path') {
+			ensureSafeRepoPath(operation.from_path ?? '');
+			ensureSafeRepoPath(operation.to_path ?? '');
+			continue;
+		}
+		if (operation.type === 'mkdir_scaffold') {
+			const basePath = operation.path ?? '';
+			ensureSafeRepoPath(basePath);
+			for (const entry of buildScaffoldEntries(basePath, operation.entries)) {
+				ensureSafeRepoPath(entry.path);
+			}
+		}
+	}
+}
+
 export async function prepareBatchWriteChanges(
 	env: AppEnv,
 	input: {
@@ -209,6 +230,7 @@ export async function prepareBatchWriteChanges(
 	},
 ): Promise<{ base_ref_sha: string; changes: PreparedTreeChange[] }> {
 	const { owner, repo, branch, operations } = input;
+	validateBatchWriteOperationPaths(operations);
 	const [baseRefSha, treeMap] = await Promise.all([
 		getBranchRefSha(env, owner, repo, branch),
 		getBranchTreeMap(env, owner, repo, branch),
@@ -219,7 +241,7 @@ export async function prepareBatchWriteChanges(
 	for (const operation of operations) {
 		if (operation.type === 'create_file' || operation.type === 'update_file' || operation.type === 'delete_file') {
 			const path = operation.path ?? '';
-			ensureSafePath(path);
+			ensureSafeRepoPath(path);
 			const snapshot = await getRepoFileSnapshot(env, owner, repo, branch, path, treeMap);
 			ensureExpectedBlobSha(snapshot, operation.expected_blob_sha);
 			if (operation.type === 'create_file' && snapshot.exists) {
@@ -251,8 +273,8 @@ export async function prepareBatchWriteChanges(
 		if (operation.type === 'rename_path') {
 			const fromPath = operation.from_path ?? '';
 			const toPath = operation.to_path ?? '';
-			ensureSafePath(fromPath);
-			ensureSafePath(toPath);
+			ensureSafeRepoPath(fromPath);
+			ensureSafeRepoPath(toPath);
 			if (reservedPaths.has(fromPath) || reservedPaths.has(toPath)) {
 				throw new Error(`path already modified in batch: ${fromPath} or ${toPath}`);
 			}
@@ -293,9 +315,9 @@ export async function prepareBatchWriteChanges(
 
 		if (operation.type === 'mkdir_scaffold') {
 			const basePath = operation.path ?? '';
-			ensureSafePath(basePath);
+			ensureSafeRepoPath(basePath);
 			for (const entry of buildScaffoldEntries(basePath, operation.entries)) {
-				ensureSafePath(entry.path);
+				ensureSafeRepoPath(entry.path);
 				if (reservedPaths.has(entry.path)) {
 					throw new Error(`path already modified in batch: ${entry.path}`);
 				}
@@ -428,6 +450,9 @@ export async function preparePatchsetChanges(
 		preview: Array<Record<string, unknown>>;
 	}> {
 	const { owner, repo, branch, patches } = input;
+	for (const patch of patches) {
+		ensureSafeRepoPath(patch.path);
+	}
 	const [baseRefSha, treeMap] = await Promise.all([
 		getBranchRefSha(env, owner, repo, branch),
 		getBranchTreeMap(env, owner, repo, branch),
@@ -437,7 +462,7 @@ export async function preparePatchsetChanges(
 	const reservedPaths = new Set<string>();
 
 	for (const patch of patches) {
-		ensureSafePath(patch.path);
+		ensureSafeRepoPath(patch.path);
 		if (reservedPaths.has(patch.path)) {
 			throw new Error(`path already modified in patchset: ${patch.path}`);
 		}
