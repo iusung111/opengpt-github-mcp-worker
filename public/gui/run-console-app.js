@@ -382,6 +382,7 @@ function createEmptyJob(jobId) {
 		approval: null,
 		control: null,
 		browserControl: null,
+		browserSession: null,
 		feed: {
 			items: [],
 			logs: [],
@@ -1621,6 +1622,46 @@ function normalizeBrowserControl(value) {
 	};
 }
 
+function normalizeWebSessionContext(value) {
+	if (!hasRecord(value)) return null;
+	if (value.provider !== 'chatgpt_web') return null;
+	if (typeof value.session_url !== 'string' || !value.session_url.trim()) return null;
+	return {
+		provider: value.provider,
+		sessionUrl: value.session_url,
+		canonicalConversationUrl:
+			typeof value.canonical_conversation_url === 'string' ? value.canonical_conversation_url : null,
+		conversationId: typeof value.conversation_id === 'string' ? value.conversation_id : null,
+		pageUrlAtAttach: typeof value.page_url_at_attach === 'string' ? value.page_url_at_attach : null,
+		pageTitleAtAttach: typeof value.page_title_at_attach === 'string' ? value.page_title_at_attach : null,
+		authState: typeof value.auth_state === 'string' ? value.auth_state : 'unknown',
+		approvalState: typeof value.approval_state === 'string' ? value.approval_state : 'none',
+		followupState: typeof value.followup_state === 'string' ? value.followup_state : 'unknown',
+		canSendFollowup: typeof value.can_send_followup === 'boolean' ? value.can_send_followup : null,
+		lastUserVisibleAction:
+			typeof value.last_user_visible_action === 'string' ? value.last_user_visible_action : null,
+		lastPromptDigest: typeof value.last_prompt_digest === 'string' ? value.last_prompt_digest : null,
+		lastFollowupAt: typeof value.last_followup_at === 'string' ? value.last_followup_at : null,
+		linkedJobUrl: typeof value.linked_job_url === 'string' ? value.linked_job_url : null,
+		updatedAt: typeof value.updated_at === 'string' ? value.updated_at : null,
+	};
+}
+
+function extractBrowserSessionContext(snapshot) {
+	if (!hasRecord(snapshot)) return null;
+	if (
+		hasRecord(snapshot.worker_manifest) &&
+		hasRecord(snapshot.worker_manifest.browser) &&
+		Object.prototype.hasOwnProperty.call(snapshot.worker_manifest.browser, 'session_context')
+	) {
+		return normalizeWebSessionContext(snapshot.worker_manifest.browser.session_context);
+	}
+	if (hasRecord(snapshot.browser) && Object.prototype.hasOwnProperty.call(snapshot.browser, 'session_context')) {
+		return normalizeWebSessionContext(snapshot.browser.session_context);
+	}
+	return null;
+}
+
 function normalizePermissionPayload(value) {
 	if (!hasRecord(value) || value.kind !== 'opengpt.notification_contract.permission_bundle') return null;
 	const notification = normalizeNotification(value.notification, {
@@ -1725,6 +1766,9 @@ function mergeJobSnapshot(job, snapshot) {
 	}
 	if (hasRecord(snapshot.browser_control)) {
 		job.browserControl = normalizeBrowserControl(snapshot.browser_control);
+	}
+	if (extractBrowserSessionContext(snapshot) || (hasRecord(snapshot.worker_manifest) && hasRecord(snapshot.worker_manifest.browser))) {
+		job.browserSession = extractBrowserSessionContext(snapshot);
 	}
 	if (hasRecord(snapshot.latest_notification)) {
 		const notification = normalizeNotification(snapshot.latest_notification, {
@@ -3975,6 +4019,7 @@ function renderDetailOverview(job) {
 					{ label: 'Release', value: state.store.host.currentDeploy?.releaseCommitSha || '' },
 				], 'Host metadata has not been loaded yet.')}
 			</div>
+			${renderWebSessionCard(job)}
 			${renderBrowserControlCard(job)}
 		</section>
 	`;
@@ -4087,6 +4132,38 @@ function renderDetailFuture(job) {
 				${job ? `<p class="supporting-copy">Current run: ${escapeHtml(job.run ? job.run.title : job.jobId)}</p>` : ''}
 			</div>
 		</section>
+	`;
+}
+
+function renderWebSessionCard(job) {
+	const session = job && job.browserSession ? job.browserSession : null;
+	return `
+		<div class="detail-card simple-card">
+			<div class="stack-header">
+				<p class="panel-kicker">Session</p>
+				<h3>ChatGPT Web session</h3>
+				<p class="supporting-copy">Business-level ChatGPT Web state is tracked separately from the CDP remote-control session so approval, auth, and follow-up readiness remain visible per run.</p>
+			</div>
+			${renderKeyValueList([
+				{ label: 'Provider', value: session ? session.provider : '' },
+				{ label: 'Session URL', value: session ? session.sessionUrl : '' },
+				{ label: 'Canonical URL', value: session ? session.canonicalConversationUrl : '' },
+				{ label: 'Conversation ID', value: session ? session.conversationId : '' },
+				{ label: 'Auth state', value: session ? session.authState : '' },
+				{ label: 'Approval state', value: session ? session.approvalState : '' },
+				{ label: 'Follow-up state', value: session ? session.followupState : '' },
+				{
+					label: 'Can send follow-up',
+					value:
+						session && session.canSendFollowup === true
+							? 'yes'
+							: session && session.canSendFollowup === false
+								? 'no'
+								: '',
+				},
+				{ label: 'Attach page', value: session ? session.pageUrlAtAttach : '' },
+			], 'No ChatGPT Web session metadata has been linked to this run yet.')}
+		</div>
 	`;
 }
 
