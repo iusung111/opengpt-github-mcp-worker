@@ -1,5 +1,5 @@
 import { ProjectCapabilities, renderPreviewUrlTemplate } from '../project-capabilities';
-import { AppEnv, JobVerificationStepRecord } from '../types';
+import { AppEnv, JobVerificationStepRecord } from '../contracts';
 import { dispatchStandardWorkflow, listWorkflowArtifacts, readSummaryArtifact } from '../workflow-execution';
 import { isRecord } from './job-state';
 
@@ -280,3 +280,4 @@ export function buildReleaseGates(input: {
 		{ id: 'desktop_smoke_pass', ok: input.desktopStatus === 'passed' || input.desktopStatus === 'success', status: input.desktopStatus ?? 'missing' },
 	];
 }
+

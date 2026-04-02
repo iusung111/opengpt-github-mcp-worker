@@ -1,0 +1,386 @@
+import { SELF } from 'cloudflare:test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildDispatchFingerprint } from '../../src/utils';
+import { getToolCatalog } from '../../src/tool-catalog';
+import {
+	createChatgptMcpClient,
+	createDirectMcpBearerClient,
+	createMcpClient,
+	mcpAccessHeaders,
+	queueJsonHeaders,
+} from '../runtime-helpers';
+import { buildStoredZip } from './test-zip-helpers';
+describe('runtime mcp surface', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('serves MCP tools and queue actions over /mcp', async () => {
+		const client = await createMcpClient();
+		const tools = await client.listTools();
+		const catalogToolNames = Array.from(
+			new Set(getToolCatalog().groups.flatMap((group) => group.tools)),
+		).sort();
+		const runtimeToolNames = tools.tools.map((tool) => tool.name).sort();
+		const widgetUri = 'ui://widget/notification-center.html';
+		expect(runtimeToolNames).toEqual(catalogToolNames);
+		for (const toolName of ["help","audit_list","branch_cleanup_candidates","branch_cleanup_execute","run_console_open","job_progress","job_event_feed","job_control","repo_work_context","review_prepare_context","request_permission_bundle","permission_request_resolve","repo_navigation_manifest","repo_context_snapshot","repo_doc_index_lookup","repo_tool_index_lookup","repo_get_file_summary","repo_get_file_chunk","repo_get_diff","repo_get_file","repo_create_file","repo_upsert_file","repo_upload_start","repo_upload_commit","repo_batch_write","repo_apply_patchset","verify_list_suites","verify_run","preview_env_create","browser_session_start","browser_action_batch","desktop_build_run","api_contract_list","db_schema_inspect","runtime_log_query","deploy_promote","release_verify","workflow_allowlist_inspect","job_create","pr_merge","workspace_resolve"]) {
+			expect(tools.tools.some((tool) => tool.name === toolName)).toBe(true);
+		}
+
+		for (const toolName of ["job_progress","run_console_open","jobs_list","job_event_feed","job_control","request_permission_bundle","permission_request_resolve","incident_bundle_create","self_host_status"]) {
+			expect(tools.tools.find((tool) => tool.name === toolName)?.outputSchema).toBeTruthy();
+		}
+
+
+		expect(tools.tools.find((tool) => tool.name === 'workflow_runs_list')?.description).toContain(
+			'repo_key in owner/repo form',
+		);
+		expect(tools.tools.find((tool) => tool.name === 'workflow_runs_list')?.inputSchema).toMatchObject({
+			properties: {
+				repo_key: expect.any(Object),
+				owner: expect.any(Object),
+				repo: expect.any(Object),
+			},
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'run_console_open')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Opening run console',
+			'openai/toolInvocation/invoked': 'Run console ready',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'job_event_feed')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Loading run events',
+			'openai/toolInvocation/invoked': 'Run events ready',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'request_permission_bundle')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Preparing approval bundle',
+			'openai/toolInvocation/invoked': 'Approval bundle ready',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'permission_request_resolve')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Recording approval outcome',
+			'openai/toolInvocation/invoked': 'Approval outcome recorded',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'job_control')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Updating run control state',
+			'openai/toolInvocation/invoked': 'Run control state updated',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'incident_bundle_create')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Collecting incident bundle',
+			'openai/toolInvocation/invoked': 'Incident bundle ready',
+		});
+		expect(
+			tools.tools.find((tool) => tool.name === 'self_host_status')?._meta,
+		).toMatchObject({
+			'openai/toolInvocation/invoking': 'Loading self host status',
+			'openai/toolInvocation/invoked': 'Self host status ready',
+		});
+
+		expect(tools.tools.find((tool) => tool.name === 'job_progress')?._meta).toMatchObject({
+			ui: {
+				resourceUri: widgetUri,
+			},
+			'openai/outputTemplate': widgetUri,
+			'openai/widgetAccessible': true,
+		});
+		expect(tools.tools.find((tool) => tool.name === 'run_console_open')?._meta).toMatchObject({
+			ui: {
+				resourceUri: widgetUri,
+			},
+			'openai/outputTemplate': widgetUri,
+			'openai/widgetAccessible': true,
+		});
+		expect(tools.tools.find((tool) => tool.name === 'job_event_feed')?._meta).toMatchObject({
+			ui: {
+				resourceUri: widgetUri,
+			},
+			'openai/outputTemplate': widgetUri,
+			'openai/widgetAccessible': true,
+		});
+
+		const resources = await client.listResources();
+		expect(resources.resources.some((resource) => resource.uri === widgetUri)).toBe(true);
+		const resourceResult = await client.readResource({ uri: widgetUri });
+		const widgetResource = resourceResult.contents.find((resource) => resource.uri === widgetUri);
+		expect(widgetResource).toBeTruthy();
+		expect(widgetResource).toMatchObject({
+			mimeType: 'text/html;profile=mcp-app',
+			_meta: {
+				ui: {
+					prefersBorder: true,
+				},
+				'openai/widgetDescription': expect.any(String),
+			},
+		});
+		expect('text' in (widgetResource ?? {}) ? widgetResource.text : '').toContain('/gui/app.js');
+
+		const createResult = await client.callTool({
+			name: 'job_create',
+			arguments: {
+				job_id: 'job-mcp-1',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				work_branch: 'agent/job-mcp-1',
+				operation_type: 'run_commands',
+				browser_session_seed: {
+					provider: 'chatgpt_web',
+					session_url: 'https://chatgpt.com/c/example',
+					canonical_conversation_url: 'https://chatgpt.com/c/example?model=gpt-5',
+					conversation_id: 'convo-123',
+					auth_state: 'authenticated',
+					can_send_followup: true,
+				},
+			},
+		});
+		const createText = 'text' in createResult.content[0] ? createResult.content[0].text : '';
+		expect(JSON.parse(createText)).toMatchObject({
+			ok: true,
+			data: {
+				job: {
+					job_id: 'job-mcp-1',
+					repo: 'iusung111/OpenGPT',
+					worker_manifest: {
+						browser: {
+							target: 'https://chatgpt.com/c/example',
+							session_context: {
+								provider: 'chatgpt_web',
+								session_url: 'https://chatgpt.com/c/example',
+								canonical_conversation_url: 'https://chatgpt.com/c/example?model=gpt-5',
+								conversation_id: 'convo-123',
+								auth_state: 'authenticated',
+								approval_state: 'none',
+								followup_state: 'ready',
+								can_send_followup: true,
+							},
+						},
+					},
+				},
+			},
+		});
+
+		const getResult = await client.callTool({
+			name: 'job_get',
+			arguments: { job_id: 'job-mcp-1' },
+		});
+		const getText = 'text' in getResult.content[0] ? getResult.content[0].text : '';
+		expect(JSON.parse(getText)).toMatchObject({
+			ok: true,
+			data: {
+				job: {
+					work_branch: 'agent/job-mcp-1',
+					worker_manifest: {
+						browser: {
+							session_context: {
+								conversation_id: 'convo-123',
+							},
+						},
+					},
+				},
+			},
+		});
+
+		const openResult = await client.callTool({
+			name: 'run_console_open',
+			arguments: {
+				include_healthz: true,
+			},
+		});
+		const openText = 'text' in openResult.content[0] ? openResult.content[0].text : '';
+		expect(JSON.parse(openText)).toMatchObject({
+			ok: true,
+			data: {
+				gui_url: expect.stringContaining('/gui/'),
+				jobs: expect.any(Array),
+				include_healthz: true,
+				selected_job_id: expect.anything(),
+				selected_job_url: expect.stringContaining('/gui/?job='),
+			},
+		});
+		expect((openResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.jobs_list',
+			gui_url: expect.stringContaining('/gui/'),
+			jobs: expect.any(Array),
+			selected_job_id: expect.anything(),
+			selected_job_url: expect.stringContaining('/gui/?job='),
+		});
+		expect((openResult as { _meta?: Record<string, unknown> })._meta ?? {}).not.toHaveProperty('opengpt/widget');
+		expect(
+			(
+				(openResult as { structuredContent?: { jobs?: Array<{ job_id?: string }> } }).structuredContent?.jobs ?? []
+			).some((job) => job.job_id === 'smoke-003'),
+		).toBe(false);
+
+		await client.callTool({
+			name: 'job_append_note',
+			arguments: {
+				job_id: 'job-mcp-1',
+				note: 'reading repo state',
+			},
+		});
+
+		const progressResult = await client.callTool({
+			name: 'job_progress',
+			arguments: { job_id: 'job-mcp-1' },
+		});
+		const progressText = 'text' in progressResult.content[0] ? progressResult.content[0].text : '';
+		expect(JSON.parse(progressText)).toMatchObject({
+			ok: true,
+			data: {
+				progress: {
+					job_id: 'job-mcp-1',
+					status: 'queued',
+					latest_note: 'reading repo state',
+					recent_notes: ['reading repo state'],
+					run_summary: {
+						run_id: 'job-mcp-1',
+						status: 'idle',
+					},
+					blocking_state: {
+						kind: 'none',
+					},
+					notification_counts: {
+						idle: expect.any(Number),
+					},
+				},
+			},
+		});
+		expect((progressResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.job_progress',
+			run_summary: {
+				run_id: 'job-mcp-1',
+			},
+		});
+
+		const eventFeedResult = await client.callTool({
+			name: 'job_event_feed',
+			arguments: {
+				job_id: 'job-mcp-1',
+				limit: 10,
+			},
+		});
+		expect((eventFeedResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.job_event_feed',
+		});
+		expect((eventFeedResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
+			'opengpt/widget': {
+				kind: 'opengpt.notification_contract.job_event_feed',
+			},
+		});
+		const eventFeedText = 'text' in eventFeedResult.content[0] ? eventFeedResult.content[0].text : '';
+		expect(JSON.parse(eventFeedText)).toMatchObject({
+			ok: true,
+			data: {
+				items: expect.any(Array),
+				logs: expect.any(Array),
+				counts: {
+					idle: expect.any(Number),
+				},
+			},
+		});
+
+		const selfHostStatusResult = await client.callTool({
+			name: 'self_host_status',
+			arguments: {
+				include_healthz: true,
+			},
+		});
+		expect((selfHostStatusResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.self_host_status',
+			self_repo_key: 'iusung111/opengpt-github-mcp-worker',
+			current_deploy: {
+				environment: expect.any(String),
+			},
+			workflow_allowlist: {
+				self_repo: expect.any(Array),
+			},
+			read_observability: {
+				counters: expect.any(Object),
+			},
+		});
+		expect((selfHostStatusResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
+			'opengpt/widget': {
+				kind: 'opengpt.notification_contract.self_host_status',
+			},
+		});
+
+		const auditResult = await client.callTool({
+			name: 'audit_list',
+			arguments: {
+				job_id: 'job-mcp-1',
+				limit: 5,
+			},
+		});
+		const auditText = 'text' in auditResult.content[0] ? auditResult.content[0].text : '';
+		const auditJson = JSON.parse(auditText);
+		expect(auditJson.ok).toBe(true);
+		expect(
+			auditJson.data.audits.some(
+				(item: { event_type: string; payload: { job_id?: string } }) =>
+					item.event_type === 'job_create' && item.payload.job_id === 'job-mcp-1',
+			),
+		).toBe(true);
+		expect(
+			auditJson.data.audits.some(
+				(item: { event_type: string; payload: { session_url?: string; conversation_id?: string | null } }) =>
+					item.event_type === 'browser_session_seeded' &&
+					item.payload.session_url === 'https://chatgpt.com/c/example' &&
+					item.payload.conversation_id === 'convo-123',
+			),
+		).toBe(true);
+
+		const registerWorkspaceResult = await client.callTool({
+			name: 'workspace_register',
+			arguments: {
+				repo_key: 'iusung111/OpenGPT',
+				workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
+				aliases: ['opengpt'],
+			},
+		});
+		const registerWorkspaceText =
+			'text' in registerWorkspaceResult.content[0] ? registerWorkspaceResult.content[0].text : '';
+		expect(JSON.parse(registerWorkspaceText)).toMatchObject({
+			ok: true,
+			data: {
+				workspace: {
+					repo_key: 'iusung111/OpenGPT',
+					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
+				},
+			},
+		});
+
+		const resolveWorkspaceResult = await client.callTool({
+			name: 'workspace_resolve',
+			arguments: {
+				repo_key: 'iusung111/OpenGPT',
+			},
+		});
+		const resolveWorkspaceText =
+			'text' in resolveWorkspaceResult.content[0] ? resolveWorkspaceResult.content[0].text : '';
+		expect(JSON.parse(resolveWorkspaceText)).toMatchObject({
+			ok: true,
+			data: {
+				repo_key: 'iusung111/OpenGPT',
+				existing_workspace: {
+					repo_key: 'iusung111/OpenGPT',
+					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
+				},
+				requires_confirmation: true,
+				recommended_workspace_relative_path: 'projects/opengpt',
+				recommended_workspace_kind: 'project',
+				local_workspace_optional: true,
+			},
+		});
+		await client.close();
+	}, 10000);
+
+});

@@ -4,8 +4,8 @@ import { buildLocalWorkerdEnv } from './local-workerd-paths.mjs';
 const vitestArgs = [
 	'vitest',
 	'run',
-	'worker/test/runtime-http.spec.ts',
-	'worker/test/runtime-mcp.spec.ts',
+	'worker/test/runtime-http',
+	'worker/test/runtime-mcp',
 	'worker/test/queue-webhook.spec.ts',
 	'--sequence.concurrent=false',
 ];

@@ -1,4 +1,4 @@
-import { AuditRecord, DeliveryRecord } from './types';
+import { AuditRecord, DeliveryRecord } from './contracts';
 import { auditStorageKey, deliveryStorageKey } from './queue-helpers';
 import { nowIso } from './utils';
 
@@ -97,3 +97,4 @@ export async function tryRegisterDelivery(
 	await enforceDeliveryRetention(context);
 	return true;
 }
+

@@ -15,7 +15,7 @@ import {
 	WEB_SESSION_AUTH_STATES,
 	WEB_SESSION_FOLLOWUP_STATES,
 	WEB_SESSION_PROVIDERS,
-} from './types';
+} from './contracts';
 import { normalizeBrowserRemoteControl } from './browser-remote-control';
 
 export const JOB_WORKER_MANIFEST_SCHEMA_VERSION = 1;
@@ -293,3 +293,4 @@ export function setManifestWorkflowRun(
 		},
 	});
 }
+

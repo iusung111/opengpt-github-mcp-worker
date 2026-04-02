@@ -1,5 +1,5 @@
 import { getSelfRepoKey } from './utils';
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { incrementReadCounter } from './read-observability';
 
 export type ReadPathClass =
@@ -223,29 +223,29 @@ export function buildNavigationManifest(env: AppEnv, repoKey: string): Record<st
 				id: 'mcp',
 				label: 'MCP',
 				purpose: 'Tool surface, routing, and ChatGPT-facing MCP behavior.',
-				entry_paths: ['docs/CHATGPT_MCP.md', 'worker/src/mcp-tools.ts', 'worker/src/http.ts'],
-				next_paths: ['worker/src/mcp-*.ts', 'worker/src/tool-catalog.json'],
+				entry_paths: ['docs/CHATGPT_MCP.md', 'worker/src/mcp-tools.ts', 'worker/src/mcp/README.md'],
+				next_paths: ['worker/src/runtime/mcp/handlers.ts', 'worker/src/mcp/repo-read/navigation.ts', 'worker/src/tool-catalog.json'],
 			},
 			{
 				id: 'auth',
 				label: 'Authentication',
 				purpose: 'OIDC, direct MCP auth, and GitHub app credential handling.',
-				entry_paths: ['worker/src/auth.ts', 'worker/src/github.ts', 'worker/src/http.ts'],
-				next_paths: ['docs/CHATGPT_MCP.md', 'worker/test/auth.spec.ts'],
+				entry_paths: ['worker/src/auth.ts', 'worker/src/github.ts', 'worker/src/runtime/mcp/handlers.ts'],
+				next_paths: ['docs/CHATGPT_MCP.md', 'worker/test/auth.spec.ts', 'worker/src/runtime/http/oauth.ts'],
 			},
 			{
 				id: 'deploy',
 				label: 'Deploy',
 				purpose: 'Self-host deployment, live/mirror controls, and Cloudflare integration.',
 				entry_paths: ['wrangler.jsonc', 'worker/src/mcp-overview-tools.ts', 'worker/src/cloudflare.ts'],
-				next_paths: ['docs/TOOL_SURFACE.md', 'README.md'],
+				next_paths: ['docs/TOOL_SURFACE.md', 'README.md', 'worker/src/overview/logic.ts'],
 			},
 			{
 				id: 'queue',
 				label: 'Queue and workflow',
 				purpose: 'Durable Object queue state, reconciliation, and workflow integration.',
-				entry_paths: ['worker/src/queue.ts', 'worker/src/queue-index.ts', 'worker/src/queue-requests.ts'],
-				next_paths: ['worker/src/queue-*.ts', 'worker/test/queue-*.spec.ts'],
+				entry_paths: ['worker/src/queue.ts', 'worker/src/queue/README.md', 'worker/src/queue/actions/router.ts'],
+				next_paths: ['worker/src/queue/actions/*.ts', 'worker/src/queue/projections/*.ts', 'worker/test/queue-*.spec.ts'],
 			},
 			{
 				id: 'gui',
@@ -266,7 +266,7 @@ export function buildNavigationManifest(env: AppEnv, repoKey: string): Record<st
 				label: 'Tool surface',
 				purpose: 'Published tool catalog and permission presets.',
 				entry_paths: ['worker/src/tool-catalog.json', 'docs/TOOL_SURFACE.md'],
-				next_paths: ['worker/src/tool-catalog.ts', 'worker/src/mcp-overview-tools.ts'],
+				next_paths: ['worker/src/tool-catalog.ts', 'worker/src/mcp-overview-tools.ts', 'worker/src/mcp/README.md'],
 			},
 		];
 		return {
@@ -327,3 +327,4 @@ export function buildPathScopedIndex(
 			anchor: 'start',
 		}));
 }
+

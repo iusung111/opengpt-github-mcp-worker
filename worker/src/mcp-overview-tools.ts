@@ -2,10 +2,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { seal } from 'tweetsodium';
 import * as z from 'zod/v4';
 import { cloudflarePut } from './cloudflare';
+import { ToolAnnotations } from './mcp/contracts';
 import { repoIdentityInputSchema, withRepoIdentity } from './mcp-repo-identity';
 import { notificationWidgetToolMeta } from './mcp-widget-resources';
 import { listPermissionPresets, listToolGroups, buildPermissionBundleMessage } from './tool-catalog';
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import {
 	activateRepoWorkspace,
 	errorCodeFor,
@@ -41,12 +42,6 @@ import {
 	queueActionResult,
 	selfHostStatusStructuredSchema,
 } from './overview/logic';
-
-export interface ToolAnnotations extends Record<string, unknown> {
-	readOnlyHint: boolean;
-	openWorldHint: boolean;
-	destructiveHint?: boolean;
-}
 
 async function queueJsonOrThrow(
 	env: AppEnv,
@@ -324,3 +319,4 @@ export function registerOverviewTools(
 		} catch (error) { return toolText(fail(errorCodeFor(error, 'self_sync_mirror_secrets_failed'), error, writeAnnotations)); }
 	});
 }
+

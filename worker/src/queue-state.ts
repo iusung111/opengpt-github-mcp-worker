@@ -1,4 +1,4 @@
-import { DispatchRequestRecord, JobControlManifest, JobInterruptRecord, JobRecord, JobStatus, NextActor } from './types';
+import { DispatchRequestRecord, JobControlManifest, JobInterruptRecord, JobRecord, JobStatus, NextActor } from './contracts';
 import { getManifestDispatchRequest, normalizeWorkerManifest, setManifestWorkflowRun } from './job-manifest';
 
 export interface WorkflowRunSnapshot {
@@ -82,3 +82,4 @@ export function recordWorkflowSnapshot(job: JobRecord, run: WorkflowRunSnapshot)
 		updated_at: new Date().toISOString(),
 	});
 }
+

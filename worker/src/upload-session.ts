@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { commitUploadedFile } from './github-file-commit';
-import { AppEnv, UploadSessionRecord } from './types';
+import { AppEnv, UploadSessionRecord } from './contracts';
 import { nowIso } from './utils';
 
 export const UPLOAD_SESSION_TTL_MS = 15 * 60 * 1000;
@@ -256,3 +256,4 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 		}
 	}
 }
+

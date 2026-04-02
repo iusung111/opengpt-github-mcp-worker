@@ -7,7 +7,7 @@ import {
 	getQueueAuthToken,
 	queueRequestAuthorized,
 } from '../src/auth';
-import type { AppEnv } from '../src/types';
+import type { AppEnv } from '../src/contracts';
 import { signChatgptOidcToken } from './jwt-helpers';
 
 function buildEnv(values: Partial<AppEnv>): AppEnv {
@@ -363,3 +363,4 @@ describe('chatgpt mcp oidc auth', () => {
 		vi.unstubAllGlobals();
 	});
 });
+

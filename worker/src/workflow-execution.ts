@@ -1,6 +1,6 @@
 import { githubRequestRaw } from './github';
 import { decodeUtf8, extractZipEntries } from './gui-capture';
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { encodeBase64Text, githubGet, githubPost, nowIso } from './utils';
 
 export interface WorkflowDispatchRequest {
@@ -214,3 +214,4 @@ export async function downloadWorkflowLogEntries(
 	);
 	return extractZipEntries(await response.arrayBuffer());
 }
+

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ensureJobIndexes, findJob, getActiveWorkspaceRepoKey, getJob, getWorkspace, persistJob } from '../src/queue-store';
 import { activeWorkspaceStorageKey, workspaceStorageKey } from '../src/queue-helpers';
 import { jobIndexReadyKey, jobRunIndexKey } from '../src/queue-index';
-import { JobRecord, WorkspaceRecord } from '../src/types';
+import { JobRecord, WorkspaceRecord } from '../src/contracts';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -117,3 +117,4 @@ describe('queue-store helpers', () => {
 		expect(reconciled?.status).toBe('done');
 	});
 });
+

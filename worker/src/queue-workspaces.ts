@@ -1,4 +1,4 @@
-import { WorkspaceRecord } from './types';
+import { WorkspaceRecord } from './contracts';
 import { normalizeLookup, normalizeWorkspacePath } from './queue-helpers';
 import { parseIsoMs } from './utils';
 
@@ -100,3 +100,4 @@ export function findSimilarWorkspaceMatches(
 		.sort((a, b) => b.score - a.score)
 		.map((match) => match.workspace);
 }
+

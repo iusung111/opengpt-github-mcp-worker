@@ -1,0 +1,72 @@
+export function buildStoredZip(entries: Array<{ name: string; text: string }>): Uint8Array {
+	const encoder = new TextEncoder();
+	const fileRecords: number[] = [];
+	const centralRecords: number[] = [];
+	let offset = 0;
+
+	for (const entry of entries) {
+		const nameBytes = Array.from(encoder.encode(entry.name));
+		const dataBytes = Array.from(encoder.encode(entry.text));
+		const localHeaderOffset = offset;
+		const localHeader = [
+			0x50, 0x4b, 0x03, 0x04,
+			20, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0, 0, 0,
+			...u32(dataBytes.length),
+			...u32(dataBytes.length),
+			...u16(nameBytes.length),
+			...u16(0),
+			...nameBytes,
+			...dataBytes,
+		];
+		fileRecords.push(...localHeader);
+		offset += localHeader.length;
+
+		const centralHeader = [
+			0x50, 0x4b, 0x01, 0x02,
+			20, 0,
+			20, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0, 0, 0,
+			...u32(dataBytes.length),
+			...u32(dataBytes.length),
+			...u16(nameBytes.length),
+			...u16(0),
+			...u16(0),
+			...u16(0),
+			...u16(0),
+			...u32(0),
+			...u32(localHeaderOffset),
+			...nameBytes,
+		];
+		centralRecords.push(...centralHeader);
+	}
+
+	const centralOffset = fileRecords.length;
+	const eocd = [
+		0x50, 0x4b, 0x05, 0x06,
+		0, 0, 0, 0,
+		...u16(entries.length),
+		...u16(entries.length),
+		...u32(centralRecords.length),
+		...u32(centralOffset),
+		...u16(0),
+	];
+
+	return new Uint8Array([...fileRecords, ...centralRecords, ...eocd]);
+}
+
+function u16(value: number): number[] {
+	return [value & 0xff, (value >> 8) & 0xff];
+}
+
+function u32(value: number): number[] {
+	return [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff];
+}

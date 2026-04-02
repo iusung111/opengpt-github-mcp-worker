@@ -1,8 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { getManifestDispatchRequest } from './job-manifest';
-import { ToolAnnotations } from './mcp-overview-tools';
+import { ToolAnnotations } from './mcp/contracts';
 import {
 	activateRepoWorkspace,
 	encodeGitHubRef,
@@ -359,3 +359,5 @@ export function registerCollabTools(
 		},
 	);
 }
+
+

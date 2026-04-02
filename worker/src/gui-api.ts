@@ -6,7 +6,7 @@ import {
 	JobStatus,
 	NextActor,
 	QueueEnvelope,
-} from './types';
+} from './contracts';
 import {
 	fail,
 	getChatgptMcpAuthMode,
@@ -19,13 +19,8 @@ import {
 	queueFetch,
 } from './utils';
 
-function badRequest(message: string): Response {
-	return jsonResponse(fail('bad_request', message), 400);
-}
-
-function readJsonBody(request: Request): Promise<Record<string, unknown>> {
-	return request.json() as Promise<Record<string, unknown>>;
-}
+function badRequest(message: string): Response { return jsonResponse(fail('bad_request', message), 400); }
+function readJsonBody(request: Request): Promise<Record<string, unknown>> { return request.json() as Promise<Record<string, unknown>>; }
 
 function parseJobStatus(value: string | null): JobStatus | undefined {
 	if (
@@ -397,3 +392,4 @@ export async function handleGuiApi(request: Request, env: AppEnv): Promise<Respo
 
 	return jsonResponse(fail('not_found', 'not found'), 404);
 }
+

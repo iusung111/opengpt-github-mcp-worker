@@ -1,4 +1,4 @@
-import { JobRecord } from './types';
+import { JobRecord } from './contracts';
 
 const encoder = new TextEncoder();
 
@@ -132,3 +132,4 @@ export async function verifyWebhookSignature(secret: string, payload: string, si
 	const expected = `sha256=${await sha256HmacHex(secret, payload)}`;
 	return expected === signatureHeader;
 }
+

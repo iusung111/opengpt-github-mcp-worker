@@ -1,4 +1,4 @@
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { githubGet } from './utils';
 
 export interface GitHubWorkflowRunSnapshot {
@@ -81,3 +81,4 @@ export async function getWorkflowRunSnapshot(
 ): Promise<GitHubWorkflowRunSnapshot | null> {
 	return (await githubGet(env, `/repos/${repo}/actions/runs/${runId}`)) as GitHubWorkflowRunSnapshot;
 }
+

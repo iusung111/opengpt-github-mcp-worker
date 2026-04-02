@@ -1,4 +1,4 @@
-import { AppEnv } from '../types';
+import { AppEnv } from '../contracts';
 import { diagnosticLog } from './common';
 import {
 	getAllowedRepos,
@@ -113,3 +113,4 @@ export function validateWorkflowInputs(inputs: Record<string, unknown>): void {
 		}
 	}
 }
+

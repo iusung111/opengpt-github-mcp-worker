@@ -2,7 +2,7 @@ import { seal } from 'tweetsodium';
 import * as z from 'zod/v4';
 import { getReadObservabilitySnapshot } from '../read-observability';
 import { listPermissionPresets, listToolGroups } from '../tool-catalog';
-import { AppEnv } from '../types';
+import { AppEnv } from '../contracts';
 import {
 	getAllowedWorkflows,
 	getAllowedWorkflowsByRepo,
@@ -370,3 +370,4 @@ export function buildHelpPayload(query: string | undefined): Record<string, unkn
 		permission_presets: permissionPresets,
 	};
 }
+

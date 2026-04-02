@@ -1,6 +1,6 @@
 import { githubAuthConfigured } from './github';
 import { mergeWorkerManifest } from './job-manifest';
-import { JobRecord } from './types';
+import { JobRecord } from './contracts';
 import { findLatestWorkflowRunId, getWorkflowRunSnapshot } from './queue-github';
 import { canAdvanceJob, getDispatchRequest, recordWorkflowSnapshot, transitionJob } from './queue-state';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
@@ -172,3 +172,4 @@ export async function reconcileGitHubRunState(
 	}
 	return true;
 }
+

@@ -36,7 +36,7 @@ Web ChatGPT repeatedly mixed repo file paths, connector handles, and local works
 ## Verification
 
 - `npm run typecheck`
-- `npx vitest run worker/test/queue-workspaces.spec.ts worker/test/queue-store.spec.ts worker/test/read-navigation.spec.ts worker/test/runtime-mcp.spec.ts --sequence.concurrent=false`
+- `npx vitest run worker/test/queue-workspaces.spec.ts worker/test/queue-store.spec.ts worker/test/read-navigation.spec.ts worker/test/runtime-mcp --sequence.concurrent=false`
 - `npm run docs:tool-surface:check`
 
 ## Prevention / Follow-up Rules

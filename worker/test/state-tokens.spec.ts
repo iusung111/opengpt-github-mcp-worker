@@ -7,7 +7,7 @@ import {
 	encodeToken,
 	validateConfirmToken,
 } from '../src/state-tokens';
-import { AppEnv } from '../src/types';
+import { AppEnv } from '../src/contracts';
 
 const tokenEnv = {
 	WEBHOOK_SECRET: 'test-webhook-secret',
@@ -97,3 +97,4 @@ describe('state tokens', () => {
 		);
 	});
 });
+

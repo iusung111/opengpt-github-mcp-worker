@@ -1,4 +1,4 @@
-import { JobRecord } from './types';
+import { JobRecord } from './contracts';
 import { pushJobNote, transitionJob } from './queue-state';
 
 export interface PullRequestEventPayload {
@@ -27,3 +27,4 @@ export function applyPullRequestEventToJob(
 	}
 	job.updated_at = timestamp;
 }
+

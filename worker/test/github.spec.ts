@@ -147,6 +147,39 @@ describe('github auth helpers', () => {
 		expect(new Uint8Array(await response.arrayBuffer())).toEqual(binaryPayload);
 	});
 
+	it('preserves null-body responses when replaying cached GitHub GETs', async () => {
+		const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						token: 'token-1',
+						expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				),
+			)
+			.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+		const env = {
+			GITHUB_API_URL: 'https://api.github.test',
+			GITHUB_APP_ID: '123',
+			GITHUB_APP_INSTALLATION_ID: '456',
+			GITHUB_APP_PRIVATE_KEY_PEM: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+		} as Env;
+
+		const firstResponse = await githubRequestRaw(env, 'GET', '/repos/iusung111/OpenGPT/empty');
+		expect(firstResponse.status).toBe(204);
+		expect(firstResponse.body).toBeNull();
+
+		const secondResponse = await githubRequestRaw(env, 'GET', '/repos/iusung111/OpenGPT/empty');
+		expect(secondResponse.status).toBe(204);
+		expect(secondResponse.body).toBeNull();
+		expect(await secondResponse.text()).toBe('');
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
 	it('inspects and commits uploaded files through git data APIs', async () => {
 		const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 		const env = {

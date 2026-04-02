@@ -7,7 +7,7 @@ import {
 	buildRunSummary,
 	computeRunAttentionStatus,
 } from '../src/queue-projections';
-import { AuditRecord, JobRecord } from '../src/types';
+import { AuditRecord, JobRecord } from '../src/contracts';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -241,3 +241,4 @@ describe('queue projection helpers', () => {
 		});
 	});
 });
+

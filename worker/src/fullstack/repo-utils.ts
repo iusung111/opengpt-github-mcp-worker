@@ -1,4 +1,4 @@
-import { AppEnv } from '../types';
+import { AppEnv } from '../contracts';
 import { decodeBase64Text, encodeGitHubPath, githubGet } from '../utils';
 
 export async function readRepoTextFile(
@@ -54,3 +54,4 @@ export function findContractCandidates(
 		sha: entry.sha ?? null,
 	}));
 }
+

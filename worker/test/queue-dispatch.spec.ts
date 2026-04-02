@@ -13,7 +13,7 @@ vi.mock('../src/utils', () => ({
 import { autoRedispatchJob } from '../src/queue-dispatch';
 import { githubAuthConfigured } from '../src/github';
 import { buildDispatchFingerprint, githubPost } from '../src/utils';
-import { JobRecord } from '../src/types';
+import { JobRecord } from '../src/contracts';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -135,3 +135,4 @@ describe('queue dispatch helpers', () => {
 		});
 	});
 });
+

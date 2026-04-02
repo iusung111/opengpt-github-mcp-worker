@@ -48,7 +48,7 @@ Commands used locally:
 
 ```text
 npm run typecheck
-npm run test:integration:runtime -- worker/test/runtime-mcp.spec.ts
+npm run test:integration:runtime -- worker/test/runtime-mcp
 ```
 
 Raw live MCP verification before deployment:

@@ -1,4 +1,4 @@
-import { JobRecord, JobStatus, NextActor } from './types';
+import { JobRecord, JobStatus, NextActor } from './contracts';
 
 export interface JobIndexPointer {
 	job_id: string;
@@ -106,3 +106,4 @@ export function buildJobIndexEntries(job: JobRecord): Array<[string, JobIndexPoi
 	}
 	return entries;
 }
+

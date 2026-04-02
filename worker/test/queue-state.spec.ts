@@ -10,7 +10,7 @@ import {
 	recordWorkflowSnapshot,
 	transitionJob,
 } from '../src/queue-state';
-import { JobRecord } from '../src/types';
+import { JobRecord } from '../src/contracts';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -133,3 +133,4 @@ describe('queue-state helpers', () => {
 		expect(hasExecutionRelatedInterrupt(interruptedJob)).toBe(true);
 	});
 });
+

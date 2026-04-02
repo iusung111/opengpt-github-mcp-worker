@@ -1,4 +1,4 @@
-import { JobRecord } from './types';
+import { JobRecord } from './contracts';
 import { mergeWorkerManifest } from './job-manifest';
 import { branchMatchScore, parseJobIdFromPrBody } from './queue-helpers';
 import { JobIndexPointer, jobBranchIndexKey, jobRepoIndexPrefix, jobRunIndexKey } from './queue-index';
@@ -204,3 +204,4 @@ export async function applyGithubEvent(
 
 	return { matched: false };
 }
+

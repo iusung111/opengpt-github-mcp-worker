@@ -12,7 +12,7 @@ import {
 	jobStatusIndexKey,
 	jobStatusIndexPrefix,
 } from '../src/queue-index';
-import { JobRecord } from '../src/types';
+import { JobRecord } from '../src/contracts';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -72,3 +72,4 @@ describe('queue index helpers', () => {
 		expect(jobStatusIndexPrefix(undefined, 'worker')).toBe('idx:actor:worker:');
 	});
 });
+

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyPullRequestEventToJob } from '../src/queue-events';
-import { JobRecord } from '../src/types';
+import { JobRecord } from '../src/contracts';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -57,3 +57,4 @@ describe('queue event helpers', () => {
 		expect(job.notes).toEqual(['linked PR #7']);
 	});
 });
+

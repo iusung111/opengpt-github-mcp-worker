@@ -1,4 +1,4 @@
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { sha256Hex } from './utils';
 
 export interface PreviewTokenPayload {
@@ -183,3 +183,4 @@ export async function buildStablePreviewId(repo: string, ref: string): Promise<s
 export async function buildStableBrowserSessionId(resolvedUrl: string): Promise<string> {
 	return `br_${(await sha256Hex(resolvedUrl)).slice(0, 12)}`;
 }
+

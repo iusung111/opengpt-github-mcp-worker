@@ -1,4 +1,4 @@
-import { JobRecord, WorkspaceRecord } from './types';
+import { JobRecord, WorkspaceRecord } from './contracts';
 import { activeWorkspaceStorageKey, jobStorageKey, workspaceStorageKey } from './queue-helpers';
 import { buildJobIndexEntries, jobIndexReadyKey } from './queue-index';
 import { normalizeWorkspaceRecord, workspaceRecordNeedsNormalization } from './queue-workspaces';
@@ -81,3 +81,4 @@ export async function findJob(
 	}
 	return null;
 }
+

@@ -7,7 +7,7 @@ import {
 	workspaceRecordNeedsNormalization,
 } from '../src/queue-workspaces';
 import { ensureSafeWorkspacePath } from '../src/queue-helpers';
-import type { WorkspaceRecord } from '../src/types';
+import type { WorkspaceRecord } from '../src/contracts';
 
 describe('queue workspace helpers', () => {
 	it('builds a normalized workspace record', () => {
@@ -102,3 +102,4 @@ describe('queue workspace helpers', () => {
 		expect(() => ensureSafeWorkspacePath('../unsafe')).toThrow(/invalid workspace path/i);
 	});
 });
+

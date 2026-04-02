@@ -1,4 +1,4 @@
-import { AppEnv, QueueEnvelope, ToolResultEnvelope } from '../types';
+import { AppEnv, QueueEnvelope, ToolResultEnvelope } from '../contracts';
 import { diagnosticLog, QUEUE_FETCH_TIMEOUT_MS } from './common';
 
 export function encodeGitHubPath(path: string): string {
@@ -104,3 +104,4 @@ export async function activateRepoWorkspace(env: AppEnv, repoKey: string): Promi
 		});
 	}
 }
+

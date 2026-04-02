@@ -1,4 +1,4 @@
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { getSelfCurrentUrl, getSelfLiveUrl } from './utils';
 
 export interface GuiCaptureLegacyAnalysisConfig {
@@ -276,3 +276,4 @@ export function normalizeGuiCaptureInstructions(
 		report,
 	};
 }
+

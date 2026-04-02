@@ -1,4 +1,4 @@
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { decodeBase64Text, encodeGitHubPath, ensureRepoAllowed, getDefaultBaseBranch, githubGet } from './utils';
 
 export interface ProjectVerifyProfile {
@@ -379,3 +379,4 @@ export function renderPreviewUrlTemplate(
 		.replace(/\{ref\}/g, encodeURIComponent(input.ref))
 		.replace(/\{service\}/g, input.service);
 }
+

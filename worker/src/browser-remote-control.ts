@@ -7,7 +7,7 @@ import {
 	JobBrowserRemoteControlState,
 	JobBrowserRemoteSession,
 	JobWebSessionContext,
-} from './types';
+} from './contracts';
 import { nowIso, parseIsoMs } from './utils';
 
 const DEFAULT_STALE_AFTER_MS = 45_000;
@@ -362,3 +362,4 @@ export function completeBrowserRemoteCommand(
 		},
 	};
 }
+

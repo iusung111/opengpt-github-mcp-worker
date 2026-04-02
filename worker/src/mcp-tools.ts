@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { registerCollabTools } from './mcp-collab-tools';
 import { registerGuiTools } from './mcp-gui-tools';
 import { registerFullstackTools } from './mcp-fullstack-tools';
@@ -39,3 +39,5 @@ export function buildMcpServer(env: AppEnv): McpServer {
 
 	return server;
 }
+
+

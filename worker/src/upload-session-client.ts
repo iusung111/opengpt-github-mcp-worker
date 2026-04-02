@@ -1,4 +1,4 @@
-import { AppEnv, UploadSessionRecord } from './types';
+import { AppEnv, UploadSessionRecord } from './contracts';
 import { inspectFileAtBranch } from './github-file-commit';
 import { nowIso } from './utils';
 import { MAX_STREAMED_UPLOAD_BYTES, RECOMMENDED_UPLOAD_CHUNK_BYTES, UPLOAD_SESSION_TTL_MS } from './upload-session';
@@ -92,3 +92,4 @@ export async function commitUploadSession(env: AppEnv, uploadId: string): Promis
 export async function abortUploadSession(env: AppEnv, uploadId: string): Promise<Record<string, unknown>> {
 	return uploadSessionFetch(env, uploadId, '/abort');
 }
+

@@ -6,7 +6,7 @@ import {
 	shouldHandleReviewTimeout,
 	shouldHandleWorkingTimeout,
 } from '../src/queue-reconcile';
-import { JobRecord } from '../src/types';
+import { JobRecord } from '../src/contracts';
 
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
@@ -135,3 +135,4 @@ describe('queue reconcile helpers', () => {
 		).toBeNull();
 	});
 });
+

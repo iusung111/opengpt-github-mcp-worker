@@ -73,7 +73,7 @@ Commands used:
 
 ```text
 npm run typecheck
-npx vitest run worker/test/runtime-http.spec.ts worker/test/runtime-mcp.spec.ts --sequence.concurrent=false
+npx vitest run worker/test/runtime-http worker/test/runtime-mcp --sequence.concurrent=false
 node worker/scripts/cloudflare-deploy.mjs --deploy-target mirror --deploy-url https://opengpt-github-mcp-worker-mirror.iusung111.workers.dev
 node worker/scripts/cloudflare-deploy.mjs --deploy-target live --deploy-url https://opengpt-github-mcp-worker.iusung111.workers.dev
 ```

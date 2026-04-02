@@ -1,6 +1,6 @@
 import { githubAuthConfigured } from './github';
 import { mergeWorkerManifest, setManifestDispatchRequest, setManifestWorkflowRun } from './job-manifest';
-import { JobRecord } from './types';
+import { JobRecord } from './contracts';
 import { buildDispatchFingerprint, githubPost, nowIso } from './utils';
 import { canAdvanceJob, getDispatchRequest, pushJobNote, transitionJob } from './queue-state';
 
@@ -64,3 +64,4 @@ export async function autoRedispatchJob(
 	);
 	return true;
 }
+

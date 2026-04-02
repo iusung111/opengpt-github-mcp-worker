@@ -1,4 +1,4 @@
-import { ToolResultEnvelope } from '../types';
+import { ToolResultEnvelope } from '../contracts';
 import { hasRecord } from './common';
 
 function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, unknown> | undefined {
@@ -126,3 +126,4 @@ export function fail(code: string, error: unknown, meta?: Record<string, unknown
 		meta: meta ?? null,
 	};
 }
+

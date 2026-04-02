@@ -2,7 +2,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { resetGitHubAuthCache } from '../src/github';
-import { AppEnv } from '../src/types';
+import { AppEnv } from '../src/contracts';
 import { waitForWorkflowRun } from '../src/workflow-execution';
 
 function buildStoredZip(entries: Array<{ name: string; text: string }>): Uint8Array {
@@ -210,3 +210,4 @@ describe('workflow execution helpers', () => {
 		});
 	});
 });
+

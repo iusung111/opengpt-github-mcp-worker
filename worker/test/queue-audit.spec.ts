@@ -7,7 +7,7 @@ import {
 	writeAudit,
 } from '../src/queue-audit';
 import { deliveryStorageKey } from '../src/queue-helpers';
-import { AuditRecord, DeliveryRecord } from '../src/types';
+import { AuditRecord, DeliveryRecord } from '../src/contracts';
 
 function createContext(
 	audits: Array<[string, AuditRecord]> = [],
@@ -117,3 +117,4 @@ describe('queue-audit helpers', () => {
 		});
 	});
 });
+

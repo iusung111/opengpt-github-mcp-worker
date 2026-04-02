@@ -1,4 +1,4 @@
-import { AppEnv } from '../types';
+import { AppEnv } from '../contracts';
 import { hasRecord } from './common';
 import workflowAllowlistConfig from '../workflow-allowlist-config';
 
@@ -323,3 +323,4 @@ export function getSelfDeployWorkflow(env: AppEnv): string {
 export function getSelfDefaultDeployTarget(env: AppEnv): 'mirror' | 'live' {
 	return env.SELF_DEFAULT_DEPLOY_TARGET?.trim() === 'live' ? 'live' : 'mirror';
 }
+

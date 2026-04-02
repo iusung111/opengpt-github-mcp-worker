@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { getSelfCurrentUrl, getSelfLiveUrl, getSelfMirrorUrl } from './utils';
 
 export const NOTIFICATION_WIDGET_URI = 'ui://widget/notification-center.html';
@@ -85,3 +85,4 @@ export function registerWidgetResources(server: McpServer, env: AppEnv): void {
 		},
 	);
 }
+

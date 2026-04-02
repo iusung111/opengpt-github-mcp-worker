@@ -3,8 +3,8 @@ import * as z from 'zod/v4';
 
 import { githubRequestRaw } from './github';
 import { extractZipEntries, decodeUtf8, encodeBase64, normalizeGuiCaptureInstructions } from './gui-capture';
-import { ToolAnnotations } from './mcp-overview-tools';
-import { AppEnv } from './types';
+import { ToolAnnotations } from './mcp/contracts';
+import { AppEnv } from './contracts';
 import { ensureRepoAllowed, ensureWorkflowAllowed, errorCodeFor, fail, getDefaultBaseBranch, getSelfRepoKey, githubGet, githubPost, ok, toolText, validateWorkflowInputs } from './utils';
 
 export const GUI_CAPTURE_WORKFLOW_ID = 'gui-capture.yml';
@@ -211,3 +211,5 @@ export function registerGuiTools(server: McpServer, env: AppEnv, writeAnnotation
 		}
 	});
 }
+
+

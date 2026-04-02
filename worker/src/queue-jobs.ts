@@ -1,4 +1,4 @@
-import { JobRecord, JobStatus, NextActor } from './types';
+import { JobRecord, JobStatus, NextActor } from './contracts';
 import { createEmptyWorkerManifest, mergeWorkerManifest, normalizeWorkerManifest } from './job-manifest';
 import { nowIso } from './utils';
 import { JobIndexPointer, jobAllIndexPrefix, jobStatusIndexPrefix } from './queue-index';
@@ -94,3 +94,4 @@ export async function listJobs(
 	}
 	return jobs.sort((left, right) => left.updated_at.localeCompare(right.updated_at));
 }
+

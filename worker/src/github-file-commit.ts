@@ -1,4 +1,4 @@
-import { AppEnv } from './types';
+import { AppEnv } from './contracts';
 import { githubPatch, githubPost, githubRequestRaw } from './github';
 import { encodeGitHubPath, encodeGitHubRef } from './utils';
 
@@ -166,3 +166,4 @@ export async function commitUploadedFile(
 		previous_blob_sha: currentBlobSha,
 	};
 }
+

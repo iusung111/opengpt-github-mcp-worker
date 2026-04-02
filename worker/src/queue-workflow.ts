@@ -1,4 +1,4 @@
-import { JobRecord, JobStatus, NextActor } from './types';
+import { JobRecord, JobStatus, NextActor } from './contracts';
 import { isDryRunJob, pushJobNote, recordWorkflowSnapshot, transitionJob, WorkflowRunSnapshot } from './queue-state';
 
 export interface CompletedWorkflowRunDecision {
@@ -64,3 +64,4 @@ export function applyCompletedWorkflowRunDecision(
 		job.last_error = decision.lastError;
 	}
 }
+

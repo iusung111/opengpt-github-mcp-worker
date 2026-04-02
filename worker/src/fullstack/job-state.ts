@@ -1,7 +1,9 @@
 import { mergeWorkerManifest } from '../job-manifest';
 import { computeRunAttentionStatus } from '../queue-projections';
-import { AppEnv, JobRecord, JobWorkerManifest } from '../types';
+import { AppEnv, JobRecord, JobWorkerManifest } from '../contracts';
 import { nowIso, queueJson } from '../utils';
+
+type ManifestSection = 'verification' | 'preview' | 'browser' | 'desktop' | 'runtime';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -27,16 +29,16 @@ export async function queueJsonOrThrow(
 	return result;
 }
 
-function sourceLayerForManifestSection(section: keyof JobWorkerManifest): 'mcp' | 'cloudflare' {
+function sourceLayerForManifestSection(section: ManifestSection): 'mcp' | 'cloudflare' {
 	return section === 'preview' ? 'cloudflare' : 'mcp';
 }
 
-function sectionStatusForAudit(manifest: Partial<JobWorkerManifest> | undefined, section: keyof JobWorkerManifest): string | null {
+function sectionStatusForAudit(manifest: Partial<JobWorkerManifest> | undefined, section: ManifestSection): string | null {
 	const sectionValue = manifest?.[section];
 	return isRecord(sectionValue) && typeof sectionValue.status === 'string' ? sectionValue.status : null;
 }
 
-function sectionMessageForAudit(section: keyof JobWorkerManifest, sectionStatus: string | null): string | null {
+function sectionMessageForAudit(section: ManifestSection, sectionStatus: string | null): string | null {
 	if (!sectionStatus) {
 		return null;
 	}
@@ -112,7 +114,7 @@ export async function updateJobState(
 				},
 			}, `failed to write status audit for ${input.jobId}`);
 		}
-		for (const section of ['verification', 'preview', 'browser', 'desktop', 'runtime'] as Array<keyof JobWorkerManifest>) {
+		for (const section of ['verification', 'preview', 'browser', 'desktop', 'runtime'] as ManifestSection[]) {
 			const sectionStatus = sectionStatusForAudit(input.workerManifest, section);
 			if (!sectionStatus) {
 				continue;
@@ -182,3 +184,4 @@ export async function resolveRunIdFromInput(
 	}
 	return runId;
 }
+
