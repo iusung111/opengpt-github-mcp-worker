@@ -18,6 +18,9 @@ const findings = [];
 const consoleLogs = [];
 const pageErrors = [];
 const networkErrors = [];
+const browserChannel = typeof process.env.PLAYWRIGHT_BROWSER_CHANNEL === 'string'
+  ? process.env.PLAYWRIGHT_BROWSER_CHANNEL.trim()
+  : '';
 
 function slug(value, fallback = 'step') {
   return String(value ?? fallback)
@@ -286,7 +289,11 @@ let finalCapture = null;
 try {
   if (instructions.mode === 'html_scenario' || instructions.mode === 'url_scenario') {
     if (!baseUrl) throw new Error('no base url resolved for scenario execution');
-    browser = await chromium.launch({ headless: true });
+    const launchOptions = { headless: true };
+    if (browserChannel) {
+      launchOptions.channel = browserChannel;
+    }
+    browser = await chromium.launch(launchOptions);
     const context = await browser.newContext({
       viewport: scenario.viewport || { width: 1440, height: 900 },
     });

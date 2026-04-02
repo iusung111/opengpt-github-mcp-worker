@@ -9,6 +9,7 @@ import { ensureRepoAllowed, ensureWorkflowAllowed, errorCodeFor, fail, getDefaul
 
 export const GUI_CAPTURE_WORKFLOW_ID = 'gui-capture.yml';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const GUI_CAPTURE_POLL_INTERVAL_MS = 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -71,7 +72,7 @@ async function waitForRun(
 				return { runId, run, artifact };
 			}
 		}
-		await sleep(3000);
+		await sleep(GUI_CAPTURE_POLL_INTERVAL_MS);
 	}
 	throw new Error('timed out waiting for gui capture workflow run');
 }

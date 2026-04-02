@@ -30,10 +30,16 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install Playwright
+      - name: Prepare Playwright runtime
+        id: playwright
         run: |
           npm install --no-save playwright
-          npx playwright install --with-deps chromium
+          if command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1; then
+            echo "channel=chrome" >> "$GITHUB_OUTPUT"
+          else
+            npx playwright install --with-deps chromium
+            echo "channel=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Start local static server
         run: |
@@ -51,6 +57,7 @@ jobs:
         env:
           INSTRUCTIONS_B64: ${{ inputs.instructions_b64 }}
           LOCAL_HTML_URL: http://127.0.0.1:4173/
+          PLAYWRIGHT_BROWSER_CHANNEL: ${{ steps.playwright.outputs.channel }}
         run: node worker/scripts/run-gui-capture.mjs
 
       - name: Upload GUI capture artifact
