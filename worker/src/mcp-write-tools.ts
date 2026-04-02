@@ -133,7 +133,8 @@ export function registerWriteTools(
 		ensureNotDefaultBranch(env, branch);
 		ensureSafeRepoPath(path);
 		await activateRepoWorkspace(env, repoKey);
-		atob(content_b64);
+		atob(content_b64.replace(/\s+/g, ''));
+		const normalizedContentB64 = normalizeContentBase64(content_b64);
 
 		if (content_b64.length > MAX_REPO_UPDATE_FILE_B64_BYTES) {
 			throw new Error(
