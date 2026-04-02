@@ -29,6 +29,8 @@ import {
 	ensureRepoAllowed,
 	ensureSafeRepoPath,
 	errorCodeFor,
+	decodeBase64Text,
+	encodeBase64Text,
 	fail,
 	getDefaultBaseBranch,
 	githubGet,
