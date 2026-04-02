@@ -172,7 +172,7 @@ export function registerWriteTools(
 
 		const payload: Record<string, unknown> = {
 			message,
-			content: content_b64,
+			content: normalizedContentB64,
 			branch,
 		};
 		if (resolvedBlobSha) {
