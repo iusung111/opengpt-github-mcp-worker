@@ -32,6 +32,29 @@ const CONTINUE_PATTERNS = [
 	/\uAD8C\uD55C\s*\uD5C8\uC6A9/,
 	/\uC811\uADFC\s*\uD5C8\uC6A9/,
 ];
+const PERMISSION_PROMPT_PATTERNS = [
+	/^approve$/i,
+	/^allow$/i,
+	/always allow/i,
+	/^confirm$/i,
+	/grant access/i,
+	/grant permission/i,
+	/allow access/i,
+	/allow permission/i,
+	/authorize/i,
+	/permission/i,
+	/approve request/i,
+	/confirm access/i,
+	/confirm permission/i,
+	/^\uC2B9\uC778$/,
+	/^\uD5C8\uC6A9$/,
+	/\uD56D\uC0C1 \uD5C8\uC6A9/,
+	/^\uD655\uC778$/,
+	/\uC561\uC138\uC2A4\s*(\uAD8C\uD55C\s*)?\uBD80\uC5EC(?!\uB428)/,
+	/\uAD8C\uD55C\s*\uD5C8\uC6A9/,
+	/\uC811\uADFC\s*\uD5C8\uC6A9/,
+	/\uC694\uCCAD\s*\uC2B9\uC778/,
+];
 const CONTINUE_EXCLUDE_PATTERNS = [
 	/\uBD80\uC5EC\uB428/,
 	/granted/i,
@@ -377,6 +400,35 @@ async function runClickContinue(page) {
 	return matched;
 }
 
+async function runResolvePermissionPrompt(page) {
+	const matched = [];
+	const deadline = Date.now() + 20000;
+	for (let attempts = 0; attempts < 3; attempts += 1) {
+		const label = await clickByPatterns(page, PERMISSION_PROMPT_PATTERNS, { excludePatterns: CONTINUE_EXCLUDE_PATTERNS });
+		if (!label) break;
+		matched.push(label);
+		await page.waitForTimeout(900);
+	}
+	if (!matched.length) {
+		while (Date.now() < deadline && (await chatGptBusy(page))) {
+			await page.waitForTimeout(1500);
+			const label = await clickByPatterns(page, PERMISSION_PROMPT_PATTERNS, { excludePatterns: CONTINUE_EXCLUDE_PATTERNS });
+			if (!label) {
+				continue;
+			}
+			matched.push(label);
+			await page.waitForTimeout(900);
+			break;
+		}
+	}
+	if (!matched.length) {
+		const visibleActions = await visibleActionSummary(page);
+		const detail = visibleActions.length ? ` Visible actions: ${visibleActions.join(' | ')}.` : '';
+		throw new Error(`No visible approval or permission button was found on the target ChatGPT page.${detail}`);
+	}
+	return matched;
+}
+
 async function fillPrompt(page, prompt) {
 	const composer = await firstVisibleLocator(page, [
 		'#prompt-textarea',
@@ -418,6 +470,14 @@ async function executeCommand(page, command) {
 		return {
 			ok: true,
 			summary: `Clicked ${matchedActions.join(', ')}.`,
+			matchedActions,
+		};
+	}
+	if (command.kind === 'resolve_permission_prompt') {
+		matchedActions.push(...(await runResolvePermissionPrompt(page)));
+		return {
+			ok: true,
+			summary: `Approved the visible permission prompt via ${matchedActions.join(', ')}.`,
 			matchedActions,
 		};
 	}

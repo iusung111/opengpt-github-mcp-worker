@@ -50,6 +50,7 @@
 html,
 body {
 	min-height: 100%;
+	min-height: 100dvh;
 }
 
 body {
@@ -79,12 +80,14 @@ textarea {
 
 #notification-app {
 	min-height: 100vh;
+	min-height: 100dvh;
 }
 
 .app-shell {
 	display: flex;
 	flex-direction: column;
 	min-height: 100vh;
+	min-height: 100dvh;
 }
 
 .topbar {
@@ -1251,8 +1254,10 @@ input[type="number"],
 		flex: 0 0 clamp(440px, 31vw, 500px);
 		position: sticky;
 		top: var(--header-offset);
-		height: calc(100vh - var(--header-offset));
+		height: calc(100dvh - var(--header-offset));
 		background: var(--surface);
+		max-height: calc(100dvh - var(--header-offset));
+		align-self: flex-start;
 	}
 
 	.drawer-backdrop {

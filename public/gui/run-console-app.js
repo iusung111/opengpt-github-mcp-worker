@@ -333,6 +333,11 @@ const state = {
 	alertBaselineReady: false,
 	alertPermissionRequested: false,
 	alertPermissionState: browserAlertsSupported() ? window.Notification.permission : 'unsupported',
+	yoloModeEnabled: false,
+	yoloHandledApprovalRequests: {},
+	yoloApprovalRetryAfter: {},
+	remoteApprovalFlow: null,
+	remoteApprovalFlowPolling: false,
 };
 
 function createStore() {
@@ -2033,9 +2038,54 @@ function currentJob() {
 	return jobs[0];
 }
 
-function currentApproval() {
-	const job = currentJob();
+function approvalForJob(job) {
 	return job ? job.approval : null;
+}
+
+function currentApproval() {
+	return approvalForJob(currentJob());
+}
+
+function pendingApprovalJobs() {
+	return sortedJobs().filter((job) => job.approval && job.approval.pending && job.approval.requestId);
+}
+
+function pruneYoloApprovalState() {
+	const activeRequestIds = new Set(
+		pendingApprovalJobs()
+			.map((job) => job.approval?.requestId)
+			.filter((value) => typeof value === 'string' && value),
+	);
+	for (const requestId of Object.keys(state.yoloHandledApprovalRequests)) {
+		if (!activeRequestIds.has(requestId)) {
+			delete state.yoloHandledApprovalRequests[requestId];
+		}
+	}
+	for (const requestId of Object.keys(state.yoloApprovalRetryAfter)) {
+		if (!activeRequestIds.has(requestId)) {
+			delete state.yoloApprovalRetryAfter[requestId];
+		}
+	}
+}
+
+function nextYoloApprovalJob() {
+	pruneYoloApprovalState();
+	const now = Date.now();
+	const preferred = currentJob();
+	const jobs =
+		preferred && preferred.approval && preferred.approval.pending && preferred.approval.requestId
+			? [preferred, ...pendingApprovalJobs().filter((job) => job.jobId !== preferred.jobId)]
+			: pendingApprovalJobs();
+	return (
+		jobs.find((job) => {
+			const requestId = job.approval?.requestId;
+			if (!requestId) return false;
+			if (state.remoteApprovalFlow && state.remoteApprovalFlow.requestId === requestId) return false;
+			if (state.yoloHandledApprovalRequests[requestId]) return false;
+			const retryAfter = Number(state.yoloApprovalRetryAfter[requestId] || 0);
+			return !Number.isFinite(retryAfter) || retryAfter <= now;
+		}) || null
+	);
 }
 
 function currentIncident() {
@@ -2712,10 +2762,16 @@ async function requestApprovalInChat() {
 	render();
 }
 
-async function resolveApproval(resolution, resumeAfter = false) {
-	const job = currentJob();
-	const approval = currentApproval();
-	if (!job || !approval || !approval.requestId) {
+async function resolveApproval(resolution, resumeAfter = false, options = {}) {
+	const job = options.job || currentJob();
+	const approval = approvalForJob(job);
+	const requestId =
+		typeof options.requestId === 'string' && options.requestId.trim()
+			? options.requestId.trim()
+			: approval && approval.requestId
+				? approval.requestId
+				: '';
+	if (!job || !requestId) {
 		state.error = 'There is no active approval request to resolve.';
 		render();
 		return;
@@ -2724,14 +2780,14 @@ async function resolveApproval(resolution, resumeAfter = false) {
 		'permission_request_resolve',
 		{
 			job_id: job.jobId,
-			request_id: approval.requestId,
+			request_id: requestId,
 			resolution,
 			note: state.approvalNote.trim() || undefined,
 		},
 		'approval',
 	);
 	if (resumeAfter && resolution === 'approved' && envelope) {
-		await performControl('resume');
+		await performControl('resume', { job });
 	}
 }
 
@@ -2743,8 +2799,8 @@ function currentExpectedState(job) {
 	return job.run.status;
 }
 
-async function performControl(action) {
-	const job = currentJob();
+async function performControl(action, options = {}) {
+	const job = options.job || currentJob();
 	if (!job) return;
 	await runTool(
 		'job_control',
@@ -2849,6 +2905,13 @@ async function runAttentionShortcut(jobId = currentJob()?.jobId || '') {
 	state.selectedJobId = jobId;
 	const job = ensureJob(jobId);
 	if (!job) return;
+	if (browserControlConnected() && externalBrowserControlAvailable() && job.approval && job.approval.pending && job.approval.requestId) {
+		await queueRemoteApprovalAndContinue(job, {
+			resumeAfter: true,
+			label: attentionShortcutLabel(job),
+		});
+		return;
+	}
 	await refreshCurrentRun({ silent: true, keepSection: true });
 	const refreshed = currentJob();
 	if (!refreshed) return;
@@ -2936,6 +2999,7 @@ function restoreViewState() {
 		if (typeof saved.dashboardSearch === 'string') state.dashboardSearch = saved.dashboardSearch;
 		if (typeof saved.dashboardStatus === 'string') state.dashboardStatus = saved.dashboardStatus;
 		if (typeof saved.dashboardSort === 'string' && DASHBOARD_SORTS.includes(saved.dashboardSort)) state.dashboardSort = saved.dashboardSort;
+		if (typeof saved.yoloModeEnabled === 'boolean') state.yoloModeEnabled = saved.yoloModeEnabled;
 		if (hasRecord(saved.feedFilters)) {
 			state.feedFilters = {
 				status: typeof saved.feedFilters.status === 'string' ? saved.feedFilters.status : '',
@@ -2964,6 +3028,7 @@ function persistViewState() {
 				dashboardSearch: state.dashboardSearch,
 				dashboardStatus: state.dashboardStatus,
 				dashboardSort: state.dashboardSort,
+				yoloModeEnabled: state.yoloModeEnabled,
 				feedFilters: state.feedFilters,
 			}),
 		);
@@ -3851,6 +3916,8 @@ function browserControlTargetLabel(target) {
 function browserControlCommandLabel(kind) {
 	if (kind === 'send_prompt') return 'Send prompt';
 	if (kind === 'auto_continue_run') return 'Auto continue';
+	if (kind === 'resolve_permission_prompt') return 'Resolve approval';
+	if (kind === 'send_followup') return 'Send follow-up';
 	return 'Click continue';
 }
 
@@ -3868,6 +3935,8 @@ async function refreshBrowserControl(options = {}) {
 	if (!externalBrowserControlAvailable()) return null;
 	const payload = await apiRequest('/gui/api/browser-control');
 	state.store.browserControl = normalizeBrowserControl(payload.data && payload.data.browser_control ? payload.data.browser_control : null);
+	await maybeFinalizeRemoteApprovalFlow();
+	await maybeQueueYoloApproval();
 	if (!options.skipRender) {
 		render();
 	}
@@ -3899,7 +3968,7 @@ async function enqueueBrowserControlCommand(jobId, input = {}) {
 				kind: input.kind,
 				label: input.label,
 				prompt: input.prompt,
-				page_url_hint: typeof config.chatUiUrl === 'string' ? config.chatUiUrl : null,
+				page_url_hint: typeof input.pageUrlHint === 'string' ? input.pageUrlHint : typeof config.chatUiUrl === 'string' ? config.chatUiUrl : null,
 			},
 		});
 		state.store.browserControl = normalizeBrowserControl(payload.data && payload.data.browser_control ? payload.data.browser_control : null);
@@ -3914,9 +3983,137 @@ async function enqueueBrowserControlCommand(jobId, input = {}) {
 	}
 }
 
+function sleep(ms) {
+	return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function maybeFinalizeRemoteApprovalFlow() {
+	const flow = state.remoteApprovalFlow;
+	if (!flow || flow.status === 'finalizing') {
+		return false;
+	}
+	const job = ensureJob(flow.jobId);
+	const result = currentBrowserControl()?.lastResult || null;
+	if (!result || result.commandId !== flow.commandId) {
+		return false;
+	}
+	if (!result.ok) {
+		state.yoloApprovalRetryAfter[flow.requestId] = Date.now() + 30_000;
+		state.remoteApprovalFlow = null;
+		state.error = result.error || result.summary || 'The browser companion could not click the approval button.';
+		state.message = '';
+		return true;
+	}
+	state.yoloHandledApprovalRequests[flow.requestId] = true;
+	delete state.yoloApprovalRetryAfter[flow.requestId];
+	state.remoteApprovalFlow = { ...flow, status: 'finalizing' };
+	render();
+	try {
+		await resolveApproval('approved', flow.resumeAfter === true, { job, requestId: flow.requestId });
+		state.error = '';
+		state.message = flow.resumeAfter === true
+			? 'The browser companion approved the ChatGPT permission prompt and the run was resumed.'
+			: 'The browser companion approved the ChatGPT permission prompt and the queue state was updated.';
+	} catch (error) {
+		state.error = error instanceof Error ? error.message : String(error);
+		state.message = '';
+	} finally {
+		state.remoteApprovalFlow = null;
+	}
+	return true;
+}
+
+async function maybeQueueYoloApproval() {
+	if (!state.yoloModeEnabled) {
+		return false;
+	}
+	if (!externalBrowserControlAvailable() || !browserControlConnected() || browserControlPending() || state.remoteApprovalFlow) {
+		return false;
+	}
+	const job = nextYoloApprovalJob();
+	if (!job) {
+		return false;
+	}
+	await queueRemoteApprovalAndContinue(job, {
+		resumeAfter: true,
+		label: 'YOLO auto-approve',
+	});
+	return true;
+}
+
+async function waitForRemoteApprovalFlow(maxWaitMs = 90000) {
+	if (state.remoteApprovalFlowPolling) {
+		return;
+	}
+	state.remoteApprovalFlowPolling = true;
+	const deadline = Date.now() + maxWaitMs;
+	try {
+		while (state.remoteApprovalFlow && Date.now() < deadline) {
+			await refreshBrowserControl({ skipRender: true });
+			if (!state.remoteApprovalFlow) {
+				break;
+			}
+			await sleep(1500);
+		}
+		if (state.remoteApprovalFlow) {
+			state.message = 'Approval click is still pending in the browser companion.';
+			render();
+		}
+	} finally {
+		state.remoteApprovalFlowPolling = false;
+	}
+}
+
+async function queueRemoteApprovalAndContinue(job = currentJob(), options = {}) {
+	const approval = approvalForJob(job);
+	if (!job || !approval || !approval.requestId) {
+		state.error = 'There is no active approval request to resolve.';
+		render();
+		return null;
+	}
+	if (!externalBrowserControlAvailable() || !browserControlConnected()) {
+		return null;
+	}
+	if (browserControlPending()) {
+		state.error = 'The browser companion is already busy with another queued command.';
+		render();
+		return null;
+	}
+	const payload = await enqueueBrowserControlCommand(job.jobId, {
+		kind: 'resolve_permission_prompt',
+		label: options.label || 'Approve and continue',
+		pageUrlHint: job.browserSession?.sessionUrl || currentBrowserControl()?.session?.pageUrl || config.chatUiUrl,
+	});
+	const commandId = state.store.browserControl?.pendingCommand?.commandId || null;
+	if (!payload || !commandId) {
+		state.error = 'The browser companion command could not be queued.';
+		render();
+		return null;
+	}
+	state.remoteApprovalFlow = {
+		commandId,
+		jobId: job.jobId,
+		requestId: approval.requestId,
+		resumeAfter: options.resumeAfter === true,
+		status: 'queued',
+	};
+	state.error = '';
+	state.message = 'Queued the ChatGPT approval click in the browser companion. Waiting for completion...';
+	render();
+	void waitForRemoteApprovalFlow();
+	return payload;
+}
+
 async function runExternalBrowserShortcut(jobId = currentJob()?.jobId || '') {
 	const job = ensureJob(jobId);
 	if (!job) return;
+	if (job.approval && job.approval.pending && job.approval.requestId) {
+		await queueRemoteApprovalAndContinue(job, {
+			resumeAfter: true,
+			label: attentionShortcutLabel(job),
+		});
+		return;
+	}
 	await enqueueBrowserControlCommand(jobId, {
 		kind: 'click_continue',
 		label: attentionShortcutLabel(job),
@@ -4177,6 +4374,13 @@ function renderBrowserControlCard(job) {
 	const canQueue = Boolean(job) && connected && externalBrowserControlAvailable() && !pending;
 	const canCopyCommand = window.parent === window;
 	const launchCommand = browserCompanionCommand();
+	const yoloEnabled = state.yoloModeEnabled === true;
+	const yoloLabel = yoloEnabled ? 'YOLO On' : 'YOLO Off';
+	const yoloCopy = yoloEnabled
+		? connected
+			? 'Pending permission prompts will be approved automatically and resumed when possible.'
+			: 'Auto approval is armed and will start once a browser companion connects.'
+		: 'Manual approval flow only.';
 	return `
 		<div class="detail-card simple-card">
 			<div class="stack-header">
@@ -4211,7 +4415,12 @@ function renderBrowserControlCard(job) {
 					</article>`
 					: ''
 			}
+			<article class="empty-card remote-state-card">
+				<strong>${escapeHtml(yoloLabel)}</strong>
+				<p>${escapeHtml(yoloCopy)}</p>
+			</article>
 			<div class="action-row">
+				<button type="button" class="${yoloEnabled ? 'action-button secondary' : 'mini-button'}" data-action="toggle-yolo">${escapeHtml(yoloLabel)}</button>
 				${
 					externalBrowserControlAvailable()
 						? `
@@ -4520,6 +4729,16 @@ function renderWorkspaceDetailPane(job, host) {
 	`;
 }
 
+function syncLayoutMetrics() {
+	const topbar = root.querySelector('.topbar');
+	if (!(topbar instanceof HTMLElement)) {
+		document.documentElement.style.setProperty('--header-offset', '88px');
+		return;
+	}
+	const height = Math.max(56, Math.ceil(topbar.getBoundingClientRect().height));
+	document.documentElement.style.setProperty('--header-offset', `${height}px`);
+}
+
 function render() {
 	const job = currentRouteJobId() ? currentJob() : null;
 	const host = currentHostApi();
@@ -4540,8 +4759,14 @@ function render() {
 	`;
 	persistViewState();
 	syncCapture();
+	syncLayoutMetrics();
 	host.notifySize(root.scrollHeight);
 }
+
+window.addEventListener('resize', () => {
+	syncLayoutMetrics();
+	currentHostApi().notifySize(root.scrollHeight);
+});
 
 function hydrateFromEnvelope(envelope) {
 	const resolved = coerceToolEnvelope(envelope);
@@ -4903,7 +5128,25 @@ root.addEventListener('click', (event) => {
 			void resolveApproval('superseded');
 			break;
 		case 'approval-approved-continue':
-			void resolveApproval('approved', true);
+			if (browserControlConnected() && externalBrowserControlAvailable()) {
+				void queueRemoteApprovalAndContinue(currentJob(), { resumeAfter: true, label: 'Approve and continue' });
+			} else {
+				void resolveApproval('approved', true);
+			}
+			break;
+		case 'toggle-yolo':
+			state.yoloModeEnabled = !state.yoloModeEnabled;
+			if (!state.yoloModeEnabled) {
+				state.message = 'YOLO auto approval disabled.';
+			} else {
+				state.yoloHandledApprovalRequests = {};
+				state.yoloApprovalRetryAfter = {};
+				state.message = 'YOLO auto approval enabled.';
+				void maybeQueueYoloApproval();
+			}
+			state.error = '';
+			persistViewState();
+			render();
 			break;
 		case 'control-pause':
 			void performControl('pause');

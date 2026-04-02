@@ -7,17 +7,53 @@ import { registerOverviewTools } from './mcp-overview-tools';
 import { registerQueueTools } from './mcp-queue-tools';
 import { registerRepoReadTools } from './mcp-repo-read-tools';
 import { decorateToolRegistration } from './mcp-tool-contracts';
-import { registerWidgetResources } from './mcp-widget-resources';
+import { registerWidgetResources, stripNotificationWidgetMeta, stripNotificationWidgetResult } from './mcp-widget-resources';
 import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
 import { registerWriteTools } from './mcp-write-tools';
 
-export function buildMcpServer(env: AppEnv): McpServer {
+type McpServerBuildOptions = {
+	enableWidgets?: boolean;
+};
+
+function disableWidgetRegistrations(server: McpServer): void {
+	const originalRegisterTool = server.registerTool.bind(server);
+	server.registerTool = ((name, config, handler) => {
+		const nextConfig =
+			config && typeof config === 'object'
+				? {
+						...config,
+						_meta: stripNotificationWidgetMeta(
+							'_meta' in config && config._meta && typeof config._meta === 'object' && !Array.isArray(config._meta)
+								? (config._meta as Record<string, unknown>)
+								: undefined,
+						),
+					}
+				: config;
+		const nextHandler =
+			typeof handler === 'function'
+				? async (...args: any[]) =>
+						stripNotificationWidgetResult(
+							(await (handler as (...innerArgs: any[]) => Promise<Record<string, unknown> | null | undefined>).apply(
+								server,
+								args,
+							)) as Record<string, unknown> | null | undefined,
+						)
+				: handler;
+		return originalRegisterTool(name, nextConfig as never, nextHandler as never);
+	}) as typeof server.registerTool;
+}
+
+export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {}): McpServer {
 	const server = new McpServer({
 		name: 'opengpt-github-mcp-worker',
 		version: '0.2.4',
 	});
 	decorateToolRegistration(server);
+	const enableWidgets = options.enableWidgets ?? true;
+	if (!enableWidgets) {
+		disableWidgetRegistrations(server);
+	}
 
 	const readAnnotations = { readOnlyHint: true, openWorldHint: false };
 	const writeAnnotations = {
@@ -26,7 +62,9 @@ export function buildMcpServer(env: AppEnv): McpServer {
 		destructiveHint: false,
 	};
 
-	registerWidgetResources(server, env);
+	if (enableWidgets) {
+		registerWidgetResources(server, env);
+	}
 	registerOverviewTools(server, env, readAnnotations, writeAnnotations);
 	registerRepoReadTools(server, env, readAnnotations);
 	registerCollabTools(server, env, readAnnotations, writeAnnotations);

@@ -383,4 +383,29 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	}, 10000);
 
+	it('suppresses widget metadata on /chatgpt/mcp while keeping the same tool surface', async () => {
+		const client = await createChatgptMcpClient();
+		const tools = await client.listTools();
+		const widgetUri = 'ui://widget/notification-center.html';
+
+		expect(tools.tools.find((tool) => tool.name === 'job_progress')?._meta ?? {}).not.toHaveProperty('openai/outputTemplate');
+		expect(tools.tools.find((tool) => tool.name === 'job_progress')?._meta ?? {}).not.toHaveProperty('openai/widgetAccessible');
+		expect(
+			((tools.tools.find((tool) => tool.name === 'job_progress')?._meta as { ui?: Record<string, unknown> } | undefined)?.ui ??
+				{}) as Record<string, unknown>,
+		)
+			.not.toHaveProperty('resourceUri');
+		expect(tools.tools.find((tool) => tool.name === 'run_console_open')?._meta ?? {}).not.toHaveProperty('openai/outputTemplate');
+
+		await expect(client.listResources()).rejects.toThrow('Method not found');
+
+		const progressResult = await client.callTool({
+			name: 'job_progress',
+			arguments: { job_id: 'missing-job' },
+		});
+		expect((progressResult as { _meta?: Record<string, unknown> })._meta ?? {}).not.toHaveProperty('opengpt/widget');
+
+		await client.close();
+	}, 10000);
+
 });

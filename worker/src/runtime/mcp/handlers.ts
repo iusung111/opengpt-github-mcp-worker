@@ -6,14 +6,14 @@ import { buildMcpServer } from '../../mcp-tools';
 import { diagnosticLog, fail, jsonResponse } from '../../utils';
 
 export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
-	return createMcpHandler(buildMcpServer(env) as never, {
+	return createMcpHandler(buildMcpServer(env, { enableWidgets: true }) as never, {
 		route: '/mcp',
 		enableJsonResponse: true,
 	});
 }
 
 export function getChatgptMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
-	return createMcpHandler(buildMcpServer(env) as never, {
+	return createMcpHandler(buildMcpServer(env, { enableWidgets: false }) as never, {
 		route: '/chatgpt/mcp',
 		enableJsonResponse: true,
 	});
