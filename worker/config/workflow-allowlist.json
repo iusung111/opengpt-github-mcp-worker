@@ -1,5 +1,5 @@
 {
   "iusung111/OpenGPT": ["build-todo-exe.yml", "opengpt-exec.yml", "opengpt-package.yml"],
-  "iusung111/opengpt-github-mcp-worker": ["gui-capture.yml", "cloudflare-ci.yml", "opengpt-exec.yml", "opengpt-package.yml"],
+  "iusung111/opengpt-github-mcp-worker": ["gui-capture.yml", "cloudflare-ci.yml", "opengpt-exec.yml", "opengpt-package.yml", "cloudflare-live-deploy.yml"],
   "iusung111/opengpt-github-mcp-worker-mirror-backup": ["gui-capture.yml", "cloudflare-ci.yml", "opengpt-exec.yml", "opengpt-package.yml"]
 }
