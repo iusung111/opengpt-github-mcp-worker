@@ -111,7 +111,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-1',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-1',
 				operation_type: 'run_commands',
@@ -143,7 +143,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-gui-1',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-gui-1',
 				status: 'working',
@@ -162,7 +162,7 @@ describe('runtime http surface', () => {
 				jobs: expect.arrayContaining([
 					expect.objectContaining({
 						job_id: 'job-gui-1',
-						repo: 'iusung111/OpenGPT',
+						repo: 'iusung111/Project_OpenGPT',
 					}),
 				]),
 			},

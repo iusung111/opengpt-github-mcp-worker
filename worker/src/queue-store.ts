@@ -2,6 +2,7 @@ import { JobRecord, WorkspaceRecord } from './contracts';
 import { activeWorkspaceStorageKey, jobStorageKey, workspaceStorageKey } from './queue-helpers';
 import { buildJobIndexEntries, jobIndexReadyKey } from './queue-index';
 import { normalizeWorkspaceRecord, workspaceRecordNeedsNormalization } from './queue-workspaces';
+import { canonicalizeRepoKey } from './repo-aliases';
 
 export interface QueueStoreContext {
 	getStorage<T>(key: string): Promise<T | null>;
@@ -64,7 +65,15 @@ export async function getWorkspace(context: QueueStoreContext, repoKey: string):
 }
 
 export async function getActiveWorkspaceRepoKey(context: QueueStoreContext): Promise<string | null> {
-	return (await context.getStorage<string>(activeWorkspaceStorageKey())) ?? null;
+	const stored = (await context.getStorage<string>(activeWorkspaceStorageKey())) ?? null;
+	if (!stored) {
+		return null;
+	}
+	const normalized = canonicalizeRepoKey(stored);
+	if (normalized !== stored) {
+		await context.putStorage(activeWorkspaceStorageKey(), normalized);
+	}
+	return normalized;
 }
 
 export async function findJob(

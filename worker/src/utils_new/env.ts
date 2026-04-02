@@ -1,6 +1,7 @@
 import { AppEnv } from '../contracts';
 import { hasRecord } from './common';
 import workflowAllowlistConfig from '../workflow-allowlist-config';
+import { canonicalizeRepoKey } from '../repo-aliases';
 
 export function parseCsv(value: string | undefined): string[] {
 	return (value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -11,7 +12,7 @@ export function parseCsvLower(value: string | undefined): string[] {
 }
 
 export function getAllowedRepos(env: AppEnv): string[] {
-	return parseCsv(env.GITHUB_ALLOWED_REPOS);
+	return Array.from(new Set(parseCsv(env.GITHUB_ALLOWED_REPOS).map(canonicalizeRepoKey)));
 }
 
 export function getMcpRequireAccessAuth(env: AppEnv): boolean {
@@ -109,7 +110,7 @@ export function getFileAllowedWorkflowsByRepo(): Record<string, string[]> {
 	const result: Record<string, string[]> = {};
 	for (const [repo, config] of Object.entries(workflowAllowlistConfig)) {
 		if (Array.isArray(config)) {
-			result[repo] = config;
+			result[canonicalizeRepoKey(repo)] = config;
 		}
 	}
 	return result;
@@ -128,9 +129,9 @@ export function getEnvAllowedWorkflowsByRepo(env: Partial<AppEnv>): Record<strin
 		}
 		for (const [repo, workflows] of Object.entries(parsed)) {
 			if (!Array.isArray(workflows)) {
-				throw new Error(`GITHUB_ALLOWED_WORKFLOWS_BY_REPO.${repo} must be an array of workflow ids`);
+				throw new Error(`GITHUB_ALLOWED_WORKFLOWS_BY_REPO.${canonicalizeRepoKey(repo)} must be an array of workflow ids`);
 			}
-			result[repo] = workflows.map((w) => String(w).trim()).filter(Boolean);
+			result[canonicalizeRepoKey(repo)] = workflows.map((w) => String(w).trim()).filter(Boolean);
 		}
 		return result;
 	} catch (error) {
@@ -156,24 +157,26 @@ export function getAllowedWorkflowsByRepo(env: Partial<AppEnv>): Record<string, 
 
 export function getAllowedWorkflowsForRepo(env: Partial<AppEnv>, repoKey: string): string[] {
 	const merged = getAllowedWorkflowsByRepo(env);
-	if (merged[repoKey]) {
-		return merged[repoKey];
+	const canonicalRepoKey = canonicalizeRepoKey(repoKey);
+	if (merged[canonicalRepoKey]) {
+		return merged[canonicalRepoKey];
 	}
 	return getAllowedWorkflows(env as AppEnv);
 }
 
 export function inspectAllowedWorkflowsForRepo(env: Partial<AppEnv>, repoKey: string) {
+	const canonicalRepoKey = canonicalizeRepoKey(repoKey);
 	const fileBased = getFileAllowedWorkflowsByRepo();
 	const envBased = getEnvAllowedWorkflowsByRepo(env);
-	const fileEntries = fileBased[repoKey] ?? [];
-	const envEntries = envBased[repoKey] ?? [];
+	const fileEntries = fileBased[canonicalRepoKey] ?? [];
+	const envEntries = envBased[canonicalRepoKey] ?? [];
 	return {
-		repo_key: repoKey,
+		repo_key: canonicalRepoKey,
 		file_based_entries: fileEntries,
 		env_based_entries: envEntries,
 		env_global_fallback: getAllowedWorkflows(env as AppEnv),
-		effective_allowlist: getAllowedWorkflowsForRepo(env, repoKey),
-		repo_specific_match_found: Boolean(fileBased[repoKey] || envBased[repoKey]),
+		effective_allowlist: getAllowedWorkflowsForRepo(env, canonicalRepoKey),
+		repo_specific_match_found: Boolean(fileBased[canonicalRepoKey] || envBased[canonicalRepoKey]),
 		precedence: {
 			rules: [
 				'Repo-managed workflow allowlist entries from worker/config/workflow-allowlist.json are loaded first.',

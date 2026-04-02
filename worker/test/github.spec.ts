@@ -68,7 +68,7 @@ describe('github auth helpers', () => {
 				GITHUB_APP_INSTALLATION_ID: '456',
 				GITHUB_APP_PRIVATE_KEY_PEM: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
 			} as Env,
-			'/repos/iusung111/OpenGPT',
+			'/repos/iusung111/Project_OpenGPT',
 		);
 
 		expect(result).toMatchObject({ ok: true });
@@ -102,7 +102,7 @@ describe('github auth helpers', () => {
 				GITHUB_APP_INSTALLATION_ID: '456',
 				GITHUB_APP_PRIVATE_KEY_PEM: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
 			} as Env,
-			'/repos/iusung111/OpenGPT/pulls/6/merge',
+			'/repos/iusung111/Project_OpenGPT/pulls/6/merge',
 			{ merge_method: 'squash', commit_title: 'Merge PR #6' },
 		);
 
@@ -141,7 +141,7 @@ describe('github auth helpers', () => {
 				GITHUB_APP_PRIVATE_KEY_PEM: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
 			} as Env,
 			'GET',
-			'/repos/iusung111/OpenGPT/actions/artifacts/1/zip',
+			'/repos/iusung111/Project_OpenGPT/actions/artifacts/1/zip',
 		);
 
 		expect(new Uint8Array(await response.arrayBuffer())).toEqual(binaryPayload);
@@ -169,11 +169,11 @@ describe('github auth helpers', () => {
 			GITHUB_APP_PRIVATE_KEY_PEM: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
 		} as Env;
 
-		const firstResponse = await githubRequestRaw(env, 'GET', '/repos/iusung111/OpenGPT/empty');
+		const firstResponse = await githubRequestRaw(env, 'GET', '/repos/iusung111/Project_OpenGPT/empty');
 		expect(firstResponse.status).toBe(204);
 		expect(firstResponse.body).toBeNull();
 
-		const secondResponse = await githubRequestRaw(env, 'GET', '/repos/iusung111/OpenGPT/empty');
+		const secondResponse = await githubRequestRaw(env, 'GET', '/repos/iusung111/Project_OpenGPT/empty');
 		expect(secondResponse.status).toBe(204);
 		expect(secondResponse.body).toBeNull();
 		expect(await secondResponse.text()).toBe('');
@@ -199,43 +199,43 @@ describe('github auth helpers', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.test/repos/iusung111/OpenGPT/git/ref/heads/agent/upload-test') {
+			if (url === 'https://api.github.test/repos/iusung111/Project_OpenGPT/git/ref/heads/agent/upload-test') {
 				return new Response(JSON.stringify({ object: { sha: 'base-ref-sha' } }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' },
 				});
 			}
-			if (url === 'https://api.github.test/repos/iusung111/OpenGPT/contents/README.md?ref=agent%2Fupload-test') {
+			if (url === 'https://api.github.test/repos/iusung111/Project_OpenGPT/contents/README.md?ref=agent%2Fupload-test') {
 				return new Response(JSON.stringify({ type: 'file', sha: 'blob-old-sha' }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' },
 				});
 			}
-			if (url === 'https://api.github.test/repos/iusung111/OpenGPT/git/commits/base-ref-sha') {
+			if (url === 'https://api.github.test/repos/iusung111/Project_OpenGPT/git/commits/base-ref-sha') {
 				return new Response(JSON.stringify({ tree: { sha: 'tree-base-sha' } }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' },
 				});
 			}
-			if (url === 'https://api.github.test/repos/iusung111/OpenGPT/git/blobs') {
+			if (url === 'https://api.github.test/repos/iusung111/Project_OpenGPT/git/blobs') {
 				return new Response(JSON.stringify({ sha: 'blob-new-sha' }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' },
 				});
 			}
-			if (url === 'https://api.github.test/repos/iusung111/OpenGPT/git/trees') {
+			if (url === 'https://api.github.test/repos/iusung111/Project_OpenGPT/git/trees') {
 				return new Response(JSON.stringify({ sha: 'tree-new-sha' }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' },
 				});
 			}
-			if (url === 'https://api.github.test/repos/iusung111/OpenGPT/git/commits' && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+			if (url === 'https://api.github.test/repos/iusung111/Project_OpenGPT/git/commits' && (init?.method ?? 'GET').toUpperCase() === 'POST') {
 				return new Response(JSON.stringify({ sha: 'commit-new-sha' }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' },
 				});
 			}
-			if (url === 'https://api.github.test/repos/iusung111/OpenGPT/git/refs/heads/agent/upload-test') {
+			if (url === 'https://api.github.test/repos/iusung111/Project_OpenGPT/git/refs/heads/agent/upload-test') {
 				return new Response(JSON.stringify({ ref: 'refs/heads/agent/upload-test', object: { sha: 'commit-new-sha' } }), {
 					status: 200,
 					headers: { 'content-type': 'application/json' },
@@ -244,12 +244,12 @@ describe('github auth helpers', () => {
 			return new Response('not found', { status: 404 });
 		});
 
-		const inspection = await inspectFileAtBranch(env, 'iusung111', 'OpenGPT', 'agent/upload-test', 'README.md');
+		const inspection = await inspectFileAtBranch(env, 'iusung111', 'Project_OpenGPT', 'agent/upload-test', 'README.md');
 		expect(inspection).toEqual({ ref_sha: 'base-ref-sha', blob_sha: 'blob-old-sha' });
 
 		const result = await commitUploadedFile(env, {
 			owner: 'iusung111',
-			repo: 'OpenGPT',
+			repo: 'Project_OpenGPT',
 			branch: 'agent/upload-test',
 			path: 'README.md',
 			message: 'Upload README via stream',

@@ -70,13 +70,13 @@ describe('normalizeWorkflowInputs', () => {
 		const env = {
 			GITHUB_ALLOWED_WORKFLOWS: 'agent-run.yml,pr-merge.yml',
 			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: JSON.stringify({
-				'iusung111/OpenGPT': ['agent-run.yml', 'pr-merge.yml'],
+				'iusung111/Project_OpenGPT': ['agent-run.yml', 'pr-merge.yml'],
 				'iusung111/opengpt-github-mcp-worker': ['cloudflare-self-deploy.yml'],
 				'iusung111/opengpt-github-mcp-worker-mirror-backup': ['cloudflare-self-deploy.yml'],
 			}),
 		};
 
-		expect(getAllowedWorkflowsForRepo(env, 'iusung111/OpenGPT')).toEqual([
+		expect(getAllowedWorkflowsForRepo(env, 'iusung111/Project_OpenGPT')).toEqual([
 			'build-todo-exe.yml',
 			'opengpt-exec.yml',
 			'opengpt-package.yml',
@@ -103,7 +103,7 @@ describe('normalizeWorkflowInputs', () => {
 
 	it('loads the repo-managed workflow allowlist config', () => {
 		expect(getFileAllowedWorkflowsByRepo()).toMatchObject({
-			'iusung111/OpenGPT': ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
+			'iusung111/Project_OpenGPT': ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
 			'iusung111/opengpt-github-mcp-worker': ['gui-capture.yml', 'cloudflare-ci.yml', 'opengpt-exec.yml', 'opengpt-package.yml', 'cloudflare-live-deploy.yml'],
 			'iusung111/opengpt-github-mcp-worker-mirror-backup': ['gui-capture.yml', 'cloudflare-ci.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
 		});
@@ -112,29 +112,29 @@ describe('normalizeWorkflowInputs', () => {
 	it('parses repo-specific workflow env config', () => {
 		const env = {
 			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: JSON.stringify({
-				'iusung111/OpenGPT': ['agent-run.yml'],
+				'iusung111/Project_OpenGPT': ['agent-run.yml'],
 			}),
 		};
 
 		expect(getEnvAllowedWorkflowsByRepo(env)).toEqual({
-			'iusung111/OpenGPT': ['agent-run.yml'],
+			'iusung111/Project_OpenGPT': ['agent-run.yml'],
 		});
 	});
 
 	it('merges repo-managed and env repo-specific workflow allowlists', () => {
 		const env = {
 			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: JSON.stringify({
-				'iusung111/OpenGPT': ['agent-run.yml', 'build-todo-exe.yml'],
+				'iusung111/Project_OpenGPT': ['agent-run.yml', 'build-todo-exe.yml'],
 			}),
 		};
 
-		expect(getAllowedWorkflowsByRepo(env)['iusung111/OpenGPT']).toEqual([
+		expect(getAllowedWorkflowsByRepo(env)['iusung111/Project_OpenGPT']).toEqual([
 			'build-todo-exe.yml',
 			'opengpt-exec.yml',
 			'opengpt-package.yml',
 			'agent-run.yml',
 		]);
-		expect(getAllowedWorkflowsForRepo(env, 'iusung111/OpenGPT')).toEqual([
+		expect(getAllowedWorkflowsForRepo(env, 'iusung111/Project_OpenGPT')).toEqual([
 			'build-todo-exe.yml',
 			'opengpt-exec.yml',
 			'opengpt-package.yml',
@@ -154,12 +154,12 @@ describe('normalizeWorkflowInputs', () => {
 		const env = {
 			GITHUB_ALLOWED_WORKFLOWS: 'agent-run.yml,pr-merge.yml',
 			GITHUB_ALLOWED_WORKFLOWS_BY_REPO: JSON.stringify({
-				'iusung111/OpenGPT': ['cloudflare-live-deploy.yml'],
+				'iusung111/Project_OpenGPT': ['cloudflare-live-deploy.yml'],
 			}),
 		};
 
-		expect(inspectAllowedWorkflowsForRepo(env, 'iusung111/OpenGPT')).toMatchObject({
-			repo_key: 'iusung111/OpenGPT',
+		expect(inspectAllowedWorkflowsForRepo(env, 'iusung111/Project_OpenGPT')).toMatchObject({
+			repo_key: 'iusung111/Project_OpenGPT',
 			file_based_entries: ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
 			env_based_entries: ['cloudflare-live-deploy.yml'],
 			env_global_fallback: ['agent-run.yml', 'pr-merge.yml'],
@@ -174,17 +174,17 @@ describe('normalizeWorkflowInputs', () => {
 		};
 
 		expect(() => getEnvAllowedWorkflowsByRepo(env)).toThrow(
-			/GITHUB_ALLOWED_WORKFLOWS_BY_REPO\.iusung111\/OpenGPT must be an array of workflow ids/,
+			/GITHUB_ALLOWED_WORKFLOWS_BY_REPO\.iusung111\/Project_OpenGPT must be an array of workflow ids/,
 		);
 	});
 
-	it('allows build-todo-exe.yml for iusung111/OpenGPT from repo-managed config', () => {
-		expect(() => ensureWorkflowAllowed({}, 'iusung111/OpenGPT', 'build-todo-exe.yml')).not.toThrow();
+	it('allows build-todo-exe.yml for iusung111/Project_OpenGPT from repo-managed config', () => {
+		expect(() => ensureWorkflowAllowed({}, 'iusung111/Project_OpenGPT', 'build-todo-exe.yml')).not.toThrow();
 	});
 
 	it('rejects non-allowlisted workflows with the repo in the error message', () => {
-		expect(() => ensureWorkflowAllowed({}, 'iusung111/OpenGPT', 'not-allowed.yml')).toThrow(
-			/workflow not allowlisted for iusung111\/OpenGPT: not-allowed\.yml/,
+		expect(() => ensureWorkflowAllowed({}, 'iusung111/Project_OpenGPT', 'not-allowed.yml')).toThrow(
+			/workflow not allowlisted for iusung111\/Project_OpenGPT: not-allowed\.yml/,
 		);
 	});
 
@@ -212,19 +212,27 @@ describe('normalizeWorkflowInputs', () => {
 
 describe('resolveRepoIdentityInput', () => {
 	it('accepts repo_key as the primary repo identity input', () => {
-		expect(resolveRepoIdentityInput({ repo_key: 'iusung111/OpenGPT' })).toEqual({
-			repo_key: 'iusung111/OpenGPT',
+		expect(resolveRepoIdentityInput({ repo_key: 'iusung111/Project_OpenGPT' })).toEqual({
+			repo_key: 'iusung111/Project_OpenGPT',
 			owner: 'iusung111',
-			repo: 'OpenGPT',
+			repo: 'Project_OpenGPT',
+		});
+	});
+
+	it('canonicalizes the legacy OpenGPT repo identity to Project_OpenGPT', () => {
+		expect(resolveRepoIdentityInput({ repo_key: 'iusung111/OpenGPT' })).toEqual({
+			repo_key: 'iusung111/Project_OpenGPT',
+			owner: 'iusung111',
+			repo: 'Project_OpenGPT',
 		});
 	});
 
 	it('rejects mismatched repo_key and owner/repo combinations', () => {
 		expect(() =>
 			resolveRepoIdentityInput({
-				repo_key: 'iusung111/OpenGPT',
+				repo_key: 'iusung111/Project_OpenGPT',
 				owner: 'other',
-				repo: 'OpenGPT',
+				repo: 'Project_OpenGPT',
 			}),
 		).toThrow(/invalid repo identity/i);
 	});
@@ -240,7 +248,7 @@ describe('resolveRepoIdentityInput', () => {
 
 describe('classifyRepoPathIssue', () => {
 	it('rejects absolute local filesystem paths with corrective guidance', () => {
-		expect(classifyRepoPathIssue('D:\\VScode\\OpenGPT\\README.md')).toMatchObject({
+		expect(classifyRepoPathIssue('D:\\VScode\\Project_OpenGPT\\README.md')).toMatchObject({
 			kind: 'absolute',
 			message: expect.stringContaining('repository-relative POSIX paths'),
 		});

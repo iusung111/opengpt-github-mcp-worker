@@ -1,4 +1,5 @@
 import { JobRecord } from './contracts';
+import { canonicalizeRepoKey, canonicalizeWorkspacePath } from './repo-aliases';
 
 const encoder = new TextEncoder();
 
@@ -15,7 +16,7 @@ export function deliveryStorageKey(deliveryId: string): string {
 }
 
 export function workspaceStorageKey(repoKey: string): string {
-	return `workspace:${repoKey.toLowerCase()}`;
+	return `workspace:${canonicalizeRepoKey(repoKey).toLowerCase()}`;
 }
 
 export function activeWorkspaceStorageKey(): string {
@@ -62,7 +63,7 @@ export function normalizeLookup(value: unknown): string {
 }
 
 export function normalizeWorkspacePath(path: string): string {
-	const trimmed = String(path ?? '').trim();
+	const trimmed = canonicalizeWorkspacePath(String(path ?? '').trim());
 	if (!trimmed) {
 		return '';
 	}

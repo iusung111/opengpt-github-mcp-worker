@@ -13,7 +13,7 @@ describe('queue workspace helpers', () => {
 	it('builds a normalized workspace record', () => {
 		const workspace = buildWorkspaceRecord(
 			{
-				repo_key: 'iusung111/OpenGPT',
+				repo_key: 'iusung111/Project_OpenGPT',
 				workspace_path: 'D:\\VScode\\projects\\OpenGPT\\',
 			},
 			null,
@@ -21,11 +21,11 @@ describe('queue workspace helpers', () => {
 		);
 
 		expect(workspace).toMatchObject({
-			repo_key: 'iusung111/OpenGPT',
-			repo_slug: 'opengpt',
-			display_name: 'iusung111/OpenGPT',
+			repo_key: 'iusung111/Project_OpenGPT',
+			repo_slug: 'project-opengpt',
+			display_name: 'iusung111/Project_OpenGPT',
 			aliases: [],
-			workspace_path: 'D:/VScode/projects/OpenGPT',
+			workspace_path: 'D:/VScode/projects/Project_OpenGPT',
 			last_used_at: '2026-03-21T00:00:00.000Z',
 		});
 	});
@@ -43,7 +43,10 @@ describe('queue workspace helpers', () => {
 
 		expect(workspaceRecordNeedsNormalization(legacyWorkspace)).toBe(true);
 		expect(normalizeWorkspaceRecord(legacyWorkspace)).toMatchObject({
-			workspace_path: 'D:/VScode/projects/OpenGPT',
+			repo_key: 'iusung111/Project_OpenGPT',
+			repo_slug: 'project-opengpt',
+			display_name: 'Project_OpenGPT',
+			workspace_path: 'D:/VScode/projects/Project_OpenGPT',
 		});
 	});
 
@@ -60,8 +63,8 @@ describe('queue workspace helpers', () => {
 				last_used_at: '2026-03-21T00:00:01.000Z',
 			},
 			{
-				repo_key: 'iusung111/OpenGPT',
-				repo_slug: 'opengpt',
+				repo_key: 'iusung111/Project_OpenGPT',
+				repo_slug: 'project-opengpt',
 				display_name: 'OpenGPT',
 				aliases: ['webgpt'],
 				workspace_path: '/tmp/OpenGPT',
@@ -71,16 +74,16 @@ describe('queue workspace helpers', () => {
 			},
 		];
 
-		const sorted = sortWorkspaces(workspaces, 'iusung111/OpenGPT');
-		expect(sorted[0]?.repo_key).toBe('iusung111/OpenGPT');
+		const sorted = sortWorkspaces(workspaces, 'iusung111/Project_OpenGPT');
+		expect(sorted[0]?.repo_key).toBe('iusung111/Project_OpenGPT');
 		expect(sorted[0]?.is_active).toBe(true);
 	});
 
 	it('finds similar workspaces by repo key or alias', () => {
 		const workspaces: Array<WorkspaceRecord & { is_active?: boolean }> = [
 			{
-				repo_key: 'iusung111/OpenGPT',
-				repo_slug: 'opengpt',
+				repo_key: 'iusung111/Project_OpenGPT',
+				repo_slug: 'project-opengpt',
 				display_name: 'OpenGPT',
 				aliases: ['webgpt'],
 				workspace_path: 'D:/tmp/OpenGPT',
@@ -90,6 +93,7 @@ describe('queue workspace helpers', () => {
 		];
 
 		expect(findSimilarWorkspaceMatches(workspaces, 'webgpt')).toHaveLength(1);
+		expect(findSimilarWorkspaceMatches(workspaces, undefined, 'iusung111/Project_OpenGPT')).toHaveLength(1);
 		expect(findSimilarWorkspaceMatches(workspaces, undefined, 'iusung111/OpenGPT')).toHaveLength(1);
 		expect(findSimilarWorkspaceMatches(workspaces, 'D:\\tmp\\OpenGPT\\')).toHaveLength(1);
 	});

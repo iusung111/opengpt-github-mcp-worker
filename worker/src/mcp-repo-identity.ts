@@ -1,4 +1,5 @@
 import * as z from 'zod/v4';
+import { canonicalizeRepoKey, canonicalizeRepoName } from './repo-aliases';
 
 export type RepoIdentityInput = {
 	repo_key?: string;
@@ -36,7 +37,7 @@ function ensureOptionalString(value: unknown, field: 'repo_key' | 'owner' | 'rep
 }
 
 function parseRepoKey(repoKey: string): ResolvedRepoIdentity {
-	const trimmed = repoKey.trim();
+	const trimmed = canonicalizeRepoKey(repoKey);
 	const segments = trimmed.split('/').map((segment) => segment.trim()).filter(Boolean);
 	if (segments.length !== 2) {
 		throw new Error(
@@ -54,7 +55,7 @@ function parseRepoKey(repoKey: string): ResolvedRepoIdentity {
 export function resolveRepoIdentityInput(input: RepoIdentityInput): ResolvedRepoIdentity {
 	const repoKey = input.repo_key?.trim();
 	const owner = input.owner?.trim();
-	const repo = input.repo?.trim();
+	const repo = owner && input.repo?.trim() ? canonicalizeRepoName(owner, input.repo) : input.repo?.trim();
 
 	if (repoKey) {
 		const resolved = parseRepoKey(repoKey);
@@ -68,7 +69,7 @@ export function resolveRepoIdentityInput(input: RepoIdentityInput): ResolvedRepo
 
 	if (owner && repo) {
 		return {
-			repo_key: `${owner}/${repo}`,
+			repo_key: canonicalizeRepoKey(`${owner}/${repo}`),
 			owner,
 			repo,
 		};

@@ -7,7 +7,7 @@ import { JobRecord, WorkspaceRecord } from '../src/contracts';
 function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
 		job_id: 'job-1',
-		repo: 'iusung111/OpenGPT',
+		repo: 'iusung111/Project_OpenGPT',
 		base_branch: 'main',
 		target_paths: [],
 		status: 'queued',
@@ -53,14 +53,14 @@ function createContext(storedJobs: JobRecord[] = []) {
 describe('queue-store helpers', () => {
 	it('loads stored job and workspace values by derived keys', async () => {
 		const { context, store } = createContext([makeJob()]);
-		store.set(workspaceStorageKey('iusung111/OpenGPT'), { repo_key: 'iusung111/OpenGPT', workspace_path: 'd:/VScode/repos/sandbox/OpenGPT' });
-		store.set(activeWorkspaceStorageKey(), 'iusung111/OpenGPT');
+		store.set(workspaceStorageKey('iusung111/Project_OpenGPT'), { repo_key: 'iusung111/Project_OpenGPT', workspace_path: 'd:/VScode/repos/sandbox/Project_OpenGPT' });
+		store.set(activeWorkspaceStorageKey(), 'iusung111/Project_OpenGPT');
 
 		await expect(getJob(context, 'job-1')).resolves.toMatchObject({ job_id: 'job-1' });
-		await expect(getWorkspace(context, 'iusung111/OpenGPT')).resolves.toMatchObject({
-			repo_key: 'iusung111/OpenGPT',
+		await expect(getWorkspace(context, 'iusung111/Project_OpenGPT')).resolves.toMatchObject({
+			repo_key: 'iusung111/Project_OpenGPT',
 		});
-		await expect(getActiveWorkspaceRepoKey(context)).resolves.toBe('iusung111/OpenGPT');
+		await expect(getActiveWorkspaceRepoKey(context)).resolves.toBe('iusung111/Project_OpenGPT');
 	});
 
 	it('normalizes and self-heals legacy workspace records on read', async () => {
@@ -77,11 +77,23 @@ describe('queue-store helpers', () => {
 		store.set(workspaceStorageKey('iusung111/OpenGPT'), legacyWorkspace);
 
 		await expect(getWorkspace(context, 'iusung111/OpenGPT')).resolves.toMatchObject({
-			workspace_path: 'D:/VScode/projects/OpenGPT',
+			repo_key: 'iusung111/Project_OpenGPT',
+			repo_slug: 'project-opengpt',
+			display_name: 'Project_OpenGPT',
+			workspace_path: 'D:/VScode/projects/Project_OpenGPT',
 		});
-		expect(store.get(workspaceStorageKey('iusung111/OpenGPT'))).toMatchObject({
-			workspace_path: 'D:/VScode/projects/OpenGPT',
+		expect(store.get(workspaceStorageKey('iusung111/Project_OpenGPT'))).toMatchObject({
+			repo_key: 'iusung111/Project_OpenGPT',
+			workspace_path: 'D:/VScode/projects/Project_OpenGPT',
 		});
+	});
+
+	it('canonicalizes legacy active repo keys on read', async () => {
+		const { context, store } = createContext();
+		store.set(activeWorkspaceStorageKey(), 'iusung111/OpenGPT');
+
+		await expect(getActiveWorkspaceRepoKey(context)).resolves.toBe('iusung111/Project_OpenGPT');
+		expect(store.get(activeWorkspaceStorageKey())).toBe('iusung111/Project_OpenGPT');
 	});
 
 	it('backfills indexes once and marks the index ready flag', async () => {
@@ -92,7 +104,7 @@ describe('queue-store helpers', () => {
 		await ensureJobIndexes(context);
 
 		expect(store.get(jobIndexReadyKey())).toBe(true);
-		expect(store.get(jobRunIndexKey('iusung111/OpenGPT', 123))).toEqual({ job_id: 'job-1' });
+		expect(store.get(jobRunIndexKey('iusung111/Project_OpenGPT', 123))).toEqual({ job_id: 'job-1' });
 	});
 
 	it('persists updated indexes and removes stale ones', async () => {
@@ -103,8 +115,8 @@ describe('queue-store helpers', () => {
 		await persistJob(context, original);
 		await persistJob(context, updated, original);
 
-		expect(store.has(jobRunIndexKey('iusung111/OpenGPT', 123))).toBe(false);
-		expect(store.get(jobRunIndexKey('iusung111/OpenGPT', 456))).toEqual({ job_id: 'job-1' });
+		expect(store.has(jobRunIndexKey('iusung111/Project_OpenGPT', 123))).toBe(false);
+		expect(store.get(jobRunIndexKey('iusung111/Project_OpenGPT', 456))).toEqual({ job_id: 'job-1' });
 	});
 
 	it('supports raw and reconciled findJob lookups', async () => {

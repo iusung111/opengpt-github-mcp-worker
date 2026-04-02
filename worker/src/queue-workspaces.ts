@@ -1,12 +1,15 @@
 import { WorkspaceRecord } from './contracts';
 import { normalizeLookup, normalizeWorkspacePath } from './queue-helpers';
+import { canonicalizeRepoKey, canonicalizeWorkspaceDisplayName, canonicalizeWorkspacePath } from './repo-aliases';
 import { parseIsoMs } from './utils';
 
 export function normalizeWorkspaceRecord(workspace: WorkspaceRecord): WorkspaceRecord {
+	const repoKey = canonicalizeRepoKey(workspace.repo_key);
 	return {
 		...workspace,
-		repo_slug: workspace.repo_slug || normalizeLookup(workspace.repo_key.split('/').pop()),
-		display_name: workspace.display_name || workspace.repo_key,
+		repo_key: repoKey,
+		repo_slug: normalizeLookup(repoKey.split('/').pop()),
+		display_name: canonicalizeWorkspaceDisplayName(workspace.display_name || repoKey),
 		aliases: Array.isArray(workspace.aliases) ? workspace.aliases : [],
 		workspace_path: normalizeWorkspacePath(workspace.workspace_path),
 	};
@@ -22,14 +25,15 @@ export function buildWorkspaceRecord(
 	existing: WorkspaceRecord | null,
 	timestamp: string,
 ): WorkspaceRecord {
-	const repoSlug = input.repo_slug || normalizeLookup(input.repo_key.split('/').pop());
+	const repoKey = canonicalizeRepoKey(input.repo_key);
+	const repoSlug = input.repo_slug || normalizeLookup(repoKey.split('/').pop());
 	return {
 		...(existing ?? {}),
 		...input,
-		repo_key: input.repo_key,
+		repo_key: repoKey,
 		workspace_path: normalizeWorkspacePath(input.workspace_path),
 		repo_slug: repoSlug,
-		display_name: input.display_name || existing?.display_name || input.repo_key,
+		display_name: canonicalizeWorkspaceDisplayName(input.display_name || existing?.display_name || repoKey),
 		aliases: input.aliases ?? existing?.aliases ?? [],
 		created_at: existing?.created_at ?? timestamp,
 		updated_at: timestamp,
@@ -41,9 +45,10 @@ export function sortWorkspaces(
 	workspaces: WorkspaceRecord[],
 	activeRepoKey: string | null,
 ): Array<WorkspaceRecord & { is_active?: boolean }> {
+	const normalizedActiveRepoKey = activeRepoKey ? canonicalizeRepoKey(activeRepoKey) : null;
 	const workspacesWithMeta = workspaces.map((workspace) => ({
 		workspace: normalizeWorkspaceRecord(workspace),
-		isActive: workspace.repo_key === activeRepoKey,
+		isActive: canonicalizeRepoKey(workspace.repo_key) === normalizedActiveRepoKey,
 		usedMs: parseIsoMs(workspace.last_used_at) ?? 0,
 		updatedMs: parseIsoMs(workspace.updated_at) ?? 0,
 	}));
@@ -72,8 +77,9 @@ export function findSimilarWorkspaceMatches(
 	query?: string,
 	repoKey?: string,
 ): WorkspaceRecord[] {
-	const target = normalizeLookup(query || repoKey || '');
-	const repoSlug = normalizeLookup((repoKey || '').split('/').pop() ?? '');
+	const canonicalRepoKey = repoKey ? canonicalizeRepoKey(repoKey) : undefined;
+	const target = normalizeLookup(canonicalizeWorkspacePath(query || canonicalRepoKey || ''));
+	const repoSlug = normalizeLookup((canonicalRepoKey || '').split('/').pop() ?? '');
 	return workspaces
 		.map((workspace) => {
 			const normalizedWorkspace = normalizeWorkspaceRecord(workspace);

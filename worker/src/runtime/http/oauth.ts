@@ -8,6 +8,7 @@ import {
 	jsonResponse,
 	ok,
 } from '../../utils';
+import { PROJECT_REPO_KEY } from '../../repo-aliases';
 
 export function handleOAuthProtectedResourceMetadata(request: Request, env: AppEnv): Response {
 	const url = new URL(request.url);
@@ -29,7 +30,7 @@ export async function handleGitHubAppInstallation(env: AppEnv): Promise<Response
 		return jsonResponse(fail('github_auth_not_configured', 'github auth not configured'), 400);
 	}
 	try {
-		const repo = getAllowedRepos(env)[0] ?? 'iusung111/OpenGPT';
+		const repo = getAllowedRepos(env)[0] ?? PROJECT_REPO_KEY;
 		const [owner, name] = repo.split('/');
 		const data = await githubGet(env, `/repos/${owner}/${name}`);
 		return jsonResponse(ok({ repository: data as Record<string, unknown> }));

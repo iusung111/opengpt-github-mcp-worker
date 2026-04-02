@@ -6,11 +6,11 @@ describe('project capabilities helpers', () => {
 		expect(
 			renderPreviewUrlTemplate('https://{service}-{repo}.example.com/{ref}', {
 				owner: 'iusung111',
-				repo: 'OpenGPT',
+				repo: 'Project_OpenGPT',
 				ref: 'agent/demo-branch',
 				service: 'web',
 			}),
-		).toBe('https://web-OpenGPT.example.com/agent%2Fdemo-branch');
+		).toBe('https://web-Project_OpenGPT.example.com/agent%2Fdemo-branch');
 	});
 
 	it('resolves an explicit verify profile when present', () => {

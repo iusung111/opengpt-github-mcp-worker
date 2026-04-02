@@ -26,7 +26,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-2',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-2',
 				status: 'working',
@@ -38,7 +38,7 @@ describe('runtime http surface', () => {
 
 		const body = JSON.stringify({
 			action: 'completed',
-			repository: { full_name: 'iusung111/OpenGPT' },
+			repository: { full_name: 'iusung111/Project_OpenGPT' },
 			workflow_run: {
 				id: 101,
 				head_branch: 'agent/job-2',
@@ -73,7 +73,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-stale-working',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-stale-working',
 				status: 'working',
@@ -105,7 +105,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-stale-review',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-stale-review',
 				status: 'review_pending',
@@ -136,7 +136,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-stale-review-repeat',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-stale-review-repeat',
 				status: 'review_pending',
@@ -169,7 +169,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-3',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-3',
 				workflow_run_id: 303,
@@ -180,7 +180,7 @@ describe('runtime http surface', () => {
 
 		const workflowBody = JSON.stringify({
 			action: 'completed',
-			repository: { full_name: 'iusung111/OpenGPT' },
+			repository: { full_name: 'iusung111/Project_OpenGPT' },
 			workflow_run: {
 				id: 303,
 				head_branch: 'main',
@@ -202,7 +202,7 @@ describe('runtime http surface', () => {
 
 		const prBody = JSON.stringify({
 			action: 'opened',
-			repository: { full_name: 'iusung111/OpenGPT' },
+			repository: { full_name: 'iusung111/Project_OpenGPT' },
 			pull_request: {
 				number: 7,
 				head: { ref: 'agent/job-3-303' },
@@ -271,7 +271,7 @@ describe('runtime http surface', () => {
 			headers: queueJsonHeaders,
 			body: JSON.stringify({
 				job_id: 'job-dup-webhook',
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				base_branch: 'main',
 				work_branch: 'agent/job-dup-webhook',
 				status: 'working',
@@ -281,7 +281,7 @@ describe('runtime http surface', () => {
 
 		const body = JSON.stringify({
 			action: 'completed',
-			repository: { full_name: 'iusung111/OpenGPT' },
+			repository: { full_name: 'iusung111/Project_OpenGPT' },
 			workflow_run: {
 				id: 515,
 				head_branch: 'agent/job-dup-webhook',
@@ -329,7 +329,7 @@ describe('runtime http surface', () => {
 	it('evicts old delivery dedupe records when retention limit is exceeded', async () => {
 		const body = JSON.stringify({
 			action: 'completed',
-			repository: { full_name: 'iusung111/OpenGPT' },
+			repository: { full_name: 'iusung111/Project_OpenGPT' },
 			workflow_run: {
 				id: 9991,
 				head_branch: 'agent/no-match',

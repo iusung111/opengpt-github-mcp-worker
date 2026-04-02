@@ -41,7 +41,7 @@ const DEMO_ENVELOPES = [
 			jobs: [
 				{
 					job_id: 'job-demo-42',
-					repo: 'iusung111/OpenGPT',
+					repo: 'iusung111/Project_OpenGPT',
 					next_actor: 'system',
 					run_summary: {
 						run_id: 'job-demo-42',
@@ -108,7 +108,7 @@ const DEMO_ENVELOPES = [
 				},
 				{
 					job_id: 'job-demo-43',
-					repo: 'iusung111/OpenGPT',
+					repo: 'iusung111/Project_OpenGPT',
 					next_actor: 'system',
 					run_summary: {
 						run_id: 'job-demo-43',
@@ -232,9 +232,9 @@ const DEMO_ENVELOPES = [
 				created_at: '2026-03-28T10:19:42.000Z',
 			},
 			bundle: {
-				repos: ['iusung111/OpenGPT'],
+				repos: ['iusung111/Project_OpenGPT'],
 				approved_tools: ['workflow_dispatch', 'job_control', 'incident_bundle_create', 'job_event_feed'],
-				approval_request: 'Approve one MCP permission bundle for iusung111/OpenGPT. Scope: Queue and workflow control. Capabilities: queue, workflow, read. Reason: Need workflow approval before redispatching the mirror validation run.',
+				approval_request: 'Approve one MCP permission bundle for iusung111/Project_OpenGPT. Scope: Queue and workflow control. Capabilities: queue, workflow, read. Reason: Need workflow approval before redispatching the mirror validation run.',
 			},
 		},
 		meta: null,

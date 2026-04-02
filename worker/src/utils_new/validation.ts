@@ -1,5 +1,6 @@
 import { AppEnv } from '../contracts';
 import { diagnosticLog } from './common';
+import { canonicalizeRepoKey } from '../repo-aliases';
 import {
 	getAllowedRepos,
 	getAllowedWorkflowsForRepo,
@@ -9,12 +10,14 @@ import {
 
 export function repoAllowed(env: AppEnv, repo: string): boolean {
 	const allowed = getAllowedRepos(env);
-	return allowed.length === 0 || allowed.includes(repo);
+	const canonicalRepoKey = canonicalizeRepoKey(repo);
+	return allowed.length === 0 || allowed.includes(canonicalRepoKey);
 }
 
 export function ensureRepoAllowed(env: AppEnv, repo: string): void {
-	if (!repoAllowed(env, repo)) {
-		throw new Error(`repository not allowlisted: ${repo}`);
+	const canonicalRepoKey = canonicalizeRepoKey(repo);
+	if (!repoAllowed(env, canonicalRepoKey)) {
+		throw new Error(`repository not allowlisted: ${canonicalRepoKey}`);
 	}
 }
 
@@ -97,10 +100,11 @@ export function ensureSafeRepoPath(path: string): string {
 }
 
 export function ensureWorkflowAllowed(env: AppEnv, repoKey: string, workflowId: string): void {
-	const allowed = getAllowedWorkflowsForRepo(env, repoKey);
+	const canonicalRepoKey = canonicalizeRepoKey(repoKey);
+	const allowed = getAllowedWorkflowsForRepo(env, canonicalRepoKey);
 	if (!allowed.includes(workflowId)) {
-		diagnosticLog('workflow_not_allowlisted', { repo_key: repoKey, workflow_id: workflowId, allowed_count: allowed.length });
-		throw new Error(`workflow not allowlisted for ${repoKey}: ${workflowId}`);
+		diagnosticLog('workflow_not_allowlisted', { repo_key: canonicalRepoKey, workflow_id: workflowId, allowed_count: allowed.length });
+		throw new Error(`workflow not allowlisted for ${canonicalRepoKey}: ${workflowId}`);
 	}
 }
 
