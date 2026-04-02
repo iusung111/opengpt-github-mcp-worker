@@ -3,6 +3,7 @@ import * as z from 'zod/v4';
 import { AppEnv } from './contracts';
 import { getManifestDispatchRequest } from './job-manifest';
 import { ToolAnnotations } from './mcp/contracts';
+import { buildReviewSkillGuidance } from './review-skill-guidance';
 import {
 	activateRepoWorkspace,
 	encodeGitHubRef,
@@ -40,6 +41,7 @@ export function registerCollabTools(
 		},
 		async ({ job_id, include_recent_audits, include_workflow_runs, workflow_run_limit }) => {
 			try {
+				const reviewSkillGuidance = buildReviewSkillGuidance();
 				const jobResult = await queueJson(env, { action: 'job_get', job_id });
 				const job = (jobResult.data?.job ?? null) as Record<string, unknown> | null;
 				if (!jobResult.ok || !job) {
@@ -94,7 +96,9 @@ export function registerCollabTools(
 						{
 							job_id,
 							repo: repoKey,
+							review_skill_guidance: reviewSkillGuidance,
 							reviewer_steps: [
+								`if host skills are available, invoke ${reviewSkillGuidance.preferred_invocation} before finalizing the verdict`,
 								'confirm the requested change and target paths before reading the diff',
 								'compare changed files against the expected target paths',
 								'check workflow results and queue progress for failed validation or stale state',

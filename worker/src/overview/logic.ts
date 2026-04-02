@@ -1,6 +1,7 @@
 import { seal } from 'tweetsodium';
 import * as z from 'zod/v4';
 import { getReadObservabilitySnapshot } from '../read-observability';
+import { buildReviewSkillGuidance } from '../review-skill-guidance';
 import { listPermissionPresets, listToolGroups } from '../tool-catalog';
 import { AppEnv } from '../contracts';
 import {
@@ -252,6 +253,7 @@ function helpContextForWorkflow(workflow: 'real_change' | 'main_ready' | 'dry_ru
 
 export function buildHelpPayload(query: string | undefined): Record<string, unknown> {
 	const normalized = normalizeHelpQuery(query);
+	const reviewSkillGuidance = buildReviewSkillGuidance();
 	const templates = {
 		real_change: {
 			label: 'Real change with PR',
@@ -341,7 +343,9 @@ export function buildHelpPayload(query: string | undefined): Record<string, unkn
 			'prefer repo_get_file_summary and repo_get_file_chunk over repo_get_file for large docs, workflows, and tool files',
 			'prefer job_progress for concise status and audit_list only for full timeline review',
 		],
+		review_skill_guidance: reviewSkillGuidance,
 		reviewer_workflow: [
+			`if host skills are available, invoke ${reviewSkillGuidance.preferred_invocation} before writing the final review verdict`,
 			'call review_prepare_context when a branch or PR is ready for review',
 			'compare the original request, target paths, and changed files before deciding the verdict',
 			'check workflow runs for failing validation or incomplete execution',
