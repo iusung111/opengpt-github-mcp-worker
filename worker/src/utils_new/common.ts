@@ -18,6 +18,23 @@ export function jsonResponse(payload: unknown, status = 200): Response {
 
 export function errorStatus(error: unknown): number {
 	const message = error instanceof Error ? error.message : String(error);
+	if (message.includes('github timeout:')) {
+		return 504;
+	}
+	if (message.includes('github auth failed:')) {
+		return 401;
+	}
+	if (message.includes('github permission failed:')) {
+		return 403;
+	}
+	if (
+		message.includes('github upstream failed:') ||
+		message.includes('github request failed:') ||
+		message.includes('failed to create installation token:') ||
+		message.includes('github network failed:')
+	) {
+		return 502;
+	}
 	if (
 		message.includes('unsafe ') ||
 		message.includes('not allowlisted') ||
@@ -33,6 +50,12 @@ export function errorStatus(error: unknown): number {
 
 export function errorCodeFor(error: unknown, fallback: string): string {
 	const message = error instanceof Error ? error.message : String(error);
+	if (message.includes('github timeout:')) return 'github_timeout';
+	if (message.includes('github auth failed:')) return 'github_auth_failed';
+	if (message.includes('github permission failed:')) return 'github_permission_failed';
+	if (message.includes('github upstream failed:')) return 'github_upstream_failed';
+	if (message.includes('github network failed:')) return 'github_network_failed';
+	if (message.includes('failed to create installation token:')) return 'github_installation_token_failed';
 	if (message.includes('Merge conflict')) return 'pr_merge_conflict';
 	if (message.includes('Pull Request is not mergeable')) return 'pr_not_mergeable';
 	if (message.includes('repository not allowlisted')) return 'repo_not_allowlisted';
