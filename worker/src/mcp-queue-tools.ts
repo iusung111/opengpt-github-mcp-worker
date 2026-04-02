@@ -129,7 +129,7 @@ export function registerQueueTools(
 	server.registerTool(
 		'job_create',
 		{
-			description: 'Create a persistent queue job for worker or reviewer loops.',
+			description: 'Create a persistent queue skeleton job for worker or reviewer loops. This does not by itself create a runnable execution or guarantee that the Run Console can start the job.',
 			inputSchema: {
 				job_id: z.string(),
 				repo: z.string(),
