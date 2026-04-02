@@ -325,11 +325,22 @@ export interface ToolResultEnvelope {
 	meta?: Record<string, unknown> | null;
 }
 
+export interface RunnableDiagnostics {
+	runnable: boolean;
+	idle_reason: string | null;
+	missing_requirements: string[];
+	missing_capabilities: string[];
+}
+
 export interface RunSummary {
 	run_id: string;
 	job_id: string;
 	title: string;
 	status: RunAttentionStatus;
+	runnable: boolean;
+	idle_reason: string | null;
+	missing_requirements: string[];
+	missing_capabilities: string[];
 	progress_percent: number;
 	last_event: string | null;
 	approval_reason: string | null;
@@ -504,6 +515,10 @@ export interface JobProgressSnapshot {
 	repo: string;
 	status: JobStatus;
 	next_actor: NextActor;
+	runnable: boolean;
+	idle_reason: string | null;
+	missing_requirements: string[];
+	missing_capabilities: string[];
 	work_branch: string | null;
 	pr_number: number | null;
 	workflow_run_id: number | null;
