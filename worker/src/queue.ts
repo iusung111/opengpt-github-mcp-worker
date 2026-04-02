@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
 	AppEnv,
+	BROWSER_REMOTE_COMMAND_KINDS,
 	BrowserRemoteCommandKind,
 	JobRecord,
 	JobStatus,
@@ -90,7 +91,12 @@ import {
 } from './browser-remote-control';
 
 function parseBrowserCommandKind(value: unknown): BrowserRemoteCommandKind | null {
-	return value === 'click_continue' || value === 'send_prompt' || value === 'auto_continue_run' ? value : null;
+	if (typeof value !== 'string') {
+		return null;
+	}
+	return BROWSER_REMOTE_COMMAND_KINDS.includes(value as BrowserRemoteCommandKind)
+		? (value as BrowserRemoteCommandKind)
+		: null;
 }
 
 function recordBody(value: unknown): Record<string, unknown> | null {
@@ -410,7 +416,10 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			}
 			const kind = parseBrowserCommandKind(body.kind);
 			if (!kind) {
-				return jsonResponse(fail('bad_request', 'kind must be one of click_continue, send_prompt, auto_continue_run'), 400);
+				return jsonResponse(
+					fail('bad_request', `kind must be one of ${BROWSER_REMOTE_COMMAND_KINDS.join(', ')}`),
+					400,
+				);
 			}
 			const jobId = typeof body.job_id === 'string' ? body.job_id.trim() : '';
 			if (!jobId) {

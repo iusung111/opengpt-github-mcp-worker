@@ -1,6 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
-import { AppEnv } from './types';
+import {
+	AppEnv,
+	JobWorkerManifest,
+	WebSessionApprovalState,
+	WebSessionAuthState,
+	WebSessionFollowupState,
+	WEB_SESSION_AUTH_STATES,
+} from './types';
 import { createEmptyWorkerManifest } from './job-manifest';
 import { ToolAnnotations } from './mcp-overview-tools';
 import { notificationWidgetToolMeta } from './mcp-widget-resources';
@@ -12,6 +19,7 @@ import {
 	fail,
 	getDefaultAutoImproveMaxCycles,
 	getDefaultBaseBranch,
+	nowIso,
 	queueJson,
 	toolText,
 } from './utils';
@@ -119,6 +127,60 @@ const reviewFindingSchema = z.object({
 	rationale: z.string().min(1),
 	required_fix: z.string().optional(),
 });
+const browserSessionSeedSchema = z.object({
+	provider: z.literal('chatgpt_web'),
+	session_url: z.string().min(1),
+	canonical_conversation_url: z.string().optional(),
+	conversation_id: z.string().optional(),
+	auth_state: z.enum(WEB_SESSION_AUTH_STATES).optional(),
+	can_send_followup: z.boolean().optional(),
+});
+
+function normalizeOptionalString(value: string | undefined): string | null {
+	return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function createWorkerManifestWithBrowserSessionSeed(
+	seed: z.infer<typeof browserSessionSeedSchema> | undefined,
+): JobWorkerManifest {
+	const manifest = createEmptyWorkerManifest();
+	if (!seed) {
+		return manifest;
+	}
+	const sessionUrl = normalizeOptionalString(seed.session_url);
+	if (!sessionUrl) {
+		return manifest;
+	}
+	const authState: WebSessionAuthState = seed.auth_state ?? 'unknown';
+	const canSendFollowup = typeof seed.can_send_followup === 'boolean' ? seed.can_send_followup : null;
+	const approvalState: WebSessionApprovalState = authState === 'approval_required' ? 'pending' : 'none';
+	const followupState: WebSessionFollowupState =
+		canSendFollowup === true ? 'ready' : canSendFollowup === false ? 'not_available' : 'unknown';
+	return {
+		...manifest,
+		browser: {
+			...(manifest.browser ?? {}),
+			target: sessionUrl,
+			session_context: {
+				provider: 'chatgpt_web' as const,
+				session_url: sessionUrl,
+				canonical_conversation_url: normalizeOptionalString(seed.canonical_conversation_url),
+				conversation_id: normalizeOptionalString(seed.conversation_id),
+				page_url_at_attach: null,
+				page_title_at_attach: null,
+				auth_state: authState,
+				approval_state: approvalState,
+				followup_state: followupState,
+				can_send_followup: canSendFollowup,
+				last_user_visible_action: null,
+				last_prompt_digest: null,
+				last_followup_at: null,
+				linked_job_url: null,
+				updated_at: nowIso(),
+			},
+		},
+	};
+}
 
 export function registerQueueTools(
 	server: McpServer,
@@ -129,7 +191,7 @@ export function registerQueueTools(
 	server.registerTool(
 		'job_create',
 		{
-			description: 'Create a persistent queue skeleton job for worker or reviewer loops. This does not by itself create a runnable execution or guarantee that the Run Console can start the job.',
+			description: 'Create a persistent queue job for worker or reviewer loops.',
 			inputSchema: {
 				job_id: z.string(),
 				repo: z.string(),
@@ -140,11 +202,13 @@ export function registerQueueTools(
 				next_actor: z.enum(['worker', 'reviewer', 'system']).default('worker'),
 				auto_improve_enabled: z.boolean().default(false),
 				auto_improve_max_cycles: z.number().int().min(0).default(getDefaultAutoImproveMaxCycles(env)),
+				browser_session_seed: browserSessionSeedSchema.optional(),
 			},
 			annotations: writeAnnotations,
 		},
 		async (input) => {
 			try {
+				const { browser_session_seed, ...jobInput } = input;
 				ensureRepoAllowed(env, input.repo);
 				await activateRepoWorkspace(env, input.repo);
 				if (input.work_branch) {
@@ -153,11 +217,11 @@ export function registerQueueTools(
 				const result = await queueJson(env, {
 					action: 'job_create',
 					job: {
-						...input,
+						...jobInput,
 						status: 'queued',
 						next_actor: input.next_actor,
 						auto_improve_cycle: 0,
-						worker_manifest: createEmptyWorkerManifest(),
+						worker_manifest: createWorkerManifestWithBrowserSessionSeed(browser_session_seed),
 						review_findings: [],
 						notes: [],
 					},

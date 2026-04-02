@@ -153,16 +153,67 @@ export interface JobPreviewManifest {
 	updated_at?: string;
 }
 
+export const WEB_SESSION_PROVIDERS = ['chatgpt_web'] as const;
+export type WebSessionProvider = (typeof WEB_SESSION_PROVIDERS)[number];
+
+export const WEB_SESSION_AUTH_STATES = [
+	'unknown',
+	'authenticated',
+	'approval_required',
+	'login_required',
+	'expired',
+	'blocked',
+] as const;
+export type WebSessionAuthState = (typeof WEB_SESSION_AUTH_STATES)[number];
+
+export const WEB_SESSION_APPROVAL_STATES = ['none', 'pending', 'granted', 'rejected'] as const;
+export type WebSessionApprovalState = (typeof WEB_SESSION_APPROVAL_STATES)[number];
+
+export const WEB_SESSION_FOLLOWUP_STATES = [
+	'unknown',
+	'ready',
+	'cooldown',
+	'requires_focus',
+	'not_available',
+] as const;
+export type WebSessionFollowupState = (typeof WEB_SESSION_FOLLOWUP_STATES)[number];
+
+export interface JobWebSessionContext {
+	provider: WebSessionProvider;
+	session_url: string;
+	canonical_conversation_url?: string | null;
+	conversation_id?: string | null;
+	page_url_at_attach?: string | null;
+	page_title_at_attach?: string | null;
+	auth_state: WebSessionAuthState;
+	approval_state: WebSessionApprovalState;
+	followup_state: WebSessionFollowupState;
+	can_send_followup?: boolean | null;
+	last_user_visible_action?: string | null;
+	last_prompt_digest?: string | null;
+	last_followup_at?: string | null;
+	linked_job_url?: string | null;
+	updated_at?: string | null;
+}
+
 export interface JobBrowserManifest {
 	status?: 'idle' | 'running' | 'passed' | 'failed' | null;
 	session_id?: string | null;
 	target?: string | null;
 	artifacts?: string[];
 	remote_control?: JobBrowserRemoteControlState | null;
+	session_context?: JobWebSessionContext | null;
 	updated_at?: string;
 }
 
-export type BrowserRemoteCommandKind = 'click_continue' | 'send_prompt' | 'auto_continue_run';
+export const BROWSER_REMOTE_COMMAND_KINDS = [
+	'click_continue',
+	'send_prompt',
+	'auto_continue_run',
+	'resolve_permission_prompt',
+	'send_followup',
+] as const;
+export type BrowserRemoteCommandKind = (typeof BROWSER_REMOTE_COMMAND_KINDS)[number];
 export type BrowserRemoteCommandStatus = 'pending' | 'claimed';
 export type BrowserRemoteSessionStatus = 'connected' | 'stale' | 'disconnected';
 

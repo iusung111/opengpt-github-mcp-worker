@@ -176,6 +176,18 @@ async function handleCreatedJob(context: QueueRequestContext, jobId: string): Pr
 	const job = await context.getJob(jobId);
 	if (job) {
 		await context.writeAudit('job_create', context.buildJobAudit(job));
+		const sessionContext = job.worker_manifest?.browser?.session_context;
+		if (sessionContext?.provider === 'chatgpt_web' && sessionContext.session_url) {
+			await context.writeAudit('browser_session_seeded', {
+				job_id: job.job_id,
+				repo: job.repo,
+				session_url: sessionContext.session_url,
+				conversation_id: sessionContext.conversation_id ?? null,
+				source_layer: 'mcp',
+				attention_status: computeRunAttentionStatus(job),
+				message: 'Browser session metadata was linked to the job.',
+			});
+		}
 	}
 	return jsonResponse(ok({ job, runnable_analysis: job ? computeRunnableDiagnostics(job) : null }));
 }

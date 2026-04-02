@@ -1,10 +1,12 @@
 import {
+	BROWSER_REMOTE_COMMAND_KINDS,
 	BrowserRemoteActiveJob,
 	BrowserRemoteCommandKind,
 	JobBrowserRemoteCommand,
 	JobBrowserRemoteCommandResult,
 	JobBrowserRemoteControlState,
 	JobBrowserRemoteSession,
+	JobWebSessionContext,
 } from './types';
 import { nowIso, parseIsoMs } from './utils';
 
@@ -19,8 +21,13 @@ function normalizeString(value: unknown): string | null {
 	return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function normalizeCommandKind(value: unknown): BrowserRemoteCommandKind | null {
-	return value === 'click_continue' || value === 'send_prompt' || value === 'auto_continue_run' ? value : null;
+export function normalizeBrowserRemoteCommandKind(value: unknown): BrowserRemoteCommandKind | null {
+	if (typeof value !== 'string') {
+		return null;
+	}
+	return BROWSER_REMOTE_COMMAND_KINDS.includes(value as BrowserRemoteCommandKind)
+		? (value as BrowserRemoteCommandKind)
+		: null;
 }
 
 function normalizeCommandStatus(value: unknown): 'pending' | 'claimed' {
@@ -87,7 +94,7 @@ function normalizeActiveJob(value: unknown): BrowserRemoteActiveJob | null {
 function normalizeCommand(value: unknown): JobBrowserRemoteCommand | null {
 	if (!isRecord(value)) return null;
 	const commandId = normalizeString(value.command_id);
-	const kind = normalizeCommandKind(value.kind);
+	const kind = normalizeBrowserRemoteCommandKind(value.kind);
 	const createdAt = normalizeString(value.created_at);
 	if (!commandId || !kind || !createdAt) return null;
 	return {
@@ -111,7 +118,7 @@ function normalizeCommand(value: unknown): JobBrowserRemoteCommand | null {
 function normalizeResult(value: unknown): JobBrowserRemoteCommandResult | null {
 	if (!isRecord(value)) return null;
 	const commandId = normalizeString(value.command_id);
-	const kind = normalizeCommandKind(value.kind);
+	const kind = normalizeBrowserRemoteCommandKind(value.kind);
 	const completedAt = normalizeString(value.completed_at);
 	if (!commandId || !kind || !completedAt) return null;
 	return {
@@ -128,6 +135,28 @@ function normalizeResult(value: unknown): JobBrowserRemoteCommandResult | null {
 		page_url: normalizeString(value.page_url),
 		page_title: normalizeString(value.page_title),
 		completed_at: completedAt,
+	};
+}
+
+export function syncSessionContextWithRemoteAttach(
+	current: JobWebSessionContext | null | undefined,
+	remoteControl: unknown,
+	timestamp = nowIso(),
+): JobWebSessionContext | null | undefined {
+	if (!current || current.provider !== 'chatgpt_web') {
+		return current;
+	}
+	const control = normalizeBrowserRemoteControl(remoteControl);
+	const pageUrl = normalizeString(control?.session?.page_url);
+	const pageTitle = normalizeString(control?.session?.page_title);
+	if (!pageUrl && !pageTitle) {
+		return current;
+	}
+	return {
+		...current,
+		page_url_at_attach: pageUrl ?? current.page_url_at_attach ?? null,
+		page_title_at_attach: pageTitle ?? current.page_title_at_attach ?? null,
+		updated_at: timestamp,
 	};
 }
 

@@ -1,6 +1,7 @@
 import { authorizeGuiOperatorRequest, queueRequestAuthorized } from './auth';
 import {
 	AppEnv,
+	BROWSER_REMOTE_COMMAND_KINDS,
 	BrowserRemoteCommandKind,
 	JobStatus,
 	NextActor,
@@ -106,7 +107,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseBrowserCommandKind(value: unknown): BrowserRemoteCommandKind | null {
-	return value === 'click_continue' || value === 'send_prompt' || value === 'auto_continue_run' ? value : null;
+	if (typeof value !== 'string') {
+		return null;
+	}
+	return BROWSER_REMOTE_COMMAND_KINDS.includes(value as BrowserRemoteCommandKind)
+		? (value as BrowserRemoteCommandKind)
+		: null;
 }
 
 async function proxyQueueAction(env: AppEnv, payload: QueueEnvelope): Promise<Response> {
@@ -245,7 +251,7 @@ export async function handleGuiApi(request: Request, env: AppEnv): Promise<Respo
 			}
 			const kind = parseBrowserCommandKind(body.kind);
 			if (!kind) {
-				return badRequest('kind must be one of click_continue, send_prompt, auto_continue_run');
+				return badRequest(`kind must be one of ${BROWSER_REMOTE_COMMAND_KINDS.join(', ')}`);
 			}
 			const jobId = isJobBrowserControlRoute ? routeJobId : typeof body.job_id === 'string' ? body.job_id.trim() : '';
 			if (!jobId) {

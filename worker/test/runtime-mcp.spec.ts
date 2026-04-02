@@ -347,6 +347,14 @@ describe('runtime mcp surface', () => {
 				base_branch: 'main',
 				work_branch: 'agent/job-mcp-1',
 				operation_type: 'run_commands',
+				browser_session_seed: {
+					provider: 'chatgpt_web',
+					session_url: 'https://chatgpt.com/c/example',
+					canonical_conversation_url: 'https://chatgpt.com/c/example?model=gpt-5',
+					conversation_id: 'convo-123',
+					auth_state: 'authenticated',
+					can_send_followup: true,
+				},
 			},
 		});
 		const createText = 'text' in createResult.content[0] ? createResult.content[0].text : '';
@@ -356,6 +364,21 @@ describe('runtime mcp surface', () => {
 				job: {
 					job_id: 'job-mcp-1',
 					repo: 'iusung111/OpenGPT',
+					worker_manifest: {
+						browser: {
+							target: 'https://chatgpt.com/c/example',
+							session_context: {
+								provider: 'chatgpt_web',
+								session_url: 'https://chatgpt.com/c/example',
+								canonical_conversation_url: 'https://chatgpt.com/c/example?model=gpt-5',
+								conversation_id: 'convo-123',
+								auth_state: 'authenticated',
+								approval_state: 'none',
+								followup_state: 'ready',
+								can_send_followup: true,
+							},
+						},
+					},
 				},
 			},
 		});
@@ -370,6 +393,13 @@ describe('runtime mcp surface', () => {
 			data: {
 				job: {
 					work_branch: 'agent/job-mcp-1',
+					worker_manifest: {
+						browser: {
+							session_context: {
+								conversation_id: 'convo-123',
+							},
+						},
+					},
 				},
 			},
 		});
@@ -512,6 +542,14 @@ describe('runtime mcp surface', () => {
 			auditJson.data.audits.some(
 				(item: { event_type: string; payload: { job_id?: string } }) =>
 					item.event_type === 'job_create' && item.payload.job_id === 'job-mcp-1',
+			),
+		).toBe(true);
+		expect(
+			auditJson.data.audits.some(
+				(item: { event_type: string; payload: { session_url?: string; conversation_id?: string | null } }) =>
+					item.event_type === 'browser_session_seeded' &&
+					item.payload.session_url === 'https://chatgpt.com/c/example' &&
+					item.payload.conversation_id === 'convo-123',
 			),
 		).toBe(true);
 

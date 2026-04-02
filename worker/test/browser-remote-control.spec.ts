@@ -5,7 +5,9 @@ import {
 	completeBrowserRemoteCommand,
 	disconnectBrowserRemoteSession,
 	enqueueBrowserRemoteCommand,
+	normalizeBrowserRemoteCommandKind,
 	normalizeBrowserRemoteControl,
+	syncSessionContextWithRemoteAttach,
 	upsertBrowserRemoteSession,
 } from '../src/browser-remote-control';
 
@@ -77,5 +79,37 @@ describe('browser remote control helpers', () => {
 		}, '2026-03-29T00:00:00.000Z');
 		const disconnected = disconnectBrowserRemoteSession(connected, '2026-03-29T00:01:00.000Z');
 		expect(disconnected.session?.status).toBe('disconnected');
+	});
+
+	it('accepts new permission and follow-up command kinds and syncs attach metadata into session context', () => {
+		expect(normalizeBrowserRemoteCommandKind('resolve_permission_prompt')).toBe('resolve_permission_prompt');
+		expect(normalizeBrowserRemoteCommandKind('send_followup')).toBe('send_followup');
+
+		const control = upsertBrowserRemoteSession(
+			null,
+			{
+				session_id: 'session-1',
+				page_url: 'https://chatgpt.com/c/example',
+				page_title: 'ChatGPT Conversation',
+			},
+			'2026-03-29T00:00:00.000Z',
+		);
+		const linked = syncSessionContextWithRemoteAttach(
+			{
+				provider: 'chatgpt_web',
+				session_url: 'https://chatgpt.com/c/example',
+				auth_state: 'authenticated',
+				approval_state: 'none',
+				followup_state: 'unknown',
+			},
+			control,
+			'2026-03-29T00:00:01.000Z',
+		);
+
+		expect(linked).toMatchObject({
+			page_url_at_attach: 'https://chatgpt.com/c/example',
+			page_title_at_attach: 'ChatGPT Conversation',
+			updated_at: '2026-03-29T00:00:01.000Z',
+		});
 	});
 });
