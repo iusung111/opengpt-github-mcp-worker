@@ -12,6 +12,7 @@ import {
 	NotificationItem,
 	NotificationSeverity,
 	NotificationSourceLayer,
+	RunnableDiagnostics,
 	RunAttentionStatus,
 	RunSummary,
 } from './types';
@@ -450,6 +451,36 @@ function getManifestSectionHasDispatch(job: JobRecord): boolean {
 	return Boolean(manifest.dispatch_request || manifest.execution?.dispatch_request);
 }
 
+export function computeRunnableDiagnostics(job: JobRecord): RunnableDiagnostics {
+	const approval = getApprovalManifest(job.worker_manifest);
+	const control = getControlManifest(job.worker_manifest);
+	const hasDispatch = getManifestSectionHasDispatch(job);
+	const activeSection = hasActiveManifestSection(job.worker_manifest);
+	const runnable = Boolean(hasDispatch || approval?.pending || job.status === 'working' || job.status === 'rework_pending' || activeSection);
+	if (runnable) {
+		return {
+			runnable: true,
+			idle_reason: null,
+			missing_requirements: [],
+			missing_capabilities: [],
+		};
+	}
+	if (control?.state === 'cancelled') {
+		return {
+			runnable: false,
+			idle_reason: 'cancelled_job',
+			missing_requirements: [],
+			missing_capabilities: [],
+		};
+	}
+	return {
+		runnable: false,
+		idle_reason: 'queued_without_dispatch_request',
+		missing_requirements: ['dispatch_request'],
+		missing_capabilities: [],
+	};
+}
+
 export function buildJobEventFeed(
 	job: JobRecord,
 	recentAudits: AuditRecord[],
@@ -542,6 +573,7 @@ export function buildJobEventFeed(
 export function buildRunSummary(job: JobRecord, recentAudits: AuditRecord[]): RunSummary {
 	const feed = buildJobEventFeed(job, recentAudits);
 	const status = computeRunAttentionStatus(job);
+	const runnableDiagnostics = computeRunnableDiagnostics(job);
 	const approval = getApprovalManifest(job.worker_manifest);
 	const control = getControlManifest(job.worker_manifest);
 	const interrupt = getLastInterrupt(job.worker_manifest);
@@ -550,6 +582,10 @@ export function buildRunSummary(job: JobRecord, recentAudits: AuditRecord[]): Ru
 		job_id: job.job_id,
 		title: buildRunTitle(job),
 		status,
+		runnable: runnableDiagnostics.runnable,
+		idle_reason: runnableDiagnostics.idle_reason,
+		missing_requirements: runnableDiagnostics.missing_requirements,
+		missing_capabilities: runnableDiagnostics.missing_capabilities,
 		progress_percent: buildProgressPercent(job, status),
 		last_event: feed.items[0]?.body ?? null,
 		approval_reason: approval?.pending ? approval.reason ?? null : null,
@@ -565,11 +601,16 @@ export function buildRunSummary(job: JobRecord, recentAudits: AuditRecord[]): Ru
 
 export function buildJobProgressSnapshot(job: JobRecord, recentAudits: AuditRecord[]): JobProgressSnapshot {
 	const eventFeed = buildJobEventFeed(job, recentAudits);
+	const runnableDiagnostics = computeRunnableDiagnostics(job);
 	return {
 		job_id: job.job_id,
 		repo: job.repo,
 		status: job.status,
 		next_actor: job.next_actor,
+		runnable: runnableDiagnostics.runnable,
+		idle_reason: runnableDiagnostics.idle_reason,
+		missing_requirements: runnableDiagnostics.missing_requirements,
+		missing_capabilities: runnableDiagnostics.missing_capabilities,
 		work_branch: job.work_branch ?? null,
 		pr_number: job.pr_number ?? null,
 		workflow_run_id: job.workflow_run_id ?? null,
