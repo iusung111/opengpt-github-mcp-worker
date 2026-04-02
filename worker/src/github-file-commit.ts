@@ -55,21 +55,30 @@ async function getCurrentBlobShaForPath(
 	branch: string,
 	path: string,
 ): Promise<string | null> {
-	const response = await githubRequestRaw(env, 'GET', `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, {
-		params: { ref: branch },
-	});
-	if (response.status === 404) {
-		return null;
+	const encodedPath = encodeGitHubPath(path);
+	try {
+		const response = await githubRequestRaw(env, 'GET', `/repos/${owner}/${repo}/contents/${encodedPath}`, {
+			params: { ref: branch },
+		});
+		if (response.status === 404) {
+			return null;
+		}
+		if (!response.ok) {
+			const message = await response.text();
+			throw new Error(`github request failed: ${response.status} ${message}`.trim());
+		}
+		const payload = (await response.json()) as ContentResponse;
+		if (payload.type && payload.type !== 'file') {
+			throw new Error(`path is not a file: ${path}`);
+		}
+		return payload.sha ?? null;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (message.includes('github request failed: GET') && message.includes(`/contents/${encodedPath}`) && message.includes('-> 404')) {
+			return null;
+		}
+		throw error;
 	}
-	if (!response.ok) {
-		const message = await response.text();
-		throw new Error(`github request failed: ${response.status} ${message}`.trim());
-	}
-	const payload = (await response.json()) as ContentResponse;
-	if (payload.type && payload.type !== 'file') {
-		throw new Error(`path is not a file: ${path}`);
-	}
-	return payload.sha ?? null;
 }
 
 export async function inspectFileAtBranch(
