@@ -11,7 +11,7 @@ import {
 	WorkspaceRecord,
 } from './types';
 import { mergeWorkerManifest } from './job-manifest';
-import { buildBlockingState, buildJobEventFeed, buildRunSummary, computeRunAttentionStatus } from './queue-projections';
+import { buildBlockingState, buildJobEventFeed, buildRunSummary, computeRunAttentionStatus, computeRunnableDiagnostics } from './queue-projections';
 import { jsonResponse, fail, ok, nowIso } from './utils';
 import { buildWorkspaceRecord } from './queue-workspaces';
 import { ensureSafeWorkspacePath } from './queue-helpers';
@@ -177,7 +177,7 @@ async function handleCreatedJob(context: QueueRequestContext, jobId: string): Pr
 	if (job) {
 		await context.writeAudit('job_create', context.buildJobAudit(job));
 	}
-	return jsonResponse(ok({ job }));
+	return jsonResponse(ok({ job, runnable_analysis: job ? computeRunnableDiagnostics(job) : null }));
 }
 
 async function handleLoadedJob(
