@@ -59,6 +59,15 @@ function isGitHubNotFoundError(error: unknown): boolean {
 	return message.includes('github request failed:') && message.includes(' 404 ');
 }
 
+function normalizeContentBase64(contentB64: string): string {
+	const compact = contentB64.replace(/\s+/g, '');
+	const decodedText = decodeBase64Text(compact);
+	if (decodedText !== null) {
+		return encodeBase64Text(decodedText);
+	}
+	return btoa(atob(compact));
+}
+
 const batchWriteOperationSchema = z.object({
 	type: z.enum(['create_file', 'update_file', 'delete_file', 'rename_path', 'mkdir_scaffold']),
 	path: z.string().optional(),
