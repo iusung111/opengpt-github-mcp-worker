@@ -29,6 +29,8 @@ import {
 	ensureRepoAllowed,
 	ensureSafeRepoPath,
 	errorCodeFor,
+	decodeBase64Text,
+	encodeBase64Text,
 	fail,
 	getDefaultBaseBranch,
 	githubGet,
@@ -55,6 +57,15 @@ interface RepoFileWriteArgs extends RepoIdentityInput {
 function isGitHubNotFoundError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
 	return message.includes('github request failed:') && message.includes(' 404 ');
+}
+
+function normalizeContentBase64(contentB64: string): string {
+	const compact = contentB64.replace(/\s+/g, '');
+	const decodedText = decodeBase64Text(compact);
+	if (decodedText !== null) {
+		return encodeBase64Text(decodedText);
+	}
+	return btoa(atob(compact));
 }
 
 const batchWriteOperationSchema = z.object({
@@ -122,7 +133,8 @@ export function registerWriteTools(
 		ensureNotDefaultBranch(env, branch);
 		ensureSafeRepoPath(path);
 		await activateRepoWorkspace(env, repoKey);
-		atob(content_b64);
+		atob(content_b64.replace(/\s+/g, ''));
+		const normalizedContentB64 = normalizeContentBase64(content_b64);
 
 		if (content_b64.length > MAX_REPO_UPDATE_FILE_B64_BYTES) {
 			throw new Error(
@@ -160,7 +172,7 @@ export function registerWriteTools(
 
 		const payload: Record<string, unknown> = {
 			message,
-			content: content_b64,
+			content: normalizedContentB64,
 			branch,
 		};
 		if (resolvedBlobSha) {
