@@ -2,48 +2,80 @@
 
 Remote GitHub MCP server for ChatGPT Developer mode, deployed on Cloudflare Workers.
 
-- Direct MCP endpoint: `/mcp`
-- ChatGPT connector endpoint: `/chatgpt/mcp`
-- Runtime: Cloudflare Workers + Durable Objects
-- Access model:
-  - `/mcp` uses Cloudflare Access
-  - `/chatgpt/mcp` uses OAuth/OIDC bearer auth
+This repository now has two operator surfaces:
 
-## Documentation
+- MCP endpoints for ChatGPT and direct clients
+- a mission-aware run console that groups child jobs under one control plane
 
-Start with the docs hub: [docs/README.md](./docs/README.md)
+## Start Here
 
-Primary entry points:
+If you are a human operator:
 
-- [Access and deployment](./docs/MCP_ACCESS.md)
-- [ChatGPT connector auth](./docs/CHATGPT_MCP.md)
-- [Tool surface](./docs/TOOL_SURFACE.md)
-- [Desktop-first fullstack roadmap](./docs/desktop-fullstack-mcp-roadmap.md)
-- [Project capability contract example](./docs/project-capabilities.example.json)
-- [Incident reports](./docs/incidents/README.md)
-- [Release history](./docs/releases/CHANGELOG.md)
+1. Read [docs/README.md](./docs/README.md).
+2. Read [docs/MCP_ACCESS.md](./docs/MCP_ACCESS.md) for `/mcp` auth and deploy shape.
+3. Read [docs/CHATGPT_MCP.md](./docs/CHATGPT_MCP.md) for `/chatgpt/mcp` OAuth or OIDC setup.
+4. Read [docs/RUN_CONSOLE.md](./docs/RUN_CONSOLE.md) before working in `/gui/`.
+
+If you are an AI agent:
+
+1. Read this file for repo shape and validation entry points.
+2. Read [docs/README.md](./docs/README.md) for the document map.
+3. Read [docs/TOOL_SURFACE.md](./docs/TOOL_SURFACE.md) for the generated MCP catalog.
+4. Read [docs/RUN_CONSOLE.md](./docs/RUN_CONSOLE.md) when the task touches queue orchestration, mission control, or the GUI console.
+
+## What This Worker Does
+
+- serves `/mcp` behind Cloudflare Access
+- serves `/chatgpt/mcp` behind OAuth or OIDC-aware bearer auth
+- receives GitHub webhooks and executes queue-driven job orchestration
+- exposes `/gui/` as the operator run console
+- groups multiagent work as `mission -> lanes -> child jobs`
+
+## Core Concepts
+
+- `job`: the execution unit tracked by the queue and review loop
+- `mission`: an aggregate record that owns a set of dependent lanes
+- `lane`: one branch of work inside a mission DAG, backed by a child `job_id`
+- `YOLO mode`: mission-scoped auto-approval for safe approvals only; deploy, release, reset, and promotion actions stay blocked
+
+The mission layer is additive. Existing `job_*` flows still work for standalone runs.
 
 ## Repository Layout
 
-- `.github/`
-- `docs/`
-- `public/`
-- `worker/`
-- `README.md`
-- `package.json`
-- `wrangler.jsonc`
+- `.github/` GitHub Actions and automation
+- `docs/` operator, deploy, incident, and integration documentation
+- `public/` GUI assets, including the modular run console
+- `worker/` Cloudflare Worker runtime, queue domain, MCP tools, and tests
+- `wrangler.jsonc` runtime bindings and deploy config
+
+## Runtime Surfaces
+
+- GUI root: `GET` and `HEAD` `/` redirect to `/gui/`
+- Static GUI: `/gui/`
+- Direct MCP: `/mcp`
+- ChatGPT MCP: `/chatgpt/mcp`
+- GitHub webhook: `/webhooks/github`
+- Health: `GET` and `HEAD` `/healthz`
+- Private queue API: `/queue/*`
+
+Queue routes require either:
+
+- `X-Queue-Token: <QUEUE_API_TOKEN>`
+- `Authorization: Bearer <QUEUE_API_TOKEN>`
+
+If `QUEUE_API_TOKEN` is unset, the worker falls back to `WEBHOOK_SECRET` for backward compatibility.
 
 ## Production Model
 
 - `push main` runs `cloudflare-ci`
 - successful CI auto-deploys `mirror`
 - `live` is promoted manually through `cloudflare-self-deploy`
-- `/mcp` stays behind Cloudflare Access
-- `/chatgpt/mcp` stays behind OAuth/OIDC-aware ChatGPT connector auth
+- Cloudflare Access remains the gate for `/mcp`
+- OAuth or OIDC bearer auth remains the gate for `/chatgpt/mcp`
 
-Deploying the Worker alone is not the full production setup. The deployment also depends on the configured Cloudflare Access and OAuth/OIDC policy.
+Deploying the Worker alone is not the full production setup. Production also depends on Cloudflare Access and OAuth or OIDC policy being configured correctly.
 
-## Quick Start
+## Local Setup
 
 1. `npm install`
 2. Copy `.dev.vars.example` to `.dev.vars`
@@ -55,20 +87,20 @@ Deploying the Worker alone is not the full production setup. The deployment also
 
 ## Validation
 
-Preferred commands:
+Preferred:
 
 ```bash
 npm run check
 ```
 
-Focused commands:
+Focused:
 
 ```bash
 npm run typecheck
 npm run test:unit
 npm run test:integration:runtime
 npm run ops:status
-npm run docs:tool-surface
+npm run docs:tool-surface:check
 ```
 
 Repo-specific validation guidance lives in [AGENTS.md](./AGENTS.md).
@@ -128,26 +160,19 @@ Workflow allowlist config lives in [worker/config/workflow-allowlist.json](./wor
 
 Tool catalog source lives in [worker/src/tool-catalog.json](./worker/src/tool-catalog.json).
 
-Target repos can opt into the desktop-first fullstack tool surface with
-`.opengpt/project-capabilities.json` plus the standard GitHub workflows
-`opengpt-exec.yml` and `opengpt-package.yml`.
+Target repos can opt into the desktop-first fullstack tool surface with `.opengpt/project-capabilities.json` plus the standard GitHub workflows `opengpt-exec.yml` and `opengpt-package.yml`.
 
-## Runtime Endpoints
+## Documentation Map
 
-- GUI root: `https://<worker-url>/` redirects to `/gui/`
-- Static GUI: `https://<worker-url>/gui/`
-- Direct MCP: `https://<worker-url>/mcp`
-- ChatGPT MCP: `https://<worker-url>/chatgpt/mcp`
-- Webhook: `https://<worker-url>/webhooks/github`
-- Health: `https://<worker-url>/healthz`
-- Queue API: `/queue/*`
-
-Queue routes are private. Authenticate with either:
-
-- `X-Queue-Token: <QUEUE_API_TOKEN>`
-- `Authorization: Bearer <QUEUE_API_TOKEN>`
-
-If `QUEUE_API_TOKEN` is unset, the worker falls back to `WEBHOOK_SECRET` for backward compatibility.
+- [docs/README.md](./docs/README.md)
+- [docs/RUN_CONSOLE.md](./docs/RUN_CONSOLE.md)
+- [docs/MCP_ACCESS.md](./docs/MCP_ACCESS.md)
+- [docs/CHATGPT_MCP.md](./docs/CHATGPT_MCP.md)
+- [docs/TOOL_SURFACE.md](./docs/TOOL_SURFACE.md)
+- [docs/project-capabilities.example.json](./docs/project-capabilities.example.json)
+- [docs/desktop-fullstack-mcp-roadmap.md](./docs/desktop-fullstack-mcp-roadmap.md)
+- [docs/incidents/README.md](./docs/incidents/README.md)
+- [docs/releases/CHANGELOG.md](./docs/releases/CHANGELOG.md)
 
 ## GitHub App Assumptions
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased - 2026-04-03
+
+Mission-control follow-up and documentation refresh.
+
+- Added a dedicated run console guide that explains mission, lane, child job, YOLO guardrails, and the modular GUI layout.
+- Reworked the top-level README and docs index so human operators and AI agents have separate fast-entry reading paths.
+- Documented the mission-aware MCP and GUI surfaces as first-class operator entry points.
+- Recorded the recent `HEAD /` and `HEAD /healthz` probe compatibility hardening so future operators do not rediscover the same issue from symptoms alone.
+
 ## 1.0.2 - 2026-03-24
 
 Operational hardening and incident-memory update.
