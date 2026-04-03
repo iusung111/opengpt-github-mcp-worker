@@ -24,11 +24,11 @@ describe('runtime mcp surface', () => {
 		const runtimeToolNames = tools.tools.map((tool) => tool.name).sort();
 		const widgetUri = 'ui://widget/notification-center.html';
 		expect(runtimeToolNames).toEqual(catalogToolNames);
-		for (const toolName of ["help","audit_list","branch_cleanup_candidates","branch_cleanup_execute","run_console_open","job_progress","job_event_feed","job_control","repo_work_context","review_prepare_context","request_permission_bundle","permission_request_resolve","repo_navigation_manifest","repo_context_snapshot","repo_doc_index_lookup","repo_tool_index_lookup","repo_get_file_summary","repo_get_file_chunk","repo_get_diff","repo_get_file","repo_create_file","repo_upsert_file","repo_upload_start","repo_upload_commit","repo_batch_write","repo_apply_patchset","verify_list_suites","verify_run","preview_env_create","browser_session_start","browser_action_batch","desktop_build_run","api_contract_list","db_schema_inspect","runtime_log_query","deploy_promote","release_verify","workflow_allowlist_inspect","job_create","pr_merge","workspace_resolve"]) {
+		for (const toolName of ["help","audit_list","branch_cleanup_candidates","branch_cleanup_execute","run_console_open","mission_create","mission_list","mission_progress","mission_event_feed","mission_control","job_progress","job_event_feed","job_control","repo_work_context","review_prepare_context","request_permission_bundle","permission_request_resolve","repo_navigation_manifest","repo_context_snapshot","repo_doc_index_lookup","repo_tool_index_lookup","repo_get_file_summary","repo_get_file_chunk","repo_get_diff","repo_get_file","repo_create_file","repo_upsert_file","repo_upload_start","repo_upload_commit","repo_batch_write","repo_apply_patchset","verify_list_suites","verify_run","preview_env_create","browser_session_start","browser_action_batch","desktop_build_run","api_contract_list","db_schema_inspect","runtime_log_query","deploy_promote","release_verify","workflow_allowlist_inspect","job_create","pr_merge","workspace_resolve"]) {
 			expect(tools.tools.some((tool) => tool.name === toolName)).toBe(true);
 		}
 
-		for (const toolName of ["job_progress","run_console_open","jobs_list","job_event_feed","job_control","request_permission_bundle","permission_request_resolve","incident_bundle_create","self_host_status"]) {
+		for (const toolName of ["mission_create","mission_list","mission_progress","mission_event_feed","mission_control","job_progress","run_console_open","jobs_list","job_event_feed","job_control","request_permission_bundle","permission_request_resolve","incident_bundle_create","self_host_status"]) {
 			expect(tools.tools.find((tool) => tool.name === toolName)?.outputSchema).toBeTruthy();
 		}
 
@@ -189,6 +189,41 @@ describe('runtime mcp surface', () => {
 			},
 		});
 
+		const missionResult = await client.callTool({
+			name: 'mission_create',
+			arguments: {
+				mission_id: 'mission-mcp-1',
+				repo: 'iusung111/OpenGPT',
+				base_branch: 'main',
+				title: 'Mission from MCP',
+				lanes: [
+					{ lane_id: 'planner', title: 'Planner', role: 'planner', depends_on_lane_ids: [] },
+					{ lane_id: 'worker', title: 'Worker', role: 'worker', depends_on_lane_ids: ['planner'] },
+				],
+			},
+		});
+		const missionText = 'text' in missionResult.content[0] ? missionResult.content[0].text : '';
+		expect(JSON.parse(missionText)).toMatchObject({
+			ok: true,
+			data: {
+				progress: {
+					mission_id: 'mission-mcp-1',
+					lanes: expect.arrayContaining([
+						expect.objectContaining({
+							lane_id: 'planner',
+							current_job_id: expect.any(String),
+						}),
+					]),
+				},
+			},
+		});
+		expect((missionResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
+			kind: 'opengpt.notification_contract.mission_progress',
+			progress: {
+				mission_id: 'mission-mcp-1',
+			},
+		});
+
 		const openResult = await client.callTool({
 			name: 'run_console_open',
 			arguments: {
@@ -200,8 +235,15 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				gui_url: expect.stringContaining('/gui/'),
+				missions: expect.arrayContaining([
+					expect.objectContaining({
+						mission_id: 'mission-mcp-1',
+					}),
+				]),
 				jobs: expect.any(Array),
 				include_healthz: true,
+				selected_mission_id: expect.anything(),
+				selected_mission_url: expect.stringContaining('/gui/?mission='),
 				selected_job_id: expect.anything(),
 				selected_job_url: expect.stringContaining('/gui/?job='),
 			},
@@ -209,6 +251,9 @@ describe('runtime mcp surface', () => {
 		expect((openResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.jobs_list',
 			gui_url: expect.stringContaining('/gui/'),
+			missions: expect.any(Array),
+			selected_mission_id: expect.anything(),
+			selected_mission_url: expect.stringContaining('/gui/?mission='),
 			jobs: expect.any(Array),
 			selected_job_id: expect.anything(),
 			selected_job_url: expect.stringContaining('/gui/?job='),

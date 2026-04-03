@@ -65,6 +65,14 @@ export function jobPrIndexKey(repo: string, prNumber: number): string {
 	return `idx:pr:${encodeSegment(repo)}:${prNumber}`;
 }
 
+export function jobMissionIndexKey(missionId: string, jobId: string): string {
+	return `idx:mission-job:${encodeSegment(missionId)}:${encodeSegment(jobId)}`;
+}
+
+export function jobMissionIndexPrefix(missionId?: string): string {
+	return missionId ? `idx:mission-job:${encodeSegment(missionId)}:` : 'idx:mission-job:';
+}
+
 export function jobActiveIndexKey(jobId: string): string {
 	return `idx:active:${encodeSegment(jobId)}`;
 }
@@ -97,6 +105,9 @@ export function buildJobIndexEntries(job: JobRecord): Array<[string, JobIndexPoi
 	}
 	if (job.pr_number) {
 		entries.push([jobPrIndexKey(job.repo, job.pr_number), pointer]);
+	}
+	if (job.mission_id) {
+		entries.push([jobMissionIndexKey(job.mission_id, job.job_id), pointer]);
 	}
 	if (job.status !== 'done' && job.status !== 'failed') {
 		entries.push([jobActiveIndexKey(job.job_id), pointer]);

@@ -52,6 +52,16 @@ export function getChatgptMcpIssuer(env: AppEnv): string | null {
 	return value ? value : null;
 }
 
+export function buildOidcEndpointUrl(issuer: string | null | undefined, endpointPath: string): string | null {
+	const normalizedIssuer = issuer?.trim();
+	if (!normalizedIssuer) {
+		return null;
+	}
+	const normalizedPath = endpointPath.replace(/^\/+/, '');
+	const base = normalizedIssuer.endsWith('/') ? normalizedIssuer : `${normalizedIssuer}/`;
+	return new URL(normalizedPath, base).toString();
+}
+
 export function getChatgptMcpAudiences(env: AppEnv): string[] {
 	return parseCsv(env.CHATGPT_MCP_AUDIENCE);
 }

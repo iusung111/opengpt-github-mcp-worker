@@ -193,19 +193,33 @@ export function registerOverviewTools(
 		}),
 	}, async ({ include_healthz }) => {
 		try {
-			const jobsResult = await queueJsonOrThrow(env, { action: 'jobs_list' }, 'failed to load queue jobs');
+			const [jobsResult, missionsResult] = await Promise.all([
+				queueJsonOrThrow(env, { action: 'jobs_list' }, 'failed to load queue jobs'),
+				queueJson(env, { action: 'mission_list' }),
+			]);
 			const jobs = Array.isArray(jobsResult.data?.jobs) ? jobsResult.data.jobs : [];
+			const missions = Array.isArray(missionsResult.data?.missions) ? missionsResult.data.missions : [];
 			const appOrigin = getSelfCurrentUrl(env) ?? getSelfLiveUrl(env) ?? getSelfMirrorUrl(env);
 			const guiUrl = appOrigin ? `${appOrigin}/gui/` : null;
+			const firstMission = missions.length > 0 ? (missions[0] as Record<string, unknown>) : null;
+			const selectedMissionId =
+				firstMission && typeof firstMission.mission_id === 'string' ? firstMission.mission_id : null;
+			const selectedMissionUrl =
+				guiUrl && selectedMissionId
+					? `${guiUrl}?mission=${encodeURIComponent(selectedMissionId)}&tab=overview`
+					: null;
 			const firstJob = jobs.length > 0 ? (jobs[0] as Record<string, unknown>) : null;
 			const selectedJobId = firstJob && typeof firstJob.job_id === 'string' ? firstJob.job_id : null;
 			const selectedJobUrl =
 				guiUrl && selectedJobId ? `${guiUrl}?job=${encodeURIComponent(selectedJobId)}&tab=overview` : null;
 			const response = ok(
 				{
+					missions,
 					jobs,
 					include_healthz,
 					gui_url: guiUrl,
+					selected_mission_id: selectedMissionId,
+					selected_mission_url: selectedMissionUrl,
 					selected_job_id: selectedJobId,
 					selected_job_url: selectedJobUrl,
 				},
@@ -216,6 +230,9 @@ export function registerOverviewTools(
 				structuredContent: {
 					kind: 'opengpt.notification_contract.jobs_list' as const,
 					gui_url: guiUrl,
+					missions,
+					selected_mission_id: selectedMissionId,
+					selected_mission_url: selectedMissionUrl,
 					selected_job_id: selectedJobId,
 					selected_job_url: selectedJobUrl,
 					jobs,

@@ -1,5 +1,25 @@
 export type JobStatus = 'queued' | 'working' | 'review_pending' | 'rework_pending' | 'done' | 'failed';
 export type NextActor = 'worker' | 'reviewer' | 'system';
+export type MissionStatus = 'queued' | 'running' | 'blocked' | 'failed' | 'completed' | 'cancelled';
+export type MissionLaneState =
+	| 'queued'
+	| 'runnable'
+	| 'launched'
+	| 'working'
+	| 'blocked'
+	| 'failed'
+	| 'completed'
+	| 'cancelled'
+	| 'detached';
+export type MissionLaneRole = 'planner' | 'worker' | 'reviewer' | 'verifier' | 'observer' | 'custom';
+export type MissionControlAction =
+	| 'pause'
+	| 'resume'
+	| 'cancel'
+	| 'retry_failed'
+	| 'reconcile'
+	| 'enable_yolo'
+	| 'disable_yolo';
 export type ReviewVerdict = 'approved' | 'changes_requested' | 'blocked';
 export type JobControlState = 'active' | 'paused' | 'cancelled';
 export type JobControlAction = 'pause' | 'resume' | 'cancel' | 'retry';

@@ -7,6 +7,16 @@ import { isSmokeTraceJob, pushJobNote, transitionJob } from '../../queue-state';
 import type { QueueRequestContext, QueueResponse } from './context';
 import { jobNotFound } from './context';
 
+async function reconcileLinkedMission(context: QueueRequestContext, job: JobRecord): Promise<void> {
+	if (!job.mission_id) {
+		return;
+	}
+	const mission = await context.getMission(job.mission_id);
+	if (mission) {
+		await context.reconcileMission(mission);
+	}
+}
+
 export async function handleCreatedJob(context: QueueRequestContext, jobId: string): Promise<QueueResponse> {
 	const job = await context.getJob(jobId);
 	if (job) {
@@ -54,6 +64,7 @@ export async function handleJobStatusUpdate(context: QueueRequestContext, payloa
 	}
 	job.updated_at = nowIso();
 	await context.persistJob(job, previous);
+	await reconcileLinkedMission(context, job);
 	await context.writeAudit(
 		'job_update_status',
 		context.buildJobAudit(job, {
@@ -75,6 +86,7 @@ export async function handleJobAppendNote(context: QueueRequestContext, jobId: s
 	pushJobNote(job, note);
 	job.updated_at = nowIso();
 	await context.persistJob(job, previous);
+	await reconcileLinkedMission(context, job);
 	await context.writeAudit('job_append_note', { job_id: job.job_id, note });
 	return jsonResponse(ok({ job }));
 }

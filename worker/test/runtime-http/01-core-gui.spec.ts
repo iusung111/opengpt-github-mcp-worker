@@ -211,4 +211,71 @@ describe('runtime http surface', () => {
 		});
 	});
 
+	it('creates missions and exposes mission progress through the standalone GUI operator API', async () => {
+		const createResponse = await SELF.fetch('https://example.com/queue/mission', {
+			method: 'POST',
+			headers: queueJsonHeaders,
+			body: JSON.stringify({
+				mission_id: 'mission-http-1',
+				repo: 'iusung111/Project_OpenGPT',
+				base_branch: 'main',
+				title: 'HTTP mission',
+				lanes: [
+					{ lane_id: 'planner', title: 'Planner', role: 'planner', depends_on_lane_ids: [] },
+					{ lane_id: 'worker', title: 'Worker', role: 'worker', depends_on_lane_ids: ['planner'] },
+				],
+			}),
+		});
+		expect(createResponse.status).toBe(200);
+		await expect(createResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				progress: {
+					mission_id: 'mission-http-1',
+					lanes: expect.arrayContaining([
+						expect.objectContaining({
+							lane_id: 'planner',
+							current_job_id: expect.any(String),
+						}),
+					]),
+				},
+			},
+		});
+
+		const listResponse = await SELF.fetch('https://example.com/gui/api/missions', {
+			headers: mcpAccessHeaders,
+		});
+		expect(listResponse.status).toBe(200);
+		await expect(listResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				missions: expect.arrayContaining([
+					expect.objectContaining({
+						mission_id: 'mission-http-1',
+						repo: 'iusung111/Project_OpenGPT',
+					}),
+				]),
+			},
+		});
+
+		const detailResponse = await SELF.fetch('https://example.com/gui/api/missions/mission-http-1', {
+			headers: mcpAccessHeaders,
+		});
+		expect(detailResponse.status).toBe(200);
+		await expect(detailResponse.json()).resolves.toMatchObject({
+			ok: true,
+			data: {
+				progress: {
+					mission_id: 'mission-http-1',
+					lanes: expect.arrayContaining([
+						expect.objectContaining({
+							lane_id: 'planner',
+							status: expect.any(String),
+						}),
+					]),
+				},
+			},
+		});
+	});
+
 });

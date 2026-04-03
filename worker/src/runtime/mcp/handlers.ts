@@ -3,7 +3,7 @@ import type { AppEnv } from '../../contracts';
 import { authorizeChatgptMcpRequest, authorizeDirectMcpRequest } from '../../auth';
 import { preflightMcpToolCallRequest } from '../../mcp-tool-contracts';
 import { buildMcpServer } from '../../mcp-tools';
-import { diagnosticLog, fail, jsonResponse } from '../../utils';
+import { buildOidcEndpointUrl, diagnosticLog, fail, jsonResponse } from '../../utils';
 
 export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
 	return createMcpHandler(buildMcpServer(env, { enableWidgets: true }) as never, {
@@ -41,8 +41,8 @@ export function chatgptMcpBootstrapResponse(request: Request, env: AppEnv): Resp
 			auth_type: 'oauth',
 			oauth: {
 				issuer: env.CHATGPT_MCP_ISSUER ?? null,
-				authorization_url: env.CHATGPT_MCP_ISSUER ? new URL('/authorize', env.CHATGPT_MCP_ISSUER).toString() : null,
-				token_url: env.CHATGPT_MCP_ISSUER ? new URL('/oauth/token', env.CHATGPT_MCP_ISSUER).toString() : null,
+				authorization_url: buildOidcEndpointUrl(env.CHATGPT_MCP_ISSUER ?? null, 'authorize'),
+				token_url: buildOidcEndpointUrl(env.CHATGPT_MCP_ISSUER ?? null, 'oauth/token'),
 			},
 		}),
 		{ status: 200, headers },

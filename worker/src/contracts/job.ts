@@ -3,6 +3,7 @@ import type {
 	JobControlState,
 	JobInterruptKind,
 	JobStatus,
+	MissionLaneRole,
 	NextActor,
 	NotificationSeverity,
 	NotificationSourceLayer,
@@ -22,6 +23,11 @@ export interface JobRecord {
 	workflow_run_id?: number;
 	operation_type?: string;
 	target_paths: string[];
+	mission_id?: string;
+	lane_id?: string;
+	lane_role?: MissionLaneRole;
+	attempt?: number;
+	depends_on_lane_ids?: string[];
 	status: JobStatus;
 	next_actor: NextActor;
 	auto_improve_enabled: boolean;

@@ -1,4 +1,5 @@
 import {
+	buildOidcEndpointUrl,
 	getChatgptMcpAllowedEmails,
 	getChatgptMcpAudiences,
 	getChatgptMcpIssuer,
@@ -144,7 +145,8 @@ function selectVerificationKey(header: JwtHeader, keys: JsonWebKey[]): JsonWebKe
 async function fetchUserinfoEmailUncached(token: string, env: AppEnv): Promise<string> {
 	const issuer = getChatgptMcpIssuer(env);
 	if (!issuer) throw new Error('ChatGPT MCP issuer is not configured');
-	const userinfoUrl = new URL('/userinfo', issuer).toString();
+	const userinfoUrl = buildOidcEndpointUrl(issuer, 'userinfo');
+	if (!userinfoUrl) throw new Error('ChatGPT MCP issuer is not configured');
 	const response = await fetch(userinfoUrl, {
 		headers: { accept: 'application/json', authorization: `Bearer ${token}` },
 	});

@@ -59,8 +59,11 @@ export const jobsListStructuredSchema = z
 	.object({
 		kind: z.literal('opengpt.notification_contract.jobs_list'),
 		gui_url: z.string().nullable().optional(),
+		selected_mission_id: z.string().nullable().optional(),
+		selected_mission_url: z.string().nullable().optional(),
 		selected_job_id: z.string().nullable().optional(),
 		selected_job_url: z.string().nullable().optional(),
+		missions: z.array(z.object({ mission_id: z.string() }).passthrough()).optional(),
 		jobs: z.array(
 			z
 				.object({

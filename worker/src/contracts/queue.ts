@@ -3,6 +3,8 @@ import type {
 	JobControlState,
 	JobResumeStrategy,
 	JobStatus,
+	MissionControlAction,
+	MissionStatus,
 	NextActor,
 	NotificationSourceLayer,
 	PermissionResolution,
@@ -11,6 +13,7 @@ import type {
 	RunAttentionStatus,
 } from './common';
 import type { JobProgressSnapshot, JobRecord } from './job';
+import type { MissionEventFeed, MissionProgressSnapshot, MissionRecord } from './mission';
 
 export interface WorkspaceRecord {
 	repo_key: string;
@@ -31,6 +34,12 @@ export interface QueueEnvelope {
 		| 'job_progress'
 		| 'job_event_feed'
 		| 'jobs_list'
+		| 'mission_create'
+		| 'mission_get'
+		| 'mission_list'
+		| 'mission_progress'
+		| 'mission_event_feed'
+		| 'mission_control'
 		| 'audit_list'
 		| 'audit_write'
 		| 'job_control'
@@ -46,15 +55,21 @@ export interface QueueEnvelope {
 		| 'github_event';
 	job?: Partial<JobRecord> & { job_id?: string };
 	job_id?: string;
+	mission?: Partial<MissionRecord> & { mission_id?: string };
+	mission_id?: string;
+	mission_status?: MissionStatus;
 	status?: JobStatus;
 	next_actor?: NextActor;
 	control_action?: JobControlAction;
+	mission_control_action?: MissionControlAction;
 	note?: string;
 	reason?: string;
 	resume_strategy?: JobResumeStrategy;
 	expected_state?: JobControlState | RunAttentionStatus | null;
 	request_id?: string;
 	resolution?: PermissionResolution;
+	lane_id?: string;
+	yolo_mode?: boolean;
 	review_verdict?: ReviewVerdict;
 	findings?: ReviewFinding[];
 	next_action?: string;
@@ -83,4 +98,8 @@ export interface DeliveryRecord {
 	created_at: string;
 }
 
-export type QueueProjection = { progress: JobProgressSnapshot };
+export type QueueProjection =
+	| { progress: JobProgressSnapshot }
+	| { mission: MissionRecord | null }
+	| { mission_progress: MissionProgressSnapshot }
+	| { mission_feed: MissionEventFeed };

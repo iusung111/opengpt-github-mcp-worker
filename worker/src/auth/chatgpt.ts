@@ -1,5 +1,5 @@
 import type { AppEnv } from '../contracts';
-import { getChatgptMcpAuthMode, getMcpRequireAccessAuth } from '../utils';
+import { getChatgptMcpAuthMode } from '../utils';
 import { authorizeMcpRequest } from './access';
 import { getBearerToken, getChatgptAllowlist, getMcpAccessEmail, getMcpAccessJwtAssertion, verifyBearerIdentity } from './shared';
 import type { McpAccessAuthResult } from './types';
@@ -46,9 +46,6 @@ export async function authorizeGuiOperatorRequest(request: Request, env: AppEnv)
 	if (bearerToken) {
 		const result = await authorizeChatgptMcpRequest(request, env);
 		return result.ok ? { ...result, auth_type: 'bearer' } : result;
-	}
-	if (!getMcpRequireAccessAuth(env) && getChatgptMcpAuthMode(env) === 'disabled') {
-		return { ok: true, email: null, auth_type: 'none' };
 	}
 	return {
 		ok: false,

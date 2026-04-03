@@ -163,6 +163,19 @@ describe('mcp access auth', () => {
 		});
 	});
 
+	it('rejects standalone GUI operator requests when no auth mechanism is configured', async () => {
+		const env = buildEnv({
+			MCP_REQUIRE_ACCESS_AUTH: 'false',
+		});
+		const request = new Request('https://example.com/gui/api/session');
+		await expect(authorizeGuiOperatorRequest(request, env)).resolves.toMatchObject({
+			ok: false,
+			status: 401,
+			code: 'unauthorized',
+			error: 'GUI operator auth requires Cloudflare Access or a bearer token',
+		});
+	});
+
 	it('allows Cloudflare Access identity for the standalone GUI operator API', async () => {
 		const env = buildEnv({
 			MCP_REQUIRE_ACCESS_AUTH: 'true',
@@ -255,6 +268,37 @@ describe('chatgpt mcp oidc auth', () => {
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = input instanceof Request ? input.url : String(input);
 				if (url === 'https://auth.example.com/userinfo') {
+					return new Response(JSON.stringify({ email: 'developer@example.com' }), {
+						status: 200,
+						headers: { 'content-type': 'application/json' },
+					});
+				}
+				throw new Error(`unexpected fetch: ${url}`);
+			}),
+		);
+		const request = new Request('https://example.com/chatgpt/mcp', {
+			headers: { authorization: `Bearer ${token}` },
+		});
+		await expect(authorizeChatgptMcpRequest(request, env)).resolves.toMatchObject({
+			ok: true,
+			email: 'developer@example.com',
+		});
+		vi.unstubAllGlobals();
+	});
+
+	it('preserves issuer path segments when falling back to the userinfo endpoint', async () => {
+		const env = buildEnv({
+			CHATGPT_MCP_AUTH_MODE: 'oidc',
+			CHATGPT_MCP_ISSUER: 'https://auth.example.com/realms/dev',
+			CHATGPT_MCP_AUDIENCE: 'chatgpt-mcp-worker',
+			CHATGPT_MCP_ALLOWED_EMAILS: 'developer@example.com',
+		});
+		const token = 'opaque-userinfo-token-with-path';
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = input instanceof Request ? input.url : String(input);
+				if (url === 'https://auth.example.com/realms/dev/userinfo') {
 					return new Response(JSON.stringify({ email: 'developer@example.com' }), {
 						status: 200,
 						headers: { 'content-type': 'application/json' },

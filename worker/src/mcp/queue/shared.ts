@@ -21,6 +21,8 @@ const attentionStatusSchema = z.enum([
 	'failed',
 ]);
 const sourceLayerSchema = z.enum(['gpt', 'mcp', 'cloudflare', 'repo', 'system']);
+const missionStatusSchema = z.enum(['queued', 'running', 'blocked', 'failed', 'completed', 'cancelled']);
+const missionLaneStateSchema = z.enum(['queued', 'runnable', 'launched', 'working', 'blocked', 'failed', 'completed', 'cancelled', 'detached']);
 const notificationCountsSchema = z
 	.object({
 		idle: z.number(),
@@ -114,6 +116,51 @@ export const jobEventFeedStructuredSchema = z
 		items: z.array(notificationItemSchema),
 		logs: z.array(layerLogEntrySchema),
 		counts: notificationCountsSchema,
+	})
+	.passthrough();
+
+export const missionProgressStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.mission_progress'),
+		action: z.string().optional(),
+		progress: z
+			.object({
+				mission_id: z.string(),
+				status: missionStatusSchema,
+				lanes: z.array(
+					z
+						.object({
+							lane_id: z.string(),
+							status: missionLaneStateSchema,
+							current_job_id: z.string().nullable().optional(),
+						})
+						.passthrough(),
+				),
+			})
+			.passthrough(),
+	})
+	.passthrough();
+
+export const missionListStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.mission_list'),
+		missions: z.array(
+			z
+				.object({
+					mission_id: z.string(),
+					status: missionStatusSchema,
+				})
+				.passthrough(),
+		),
+	})
+	.passthrough();
+
+export const missionEventFeedStructuredSchema = z
+	.object({
+		kind: z.literal('opengpt.notification_contract.mission_event_feed'),
+		mission_id: z.string(),
+		items: z.array(notificationItemSchema),
+		logs: z.array(layerLogEntrySchema),
 	})
 	.passthrough();
 

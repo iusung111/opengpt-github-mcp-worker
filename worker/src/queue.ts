@@ -3,6 +3,8 @@ import {
 	AppEnv,
 	JobRecord,
 	JobStatus,
+	MissionProgressSnapshot,
+	MissionRecord,
 	NextActor,
 	QueueEnvelope,
 	WorkspaceRecord,
@@ -66,6 +68,7 @@ import { applyGithubEvent as applyGitHubWebhookEvent } from './queue-webhooks';
 import {
 	buildJobIndexEntries,
 	jobIndexReadyKey,
+	jobMissionIndexPrefix,
 	JobIndexPointer,
 } from './queue-index';
 import { incrementReadCounter } from './read-observability';
@@ -82,6 +85,22 @@ import {
 	workspaceRecordNeedsNormalization,
 } from './queue-workspaces';
 import { GLOBAL_BROWSER_REMOTE_CONTROL_STORAGE_KEY, normalizeBrowserRemoteControl } from './browser-remote-control';
+import {
+	type MissionIndexPointer,
+	missionIndexReadyKey,
+} from './queue/missions/indexes';
+import {
+	buildMissionProgressSnapshot as buildQueueMissionProgressSnapshot,
+} from './queue/missions/projections';
+import { scheduleMission } from './queue/missions/scheduler';
+import {
+	ensureMissionIndexes as ensureQueueMissionIndexes,
+	getMission as getStoredMission,
+	listMissions as listStoredMissions,
+	missionRecordNeedsNormalization,
+	normalizeStoredMissionRecord,
+	persistMission as persistStoredMission,
+} from './queue/missions/store';
 import { handleJobQueueDurableObjectRequest } from './queue/durable-object-routes';
 export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	constructor(ctx: DurableObjectState, env: AppEnv) {
@@ -101,6 +120,11 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async listStoredJobs(): Promise<JobRecord[]> { incrementReadCounter('queue_storage_list_call'); return Array.from((await this.ctx.storage.list<JobRecord>({ prefix: 'job:' })).values()); }
+
+	private async listStoredMissions(): Promise<MissionRecord[]> {
+		incrementReadCounter('queue_storage_list_call');
+		return Array.from((await this.ctx.storage.list<MissionRecord>({ prefix: 'mission:' })).values());
+	}
 
 	private async listStoredAudits(): Promise<Map<string, AuditRecord>> {
 		incrementReadCounter('queue_storage_list_call');
@@ -130,6 +154,18 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		};
 	}
 
+	private createMissionStoreContext() {
+		return {
+			getStorage: this.getStorageValue.bind(this),
+			putStorage: this.putStorageValue.bind(this),
+			deleteStorage: this.deleteStorageValue.bind(this),
+			listMissions: this.listStoredMissions.bind(this),
+			reconcileMission: this.reconcileMission.bind(this),
+			listMissionIndexPointers: async (prefix: string) =>
+				Array.from((await this.ctx.storage.list<MissionIndexPointer>({ prefix })).values()),
+		};
+	}
+
 	private async enforceAuditRetention(): Promise<void> {
 		await enforceQueueAuditRetention(this.createQueueAuditContext());
 	}
@@ -155,16 +191,50 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return normalized;
 	}
 
+	private async getMission(missionId: string): Promise<MissionRecord | null> {
+		const mission = await getStoredMission(this.createMissionStoreContext(), missionId);
+		if (!mission) {
+			return null;
+		}
+		if (!missionRecordNeedsNormalization(mission)) {
+			return mission;
+		}
+		const normalized = normalizeStoredMissionRecord(mission);
+		await this.persistMission(normalized, mission);
+		return normalized;
+	}
+
 	private async ensureJobIndexes(): Promise<void> {
 		await ensureQueueJobIndexes(this.createQueueStoreContext());
+	}
+
+	private async ensureMissionIndexes(): Promise<void> {
+		await ensureQueueMissionIndexes(this.createMissionStoreContext());
 	}
 
 	private async persistJob(job: JobRecord, previous?: JobRecord | null): Promise<void> {
 		await persistStoredJob(this.createQueueStoreContext(), job, previous);
 	}
 
+	private async persistMission(mission: MissionRecord, previous?: MissionRecord | null): Promise<void> {
+		await persistStoredMission(this.createMissionStoreContext(), mission, previous);
+	}
+
 	private async getWorkspace(repoKey: string): Promise<WorkspaceRecord | null> {
 		return getStoredWorkspace(this.createQueueStoreContext(), repoKey);
+	}
+
+	private async listMissionJobs(missionId: string): Promise<JobRecord[]> {
+		await this.ensureJobIndexes();
+		const pointers = await this.ctx.storage.list<JobIndexPointer>({ prefix: jobMissionIndexPrefix(missionId) });
+		const jobs: JobRecord[] = [];
+		for (const pointer of pointers.values()) {
+			const job = await this.getJob(pointer.job_id);
+			if (job) {
+				jobs.push(await this.reconcileJob(job));
+			}
+		}
+		return jobs.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
 	}
 
 	private async getActiveWorkspaceRepoKey(): Promise<string | null> {
@@ -179,11 +249,91 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return buildQueueJobProgressSnapshot(job, recentAudits);
 	}
 
+	private async buildMissionProgressSnapshot(mission: MissionRecord): Promise<MissionProgressSnapshot> {
+		const childProgressByJobId = new Map<string, JobProgressSnapshot>();
+		let latestNotification = null;
+		for (const lane of mission.lanes) {
+			if (!lane.current_job_id) {
+				continue;
+			}
+			const job = await this.getJob(lane.current_job_id);
+			if (!job) {
+				continue;
+			}
+			const audits = await this.listAuditRecords(undefined, job.job_id, 10);
+			const progress = this.buildJobProgressSnapshot(job, audits);
+			childProgressByJobId.set(job.job_id, progress);
+			if (
+				progress.latest_notification &&
+				(!latestNotification || progress.latest_notification.created_at > latestNotification.created_at)
+			) {
+				latestNotification = progress.latest_notification;
+			}
+		}
+		return buildQueueMissionProgressSnapshot(mission, childProgressByJobId, latestNotification);
+	}
+
 	private async findJob(
 		matcher: (job: JobRecord) => boolean,
 		options: { reconcile?: boolean } = {},
 	): Promise<JobRecord | null> {
 		return findStoredJob(this.createQueueStoreContext(), matcher, options);
+	}
+
+	private async reconcileMission(mission: MissionRecord): Promise<MissionRecord> {
+		return scheduleMission(
+			{
+				getJob: this.getJob.bind(this),
+				listMissionJobs: this.listMissionJobs.bind(this),
+				upsertJob: upsertQueueJob.bind(null, {
+					getJob: this.getJob.bind(this),
+					persistJob: this.persistJob.bind(this),
+				}),
+				persistMission: this.persistMission.bind(this),
+				writeAudit: this.writeAudit.bind(this),
+				autoApproveJob: async (job, note) => {
+					const approval = job.worker_manifest?.attention?.approval;
+					if (!approval?.request_id) {
+						return job;
+					}
+					const previous = structuredClone(job);
+					const resolvedAt = nowIso();
+					job.worker_manifest = mergeWorkerManifest(job.worker_manifest, {
+						attention: {
+							approval: {
+								...approval,
+								pending: false,
+								status: 'approved',
+								note,
+								resolved_at: resolvedAt,
+								cleared_at: resolvedAt,
+							},
+						},
+						control: {
+							state: 'active',
+							reason: null,
+							resolved_at: resolvedAt,
+							last_interrupt: null,
+						},
+					});
+					job.updated_at = resolvedAt;
+					await this.persistJob(job, previous);
+					await this.writeAudit('permission_request_resolved', {
+						job_id: job.job_id,
+						repo: job.repo,
+						request_id: approval.request_id,
+						resolution: 'approved',
+						note,
+						blocked_action: approval.blocked_action ?? null,
+						source_layer: 'gpt',
+						attention_status: computeRunAttentionStatus(job),
+						message: note,
+					});
+					return job;
+				},
+			},
+			mission,
+		);
 	}
 
 	private async markJobStale(job: JobRecord, reason: string, note: string): Promise<boolean> {
@@ -364,17 +514,21 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 		return normalized;
 	}
 
-	async fetch(request: Request): Promise<Response> {
-		const url = new URL(request.url);
-		return handleJobQueueDurableObjectRequest(request, url, {
-			env: this.env,
+	private createQueueActionContext() {
+		return {
 			upsertJob: this.upsertJob.bind(this),
 			getJob: this.getJob.bind(this),
+			listMissionJobs: this.listMissionJobs.bind(this),
 			reconcileJob: this.reconcileJob.bind(this),
 			persistJob: this.persistJob.bind(this),
+			getMission: this.getMission.bind(this),
+			reconcileMission: this.reconcileMission.bind(this),
+			persistMission: this.persistMission.bind(this),
+			listMissions: this.listMissions.bind(this),
 			writeAudit: this.writeAudit.bind(this),
 			buildJobAudit: this.buildJobAudit.bind(this),
 			buildJobProgressSnapshot: this.buildJobProgressSnapshot.bind(this),
+			buildMissionProgressSnapshot: this.buildMissionProgressSnapshot.bind(this),
 			listAuditRecords: this.listAuditRecords.bind(this),
 			listJobs: this.listJobs.bind(this),
 			getWorkspace: this.getWorkspace.bind(this),
@@ -384,7 +538,7 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 			tryRegisterDelivery: this.tryRegisterDelivery.bind(this),
 			autoRedispatchJob: this.autoRedispatchJob.bind(this),
 			cancelWorkflowRun: this.cancelWorkflowRun.bind(this),
-			applyGithubEvent: (payload, _deliveryId) =>
+			applyGithubEvent: (payload: Record<string, unknown>, _deliveryId: string) =>
 				applyGitHubWebhookEvent(
 					{
 						ensureJobIndexes: this.ensureJobIndexes.bind(this),
@@ -400,6 +554,19 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 				),
 			putWorkspace: this.putWorkspace.bind(this),
 			setActiveWorkspace: this.setActiveWorkspace.bind(this),
+		};
+	}
+
+	private async listMissions(options: { status?: MissionRecord['status']; repo?: string } = {}): Promise<MissionRecord[]> {
+		await this.ensureMissionIndexes();
+		return listStoredMissions(this.createMissionStoreContext(), options);
+	}
+
+	async fetch(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+		return handleJobQueueDurableObjectRequest(request, url, {
+			env: this.env,
+			...this.createQueueActionContext(),
 			getBrowserRemoteControlState: this.getBrowserRemoteControlState.bind(this),
 			persistBrowserRemoteControlState: this.persistBrowserRemoteControlState.bind(this),
 		});

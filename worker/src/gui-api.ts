@@ -8,6 +8,7 @@ import {
 	QueueEnvelope,
 } from './contracts';
 import {
+	buildOidcEndpointUrl,
 	fail,
 	getChatgptMcpAuthMode,
 	getChatgptMcpIssuer,
@@ -68,6 +69,28 @@ function parseSourceLayer(value: string | null): QueueEnvelope['source_layer'] {
 
 function parseControlAction(value: unknown): QueueEnvelope['control_action'] {
 	if (value === 'pause' || value === 'resume' || value === 'cancel' || value === 'retry') {
+		return value;
+	}
+	return undefined;
+}
+
+function parseMissionStatus(value: string | null): QueueEnvelope['mission_status'] {
+	if (value === 'queued' || value === 'running' || value === 'blocked' || value === 'failed' || value === 'completed' || value === 'cancelled') {
+		return value;
+	}
+	return undefined;
+}
+
+function parseMissionControlAction(value: unknown): QueueEnvelope['mission_control_action'] {
+	if (
+		value === 'pause' ||
+		value === 'resume' ||
+		value === 'cancel' ||
+		value === 'retry_failed' ||
+		value === 'reconcile' ||
+		value === 'enable_yolo' ||
+		value === 'disable_yolo'
+	) {
 		return value;
 	}
 	return undefined;
@@ -163,9 +186,9 @@ export async function handleGuiApi(request: Request, env: AppEnv): Promise<Respo
 					audience,
 					scope: getGuiOidcScope(env),
 					redirect_uri: redirectUri,
-					authorization_url: issuer ? new URL('/authorize', issuer).toString() : null,
-					token_url: issuer ? new URL('/oauth/token', issuer).toString() : null,
-					logout_url: issuer ? new URL('/v2/logout', issuer).toString() : null,
+					authorization_url: buildOidcEndpointUrl(issuer, 'authorize'),
+					token_url: buildOidcEndpointUrl(issuer, 'oauth/token'),
+					logout_url: buildOidcEndpointUrl(issuer, 'v2/logout'),
 					missing,
 				},
 			}),
@@ -318,6 +341,44 @@ export async function handleGuiApi(request: Request, env: AppEnv): Promise<Respo
 			status: parseJobStatus(url.searchParams.get('status')),
 			next_actor: parseNextActor(url.searchParams.get('next_actor')),
 		});
+	}
+
+	if (request.method === 'GET' && parts.length === 3 && parts[2] === 'missions') {
+		return proxyQueueAction(env, {
+			action: 'mission_list',
+			mission_status: parseMissionStatus(url.searchParams.get('status')),
+			repo_key: url.searchParams.get('repo') ?? undefined,
+		});
+	}
+
+	if (parts.length >= 4 && parts[2] === 'missions') {
+		const missionId = decodeURIComponent(parts[3] ?? '').trim();
+		if (!missionId) {
+			return badRequest('mission_id is required');
+		}
+		if (request.method === 'GET' && parts.length === 4) {
+			return proxyQueueAction(env, { action: 'mission_progress', mission_id: missionId });
+		}
+		if (request.method === 'GET' && parts.length === 5 && parts[4] === 'feed') {
+			const rawLimit = Number(url.searchParams.get('limit') ?? 50);
+			const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 200)) : 50;
+			return proxyQueueAction(env, { action: 'mission_event_feed', mission_id: missionId, limit });
+		}
+		if (request.method === 'POST' && parts.length === 5 && parts[4] === 'control') {
+			const body = await readJsonBody(request).catch(() => null);
+			if (!body) {
+				return badRequest('invalid json body');
+			}
+			const action = parseMissionControlAction(body.action);
+			if (!action) {
+				return badRequest('action must be one of pause, resume, cancel, retry_failed, reconcile, enable_yolo, disable_yolo');
+			}
+			return proxyQueueAction(env, {
+				action: 'mission_control',
+				mission_id: missionId,
+				mission_control_action: action,
+			});
+		}
 	}
 
 	if (parts.length >= 4 && parts[2] === 'jobs') {

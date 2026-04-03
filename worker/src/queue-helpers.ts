@@ -7,6 +7,10 @@ export function jobStorageKey(jobId: string): string {
 	return `job:${jobId}`;
 }
 
+export function missionStorageKey(missionId: string): string {
+	return `mission:${missionId}`;
+}
+
 export function auditStorageKey(id: string): string {
 	return `audit:${id}`;
 }

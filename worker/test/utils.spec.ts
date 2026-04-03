@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveRepoIdentityInput, resolveUnknownRepoIdentityInput } from '../src/mcp-repo-identity';
 import {
 	classifyRepoPathIssue,
+	buildOidcEndpointUrl,
 	decodeBase64Text,
 	ensureWorkflowAllowed,
 	ensureLiveSelfHostControl,
@@ -207,6 +208,15 @@ describe('normalizeWorkflowInputs', () => {
 				'mirror secret sync',
 			),
 		).toThrow(/requires the live self-host worker/);
+	});
+
+	it('preserves issuer path segments when building OIDC endpoint URLs', () => {
+		expect(buildOidcEndpointUrl('https://auth.example.com/realms/dev', '/userinfo')).toBe(
+			'https://auth.example.com/realms/dev/userinfo',
+		);
+		expect(buildOidcEndpointUrl('https://auth.example.com', 'authorize')).toBe(
+			'https://auth.example.com/authorize',
+		);
 	});
 });
 

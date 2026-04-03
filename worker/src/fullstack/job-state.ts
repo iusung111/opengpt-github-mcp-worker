@@ -61,21 +61,7 @@ export async function updateJobState(
 		return;
 	}
 	const currentJob = await getJobRecord(env, input.jobId);
-	const approvalPending = currentJob?.worker_manifest?.attention?.approval?.pending === true;
-	const shouldClearApproval =
-		approvalPending &&
-		(input.status === 'working' || input.status === 'done' || input.status === 'failed');
 	const mergedManifest = mergeWorkerManifest(currentJob?.worker_manifest ?? {}, input.workerManifest ?? {});
-	if (shouldClearApproval) {
-		mergedManifest.attention = {
-			...(mergedManifest.attention ?? {}),
-			approval: {
-				...(mergedManifest.attention?.approval ?? {}),
-				pending: false,
-				cleared_at: nowIso(),
-			},
-		};
-	}
 	await queueJsonOrThrow(env, {
 		action: 'job_upsert',
 		job: {
@@ -135,20 +121,6 @@ export async function updateJobState(
 					dedupe_key: `${input.jobId}:${section}:${sectionStatus}:${projectedJob.workflow_run_id ?? 'none'}`,
 				},
 			}, `failed to write ${section} audit for ${input.jobId}`);
-		}
-		if (shouldClearApproval) {
-			await queueJsonOrThrow(env, {
-				action: 'audit_write',
-				event_type: 'job_attention_approval_cleared',
-				payload: {
-					job_id: input.jobId,
-					repo: input.repoKey,
-					source_layer: 'gpt',
-					attention_status: computeRunAttentionStatus(projectedJob),
-					message: 'Approval requirement cleared and work resumed.',
-					dedupe_key: `approval_cleared:${input.jobId}:${projectedJob.updated_at}`,
-				},
-			}, `failed to write approval cleared audit for ${input.jobId}`);
 		}
 	}
 }

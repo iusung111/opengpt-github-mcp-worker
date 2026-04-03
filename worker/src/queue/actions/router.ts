@@ -3,6 +3,7 @@ import { fail, jsonResponse, ok } from '../../utils';
 import type { QueueRequestContext, QueueResponse } from './context';
 import { handleGitHubEvent } from './events';
 import { handleCreatedJob, handleLoadedJob, handleJobAppendNote, handleJobEventFeed, handleJobProgress, handleJobsList, handleJobStatusUpdate } from './jobs';
+import { handleMissionControl, handleMissionCreate, handleMissionEventFeed, handleMissionGet, handleMissionList, handleMissionProgress } from '../missions/actions';
 import { handleJobControl, handleJobSubmitReview, handlePermissionRequestResolve } from './reviews';
 import { handleWorkspaceActivate, handleWorkspaceGet, handleWorkspaceRegister } from './workspaces';
 
@@ -20,6 +21,18 @@ export async function handleQueueAction(context: QueueRequestContext, payload: Q
 			return payload.job_id ? handleLoadedJob(context, payload.job_id, true) : null;
 		case 'jobs_list':
 			return handleJobsList(context, payload);
+		case 'mission_create':
+			return handleMissionCreate(context, payload);
+		case 'mission_get':
+			return payload.mission_id ? handleMissionGet(context, payload.mission_id) : null;
+		case 'mission_list':
+			return handleMissionList(context, payload);
+		case 'mission_progress':
+			return payload.mission_id ? handleMissionProgress(context, payload.mission_id) : null;
+		case 'mission_event_feed':
+			return payload.mission_id ? handleMissionEventFeed(context, payload) : null;
+		case 'mission_control':
+			return payload.mission_id && payload.mission_control_action ? handleMissionControl(context, payload) : null;
 		case 'job_update_status':
 			return payload.job_id && payload.status && payload.next_actor ? handleJobStatusUpdate(context, payload) : null;
 		case 'job_control':

@@ -24,5 +24,20 @@ export async function handleQueueApi(request: Request, env: AppEnv): Promise<Res
 			next_actor: nextActor ?? undefined,
 		});
 	}
+	if (request.method === 'POST' && url.pathname === '/queue/mission') {
+		const mission = (await request.json()) as Record<string, unknown> & { mission_id: string };
+		return queueFetch(env, { action: 'mission_create', mission });
+	}
+	if (request.method === 'GET' && url.pathname.startsWith('/queue/mission/')) {
+		const missionId = url.pathname.split('/').pop();
+		return queueFetch(env, { action: 'mission_progress', mission_id: missionId });
+	}
+	if (request.method === 'GET' && url.pathname === '/queue/missions') {
+		return queueFetch(env, {
+			action: 'mission_list',
+			mission_status: (url.searchParams.get('status') as any) ?? undefined,
+			repo_key: url.searchParams.get('repo') ?? undefined,
+		});
+	}
 	return jsonResponse(fail('not_found', 'not found'), 404);
 }

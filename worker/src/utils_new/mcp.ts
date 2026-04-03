@@ -20,13 +20,35 @@ function buildStructuredToolResult(result: ToolResultEnvelope): Record<string, u
 			workflow_cancel: hasRecord(data.workflow_cancel) ? data.workflow_cancel : null,
 		};
 	}
+	if (hasRecord(data.progress) && typeof data.progress.mission_id === 'string' && Array.isArray(data.progress.lanes)) {
+		return {
+			kind: 'opengpt.notification_contract.mission_progress',
+			action: typeof data.action === 'string' ? data.action : undefined,
+			progress: data.progress,
+		};
+	}
 	if (Array.isArray(data.jobs) && data.jobs.some((item) => hasRecord(item) && hasRecord(item.run_summary))) {
 		return {
 			kind: 'opengpt.notification_contract.jobs_list',
 			jobs: data.jobs,
 		};
 	}
+	if (Array.isArray(data.missions) && data.missions.some((item) => hasRecord(item) && typeof item.mission_id === 'string')) {
+		return {
+			kind: 'opengpt.notification_contract.mission_list',
+			missions: data.missions,
+		};
+	}
 	if (Array.isArray(data.items) && Array.isArray(data.logs) && hasRecord(data.counts)) {
+		if (typeof data.mission_id === 'string') {
+			return {
+				kind: 'opengpt.notification_contract.mission_event_feed',
+				mission_id: data.mission_id,
+				items: data.items,
+				logs: data.logs,
+				counts: data.counts,
+			};
+		}
 		return {
 			kind: 'opengpt.notification_contract.job_event_feed',
 			items: data.items,

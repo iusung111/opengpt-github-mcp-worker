@@ -2,6 +2,7 @@ export * from './browser-control';
 export * from './common';
 export * from './env';
 export * from './job';
+export * from './mission';
 export * from './queue';
 export * from './self-host';
 export * from './upload';

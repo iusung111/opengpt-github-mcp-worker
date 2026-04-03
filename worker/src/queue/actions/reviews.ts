@@ -6,6 +6,16 @@ import { getControlState, getDispatchRequest, hasExecutionRelatedInterrupt, tran
 import type { QueueRequestContext, QueueResponse } from './context';
 import { jobNotFound } from './context';
 
+async function reconcileLinkedMission(context: QueueRequestContext, job: JobRecord): Promise<void> {
+	if (!job.mission_id) {
+		return;
+	}
+	const mission = await context.getMission(job.mission_id);
+	if (mission) {
+		await context.reconcileMission(mission);
+	}
+}
+
 function interruptKindForResolution(resolution: PermissionResolution) {
 	if (resolution === 'rejected') return 'approval_rejected';
 	if (resolution === 'superseded') return 'approval_superseded';
@@ -61,6 +71,7 @@ export async function handlePermissionRequestResolve(context: QueueRequestContex
 	});
 	job.updated_at = resolvedAt;
 	await context.persistJob(job, previous);
+	await reconcileLinkedMission(context, job);
 	await context.writeAudit('permission_request_resolved', {
 		job_id: job.job_id,
 		repo: job.repo,
@@ -113,6 +124,7 @@ export async function handleJobControl(context: QueueRequestContext, payload: Qu
 		job.worker_manifest = mergeWorkerManifest(job.worker_manifest, { control: { state: 'paused', reason: reason ?? 'Paused from the run console.', requested_by: 'gpt', requested_at: timestamp, resolved_at: null } });
 		job.updated_at = timestamp;
 		await context.persistJob(job, previous);
+		await reconcileLinkedMission(context, job);
 		await context.writeAudit('job_control_paused', { job_id: job.job_id, repo: job.repo, reason: reason ?? 'Paused from the run console.', control_state: 'paused', source_layer: 'gpt', attention_status: computeRunAttentionStatus(job) });
 		return jsonResponse(ok(await buildProgressPayload(context, job, { action })));
 	}
@@ -124,6 +136,7 @@ export async function handleJobControl(context: QueueRequestContext, payload: Qu
 		});
 		job.updated_at = timestamp;
 		await context.persistJob(job, previous);
+		await reconcileLinkedMission(context, job);
 		workflowCancel = await context.cancelWorkflowRun(job);
 		await context.writeAudit('job_control_cancelled', { job_id: job.job_id, repo: job.repo, reason: reason ?? 'Cancelled from the run console.', control_state: 'cancelled', source_layer: 'gpt', attention_status: 'cancelled', workflow_cancel_attempted: workflowCancel.attempted, workflow_cancelled: workflowCancel.cancelled, workflow_cancel_error: workflowCancel.error });
 		return jsonResponse(ok(await buildProgressPayload(context, job, { action, workflow_cancel: workflowCancel })));
@@ -138,6 +151,7 @@ export async function handleJobControl(context: QueueRequestContext, payload: Qu
 		}
 		job.updated_at = timestamp;
 		await context.persistJob(job, previous);
+		await reconcileLinkedMission(context, job);
 		await context.writeAudit('job_control_resumed', { job_id: job.job_id, repo: job.repo, reason, control_state: 'active', resume_strategy: resumeStrategy, source_layer: 'gpt', attention_status: computeRunAttentionStatus(job) });
 		return jsonResponse(ok(await buildProgressPayload(context, job, { action, resume_strategy: resumeStrategy })));
 	}
@@ -148,6 +162,7 @@ export async function handleJobControl(context: QueueRequestContext, payload: Qu
 		if (!(await context.autoRedispatchJob(job, reason ?? 'manual retry'))) return jsonResponse(fail('retry_unavailable', 'run could not be re-dispatched'), 409);
 		job.updated_at = timestamp;
 		await context.persistJob(job, previous);
+		await reconcileLinkedMission(context, job);
 		await context.writeAudit('job_control_retried', { job_id: job.job_id, repo: job.repo, reason, control_state: 'active', resume_strategy: 'redispatch', source_layer: 'gpt', attention_status: computeRunAttentionStatus(job) });
 		return jsonResponse(ok(await buildProgressPayload(context, job, { action, resume_strategy: 'redispatch' })));
 	}
@@ -179,6 +194,7 @@ export async function handleJobSubmitReview(context: QueueRequestContext, payloa
 	}
 	job.updated_at = nowIso();
 	await context.persistJob(job, previous);
+	await reconcileLinkedMission(context, job);
 	await context.writeAudit('job_submit_review', { job_id: job.job_id, verdict: payload.review_verdict, findings: payload.findings, next_action: payload.next_action ?? null, source_layer: 'repo', attention_status: computeRunAttentionStatus(job) });
 	return jsonResponse(ok({ job }));
 }
