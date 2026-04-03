@@ -6,7 +6,7 @@ function laneCard(lane, selectedJobId) {
 		<div class="job-card-heading">
 			<div>
 				<h3>${escapeHtml(lane.title)}</h3>
-				<p class="supporting-copy">${escapeHtml(lane.role)} · attempt ${escapeHtml(lane.attempt)}</p>
+				<p class="supporting-copy">${escapeHtml(lane.role)} / attempt ${escapeHtml(lane.attempt)}</p>
 			</div>
 			${statusBadge(lane.status)}
 		</div>
@@ -27,7 +27,7 @@ export function renderMissionBoard(store, mission) {
 			<div>
 				<p class="eyebrow">Mission</p>
 				<h2>${escapeHtml(mission.title)}</h2>
-				<p class="supporting-copy">${escapeHtml(mission.repo)} · updated ${escapeHtml(formatRelative(mission.updatedAt))}</p>
+				<p class="supporting-copy">${escapeHtml(mission.repo)} / updated ${escapeHtml(formatRelative(mission.updatedAt))}</p>
 			</div>
 			<div class="action-row">
 				${actionButton(mission.yoloMode ? 'Disable YOLO' : 'Enable YOLO', mission.yoloMode ? 'disable-yolo' : 'enable-yolo')}
@@ -37,7 +37,7 @@ export function renderMissionBoard(store, mission) {
 			</div>
 		</header>
 		<section class="hero-card">
-			<p class="supporting-copy">Status ${escapeHtml(mission.status)} · parallel ${escapeHtml(mission.maxParallelism)} · blocked ${escapeHtml(mission.counts.blocked)} · failed ${escapeHtml(mission.counts.failed)}</p>
+			<p class="supporting-copy">Status ${escapeHtml(mission.status)} / parallel ${escapeHtml(mission.maxParallelism)} / blocked ${escapeHtml(mission.counts.blocked)} / failed ${escapeHtml(mission.counts.failed)}</p>
 		</section>
 		<section class="job-grid" aria-label="Mission lanes">
 			${mission.lanes.length ? mission.lanes.map((lane) => laneCard(lane, store.selectedJobId)).join('') : renderEmpty('No lanes defined for this mission.')}

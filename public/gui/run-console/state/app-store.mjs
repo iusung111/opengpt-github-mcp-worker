@@ -1,5 +1,10 @@
+import { visibleLegacyJobs } from './attention-center.mjs';
 import { mergeJobMaps, normalizeJob } from './job-normalizer.mjs';
 import { mergeMissionMaps, normalizeMission } from './mission-normalizer.mjs';
+
+function firstVisibleLegacyJobId(store) {
+	return visibleLegacyJobs(store)[0]?.jobId || '';
+}
 
 export function createAppStore(route = {}) {
 	return {
@@ -17,6 +22,7 @@ export function createAppStore(route = {}) {
 		message: '',
 		loading: false,
 		standaloneToken: '',
+		notificationMenuOpen: false,
 		session: {
 			ready: false,
 			email: null,
@@ -52,7 +58,25 @@ export function applyDashboard(store, payload) {
 	if (!store.selectedJobId) {
 		const selectedMission = currentMission(store);
 		const missionJob = selectedMission?.lanes.find((lane) => lane.currentJobId)?.currentJobId || '';
-		store.selectedJobId = missionJob || store.jobOrder[0] || '';
+		store.selectedJobId = missionJob || firstVisibleLegacyJobId(store);
+	}
+}
+
+export function applyMissionList(store, payload) {
+	const missionResult = mergeMissionMaps(store.missionsById, payload.missions || payload || []);
+	store.missionsById = missionResult.missionsById;
+	store.missionOrder = missionResult.order;
+	if (!store.selectedMissionId && store.missionOrder.length) {
+		store.selectedMissionId = store.missionOrder[0];
+	}
+}
+
+export function applyJobList(store, payload) {
+	const jobResult = mergeJobMaps(store.jobsById, payload.jobs || payload || []);
+	store.jobsById = jobResult.jobsById;
+	store.jobOrder = jobResult.order;
+	if (!store.selectedJobId) {
+		store.selectedJobId = firstVisibleLegacyJobId(store);
 	}
 }
 
@@ -117,10 +141,7 @@ export function selectJob(store, jobId) {
 }
 
 export function legacyJobs(store) {
-	return store.jobOrder
-		.map((jobId) => store.jobsById[jobId])
-		.filter(Boolean)
-		.filter((job) => !job.missionId);
+	return visibleLegacyJobs(store);
 }
 
 export function needsStandaloneAuth(store) {

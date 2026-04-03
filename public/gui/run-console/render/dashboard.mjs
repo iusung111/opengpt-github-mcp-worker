@@ -1,4 +1,5 @@
 import { config } from '../config.mjs';
+import { buildAttentionItems, yoloAllEnabled } from '../state/attention-center.mjs';
 import { needsStandaloneAuth } from '../state/app-store.mjs';
 import { actionButton, escapeHtml, formatRelative, renderEmpty, statusBadge } from './shared-ui.mjs';
 
@@ -13,7 +14,7 @@ function missionCard(mission, selectedMissionId) {
 			</div>
 			${statusBadge(mission.status)}
 		</div>
-		<p class="job-card-summary">parallel ${escapeHtml(mission.maxParallelism)} · working ${escapeHtml(counts.working)} · blocked ${escapeHtml(counts.blocked)}</p>
+		<p class="job-card-summary">parallel ${escapeHtml(mission.maxParallelism)} / working ${escapeHtml(counts.working)} / blocked ${escapeHtml(counts.blocked)}</p>
 		<div class="job-card-meta">
 			<span class="job-card-meta-item">${escapeHtml(formatRelative(mission.updatedAt))}</span>
 			<span class="job-card-meta-item">${mission.yoloMode ? 'YOLO on' : 'YOLO off'}</span>
@@ -69,8 +70,49 @@ function standaloneAuthPanel(store) {
 	</section>`;
 }
 
+function notificationCenter(store) {
+	const items = buildAttentionItems(store);
+	const open = store.notificationMenuOpen === true;
+	return `<div class="notification-shell" data-notification-menu>
+		<button type="button" class="icon-button notification-button" data-action="toggle-notifications" aria-expanded="${open ? 'true' : 'false'}">
+			Alerts
+			${items.length ? `<span class="notification-badge">${escapeHtml(items.length)}</span>` : ''}
+		</button>
+		${
+			open
+				? `<div class="notification-menu">
+					<div class="notification-menu-header">
+						<h3>Attention</h3>
+						${actionButton('Close', 'toggle-notifications', {}, false, true)}
+					</div>
+					<div class="notification-list">
+						${
+							items.length
+								? items
+										.map(
+											(item) => `<article class="notification-entry">
+												<strong>${escapeHtml(item.title)}</strong>
+												<p>${escapeHtml(item.body)}</p>
+												<span>${escapeHtml(item.status)} / ${escapeHtml(formatRelative(item.updatedAt))}</span>
+												<div class="action-row">
+													${item.jobId ? `<button type="button" class="mini-button" data-select-job="${escapeHtml(item.jobId)}">Open job</button>` : ''}
+													${item.missionId ? `<button type="button" class="mini-button" data-select-mission="${escapeHtml(item.missionId)}">Open mission</button>` : ''}
+												</div>
+											</article>`,
+										)
+										.join('')
+								: '<article class="notification-empty">No active alerts.</article>'
+						}
+					</div>
+				</div>`
+				: ''
+		}
+	</div>`;
+}
+
 export function renderDashboard(store, legacyJobs) {
 	const missions = store.missionOrder.map((missionId) => store.missionsById[missionId]).filter(Boolean);
+	const yoloAll = yoloAllEnabled(store);
 	return `<section class="dashboard-pane">
 		<header class="hero-card">
 			<div>
@@ -79,6 +121,8 @@ export function renderDashboard(store, legacyJobs) {
 				<p class="supporting-copy">Mission rollups on the left, lane board in the middle, child run detail on the right.</p>
 			</div>
 			<div class="action-row">
+				${notificationCenter(store)}
+				${actionButton(yoloAll ? 'YOLO all on' : 'YOLO all off', 'toggle-yolo-all', {}, missions.length === 0, yoloAll)}
 				${actionButton('Refresh', 'refresh-dashboard')}
 			</div>
 		</header>

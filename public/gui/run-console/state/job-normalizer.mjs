@@ -60,8 +60,10 @@ export function normalizeJob(raw) {
 		jobId,
 		missionId: asString(progress.mission_id || raw.mission_id, ''),
 		laneId: asString(progress.lane_id || raw.lane_id, ''),
+		operationType: asString(progress.operation_type || raw.operation_type, ''),
 		title: asString(summary.title, jobId),
 		repo: asString(progress.repo || raw.repo, ''),
+		targetPaths: Array.isArray(progress.target_paths || raw.target_paths) ? (progress.target_paths || raw.target_paths).map(String) : [],
 		status: asString(summary.status, 'idle'),
 		nextActor: asString(progress.next_actor || raw.next_actor, ''),
 		progressPercent: asNumber(summary.progress_percent, 0),
@@ -72,6 +74,7 @@ export function normalizeJob(raw) {
 		approval: normalizeApproval(progress.approval_request || raw.approval_request),
 		control: normalizeControl(progress.control_state || raw.control_state),
 		blocking: normalizeBlocking(progress.blocking_state || raw.blocking_state),
+		latestNotification: hasRecord(progress.latest_notification || raw.latest_notification) ? (progress.latest_notification || raw.latest_notification) : null,
 		browserControl: hasRecord(progress.browser_control || raw.browser_control) ? (progress.browser_control || raw.browser_control) : null,
 		raw: progress,
 	};
