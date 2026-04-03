@@ -35,8 +35,28 @@ async function sha256Base64Url(value) {
 	return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function cleanupLoginQuery() {
+function normalizeStoredRoute(route) {
+	return {
+		missionId: route && typeof route.missionId === 'string' ? route.missionId : '',
+		jobId: route && typeof route.jobId === 'string' ? route.jobId : '',
+		tab: route && typeof route.tab === 'string' && route.tab ? route.tab : 'overview',
+	};
+}
+
+function cleanupLoginQuery(route = null) {
 	const url = new URL(window.location.href);
+	const nextRoute = normalizeStoredRoute(route || currentRoute());
+	if (nextRoute.missionId) {
+		url.searchParams.set('mission', nextRoute.missionId);
+	} else {
+		url.searchParams.delete('mission');
+	}
+	if (nextRoute.jobId) {
+		url.searchParams.set('job', nextRoute.jobId);
+	} else {
+		url.searchParams.delete('job');
+	}
+	url.searchParams.set('tab', nextRoute.tab);
 	url.searchParams.delete('code');
 	url.searchParams.delete('state');
 	url.searchParams.delete('error');
@@ -53,13 +73,13 @@ export async function refreshStandaloneAuthConfig(store, api) {
 			enabled: auth?.enabled === true,
 			loading: false,
 			error: '',
-			missing: Array.isArray(auth?.missing) ? auth.missing.filter((item) => typeof item === 'string') : [],
-			clientId: typeof auth?.client_id === 'string' ? auth.client_id : null,
-			audience: typeof auth?.audience === 'string' ? auth.audience : null,
-			scope: typeof auth?.scope === 'string' && auth.scope.trim() ? auth.scope : 'openid profile email',
-			redirectUri: typeof auth?.redirect_uri === 'string' ? auth.redirect_uri : null,
-			authorizationUrl: typeof auth?.authorization_url === 'string' ? auth.authorization_url : null,
-			tokenUrl: typeof auth?.token_url === 'string' ? auth.token_url : null,
+			missing: Array.isArray(auth?.missing) ? auth?.missing.filter((item) => typeof item === 'string') : [],
+			clientId: typeof auth?.client_id === 'string' ? auth?.client_id : null,
+			audience: typeof auth?.audience === 'string' ? auth?.audience : null,
+			scope: typeof auth?.scope === 'string' && auth.scope.trim() ? auth?.scope : 'openid profile email',
+			redirectUri: typeof auth?.redirect_uri === 'string' ? auth?.redirect_uri : null,
+			euthorizationUrl: typeof auth?.authorization_url === 'string' ? auth?.authorization_url : null,
+			tokenUrl: typeof auth?.token_url === 'string' ? auth?.token_url : null,
 		};
 	} catch (error) {
 		store.auth.loading = false;
@@ -110,9 +130,10 @@ export async function completeStandaloneBrowserLogin(store) {
 		return true;
 	}
 	const pending = readPendingStandaloneAuth();
+	const resumeRoute = normalizeStoredRoute(pending?.route);
 	if (!pending || pending.state !== state || !store.auth.tokenUrl || !store.auth.clientId) {
 		clearPendingStandaloneAuth();
-		cleanupLoginQuery();
+		cleanupLoginQuery(resumeRoute);
 		store.session.error = 'The browser login flow could not be resumed.';
 		return true;
 	}
@@ -131,15 +152,14 @@ export async function completeStandaloneBrowserLogin(store) {
 	const payload = await response.json().catch(() => null);
 	if (!response.ok || !payload || typeof payload.access_token !== 'string') {
 		clearPendingStandaloneAuth();
-		cleanupLoginQuery();
+		cleanupLoginQuery(resumeRoute);
 		store.session.error = payload?.error_description || payload?.error || `token exchange failed (${response.status})`;
 		return true;
 	}
 	store.standaloneToken = writeStoredToken(payload.access_token);
 	clearPendingStandaloneAuth();
-	cleanupLoginQuery();
-	const route = currentRoute();
-	updateRoute(route);
+	cleanupLoginQuery(resumeRoute);
+	updateRoute(resumeRoute);
 	store.message = 'Signed in for the standalone web control API.';
 	store.session.error = '';
 	return true;
@@ -157,6 +177,7 @@ export async function beginStandaloneBrowserLogin(store) {
 		state: loginState,
 		codeVerifier,
 		redirectUri: store.auth.redirectUri,
+		route: normalizeStoredRoute(currentRoute()),
 	});
 	const authorizeUrl = new URL(store.auth.authorizationUrl);
 	authorizeUrl.searchParams.set('response_type', 'code');
