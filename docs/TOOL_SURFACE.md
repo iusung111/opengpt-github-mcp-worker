@@ -157,6 +157,11 @@ Persistent job tracking, audit history, reviewer actions, and queue-driven state
 
 - `job_create`
 - `job_get`
+- `mission_create`
+- `mission_list`
+- `mission_progress`
+- `mission_event_feed`
+- `mission_control`
 - `job_progress`
 - `jobs_list`
 - `job_event_feed`
