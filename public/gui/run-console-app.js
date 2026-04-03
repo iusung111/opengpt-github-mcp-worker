@@ -431,6 +431,8 @@ function syncRouteStateFromLocation() {
 	const tab = params.get('tab');
 	if (jobId) {
 		state.selectedJobId = jobId;
+	} else {
+		state.selectedJobId = '';
 	}
 	state.focusSection = normalizeDetailSection(tab);
 }
@@ -1898,7 +1900,6 @@ function applyStructuredContent(structuredContent, meta = null, sessionId = null
 		if (!job.run && hasRecord(structuredContent.run_summary)) {
 			job.run = normalizeRunSummary(structuredContent.run_summary, jobId, structuredContent.progress || {});
 		}
-		if (!state.selectedJobId) state.selectedJobId = jobId;
 		if (sessionId) assignSessionJob(sessionId, jobId);
 		return;
 	}
@@ -1918,9 +1919,6 @@ function applyStructuredContent(structuredContent, meta = null, sessionId = null
 			if (typeof rawJob.next_actor === 'string') {
 				job.nextActor = rawJob.next_actor;
 			}
-		}
-		if (!state.selectedJobId && jobs.length && hasRecord(jobs[0]) && typeof jobs[0].job_id === 'string') {
-			state.selectedJobId = jobs[0].job_id;
 		}
 		return;
 	}
@@ -1957,9 +1955,6 @@ function applyStructuredContent(structuredContent, meta = null, sessionId = null
 			if (job.feed.items[0]) {
 				job.latestNotification = job.feed.items[0];
 			}
-			if (!state.selectedJobId) {
-				state.selectedJobId = jobId;
-			}
 			if (sessionId) {
 				assignSessionJob(sessionId, jobId);
 			}
@@ -1979,9 +1974,6 @@ function applyStructuredContent(structuredContent, meta = null, sessionId = null
 		if (!jobId) return;
 		const job = ensureJob(jobId);
 		mergePermissionIntoJob(job, permission);
-		if (!state.selectedJobId) {
-			state.selectedJobId = jobId;
-		}
 		if (sessionId) {
 			assignSessionJob(sessionId, jobId);
 		}
@@ -2035,7 +2027,7 @@ function currentJob() {
 			return null;
 		}
 	}
-	return jobs[0];
+	return null;
 }
 
 function approvalForJob(job) {
@@ -2679,6 +2671,15 @@ async function loadFeed(options = {}) {
 		'logs',
 		options,
 	);
+}
+
+function warmSelectedJobData(options = { silent: true, keepSection: true }) {
+	if (toolAvailable('job_progress')) {
+		void refreshCurrentRun(options);
+	}
+	if (toolAvailable('job_event_feed')) {
+		void loadFeed(options);
+	}
 }
 
 async function loadHostStatus() {
@@ -3828,6 +3829,43 @@ function renderStandaloneAuthAction() {
 	return '';
 }
 
+function dashboardSummary(job) {
+	if (!job) return 'No summary available.';
+	const attention = jobAttentionStatus(job);
+	if (attention === 'pending_approval') {
+		return job.blockingState?.reason || job.run?.approvalReason || job.latestNotification?.body || 'Approval is required before the run can continue.';
+	}
+	if (attention === 'interrupted') {
+		return currentInterrupt(job)?.message || job.blockingState?.reason || job.latestNotification?.body || job.run?.lastEvent || 'The run was interrupted.';
+	}
+	if (attention === 'failed') {
+		return job.blockingState?.reason || job.latestNotification?.body || job.run?.lastEvent || 'The run failed and needs attention.';
+	}
+	if (attention === 'completed') {
+		return job.latestNotification?.body || job.run?.lastEvent || 'The run completed successfully.';
+	}
+	return job.run?.lastEvent || job.latestNotification?.body || 'No summary yet.';
+}
+
+function alertsActionLabel() {
+	const permission = currentBrowserAlertPermission();
+	if (!browserAlertsSupported()) return 'Alerts n/a';
+	if (permission === 'granted') return 'Alerts on';
+	if (permission === 'denied') return 'Alerts blocked';
+	return 'Enable alerts';
+}
+
+function renderAlertsActionButton() {
+	const permission = currentBrowserAlertPermission();
+	const title =
+		permission === 'granted'
+			? 'Browser popup alerts are enabled for actionable run updates.'
+			: permission === 'denied'
+				? 'Browser popup alerts are blocked. Re-enable notifications for this site in your browser settings.'
+				: 'Enable browser popup alerts for approvals, interrupts, failures, and completions.';
+	return `<button type="button" class="${permission === 'granted' ? 'action-button secondary' : 'mini-button'}" data-action="enable-alerts"${buttonDisabledAttr(!browserAlertsSupported())} title="${escapeHtml(title)}">${escapeHtml(alertsActionLabel())}</button>`;
+}
+
 function renderStandaloneAccessPanel() {
 	if (window.parent && window.parent !== window) {
 		return '';
@@ -4172,31 +4210,35 @@ function renderDashboardJobs() {
 					const isSelected = selectedJobId === job.jobId;
 					const canRun = canRunQuickAction(job);
 					const quickLabel = quickActionLabel(job);
-					const quickReason = quickActionReason(job);
-					const categories = [job.repo, job.nextActor ? `next:${job.nextActor}` : ''].filter(Boolean);
+					const summary = dashboardSummary(job);
+					const categories = [job.repo, job.nextActor ? `next ${job.nextActor}` : ''].filter(Boolean);
+					const updated = job.run?.updatedAt ? `Updated ${formatRelativeTime(job.run.updatedAt)}` : 'Updated unknown';
 					return `
 						<article class="job-card${isSelected ? ' is-selected' : ''}" data-select-job="${escapeHtml(job.jobId)}" data-card-state="${escapeHtml(attention)}" tabindex="0" role="button" aria-label="${escapeHtml(job.run ? job.run.title : job.jobId)}">
 							<div class="job-card-main">
-								<div class="job-card-copy">
-									<div class="job-card-heading">
+								<div class="job-card-heading">
+									<div class="job-card-heading-row">
+										${statusPill(attention)}
 										<h3>${escapeHtml(job.run ? job.run.title : job.jobId)}</h3>
 									</div>
-									<p class="supporting-copy">${escapeHtml(job.run && job.run.lastEvent ? job.run.lastEvent : job.blockingState?.reason || 'No summary yet.')}</p>
-									<div class="meta-row">
-										${statusPill(attention)}
+									<div class="meta-row job-card-tags">
 										${categories
 											.map((label) => `<span class="run-category">${escapeHtml(label)}</span>`)
 											.join('')}
 									</div>
 								</div>
+								<p class="job-card-summary" title="${escapeHtml(summary)}">${escapeHtml(summary)}</p>
+								<div class="job-card-meta">
+									<span class="job-card-meta-item">${clockIcon('inline-icon')}${escapeHtml(updated)}</span>
+									${
+										job.run && job.run.progressPercent != null
+											? `<span class="job-card-meta-item mono-copy">${escapeHtml(`${job.run.progressPercent}%`)}</span>`
+											: ''
+									}
+								</div>
 								<div class="job-card-actions">
 									<button type="button" class="card-run-button" data-action="job-shortcut" data-job-id="${escapeHtml(job.jobId)}"${buttonDisabledAttr(!canRun)}>${runIcon('inline-icon')}${escapeHtml(quickLabel)}</button>
-									<p class="action-reason">${escapeHtml(quickReason)}</p>
 								</div>
-							</div>
-							<div class="job-card-footer">
-								<span>${clockIcon('inline-icon')}Updated ${escapeHtml(job.run?.updatedAt ? formatRelativeTime(job.run.updatedAt) : 'Unknown')}</span>
-								${job.run && job.run.progressPercent != null ? `<span class="mono-copy">${escapeHtml(`${job.run.progressPercent}%`)}</span>` : ''}
 							</div>
 						</article>
 					`;
@@ -4628,7 +4670,7 @@ function renderNotificationCenter() {
 										${items
 											.map(
 												(item) => `
-													<button type="button" class="notification-entry${state.seenAlertKeys[item.key] ? '' : ' is-unread'}" data-action="dismiss-notification" data-alert-key="${escapeHtml(item.key)}"${item.notificationId ? ` data-notification-id="${escapeHtml(item.notificationId)}"` : ''}>
+													<button type="button" class="notification-entry${state.seenAlertKeys[item.key] ? '' : ' is-unread'}" data-action="open-notification" data-alert-key="${escapeHtml(item.key)}" data-job-id="${escapeHtml(item.jobId)}" data-section-target="${escapeHtml(item.section)}"${item.notificationId ? ` data-notification-id="${escapeHtml(item.notificationId)}"` : ''}>
 														<p>${escapeHtml(item.body || item.title)}</p>
 														<span>${escapeHtml(formatRelativeTime(item.createdAt))}</span>
 													</button>
@@ -4685,6 +4727,7 @@ function renderDashboardHeader() {
 				<div class="topbar-actions">
 					<button type="button" class="action-button" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>${refreshIcon('inline-icon')}Load runs</button>
 					<button type="button" class="action-button secondary" data-action="retry-standalone-session"${buttonDisabledAttr(window.parent && window.parent !== window)}>Reconnect API</button>
+					${renderAlertsActionButton()}
 					${renderTopbarYoloButton()}
 					${renderStandaloneAuthAction()}
 				</div>
@@ -4957,9 +5000,8 @@ root.addEventListener('click', (event) => {
 		state.selectedLogId = '';
 		state.notificationMenuOpen = false;
 		state.utilityMenuOpen = false;
-		navigateToJob(target.dataset.selectJob, 'logs');
-		void refreshCurrentRun({ silent: true, keepSection: true });
-		void loadFeed({ silent: true, keepSection: true });
+		navigateToJob(target.dataset.selectJob, 'info');
+		warmSelectedJobData();
 		void syncModelContext(false).catch((error) => console.warn(error));
 		return;
 	}
@@ -5027,15 +5069,15 @@ root.addEventListener('click', (event) => {
 			state.notificationMenuOpen = false;
 			if (target.dataset.jobId) {
 				navigateToJob(target.dataset.jobId, normalizeDetailSection(sectionTarget));
+				warmSelectedJobData();
 			}
 			break;
 		}
 		case 'open-job':
 			if (target.dataset.jobId) {
 				state.selectedJobId = target.dataset.jobId;
-				navigateToJob(target.dataset.jobId, 'logs');
-				void refreshCurrentRun({ silent: true, keepSection: true });
-				void loadFeed({ silent: true, keepSection: true });
+				navigateToJob(target.dataset.jobId, 'info');
+				warmSelectedJobData();
 				if (externalBrowserControlAvailable()) {
 					void refreshBrowserControl().catch((error) => console.warn(error));
 				}
@@ -5190,6 +5232,24 @@ root.addEventListener('click', (event) => {
 			void buildIncidentBundle();
 			break;
 		case 'enable-alerts':
+			if (!browserAlertsSupported()) {
+				state.error = 'Browser notifications are unavailable in this environment.';
+				state.message = '';
+				render();
+				break;
+			}
+			if (currentBrowserAlertPermission() === 'granted') {
+				state.message = 'Browser alerts are already enabled.';
+				state.error = '';
+				render();
+				break;
+			}
+			if (currentBrowserAlertPermission() === 'denied') {
+				state.message = 'Browser alerts are blocked in this browser. Allow notifications for this site in browser settings, then try again.';
+				state.error = '';
+				render();
+				break;
+			}
 			void requestBrowserAlertsPermission()
 				.then((permission) => {
 					state.message = permission === 'granted' ? 'Browser alerts enabled.' : `Browser alerts permission: ${permission}.`;
