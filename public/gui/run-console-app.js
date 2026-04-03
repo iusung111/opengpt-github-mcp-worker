@@ -3931,6 +3931,35 @@ function browserCompanionCommand(options = {}) {
 	return `npm run browser:companion -- --app-origin ${config.appOrigin} ${authPart} --cdp-url http://127.0.0.1:9222`;
 }
 
+function yoloModeEnabled() {
+	return state.yoloModeEnabled === true;
+}
+
+function yoloDetailLabel() {
+	return yoloModeEnabled() ? 'YOLO On' : 'YOLO Off';
+}
+
+function yoloAllLabel() {
+	return yoloModeEnabled() ? 'YOLO all On' : 'YOLO all Off';
+}
+
+function yoloStatusCopy() {
+	if (yoloModeEnabled()) {
+		return browserControlConnected()
+			? 'Every pending permission request will be approved automatically and resumed when possible.'
+			: 'Global auto approval is armed and will start once a browser companion connects.';
+	}
+	return 'Manual approval flow only.';
+}
+
+function renderTopbarYoloButton() {
+	const label = yoloAllLabel();
+	const title = yoloModeEnabled()
+		? 'Automatically approve every pending permission request across all runs.'
+		: 'Arm automatic approval for every pending permission request across all runs.';
+	return `<button type="button" class="${yoloModeEnabled() ? 'action-button secondary' : 'mini-button'}" data-action="toggle-yolo" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+}
+
 async function refreshBrowserControl(options = {}) {
 	if (!externalBrowserControlAvailable()) return null;
 	const payload = await apiRequest('/gui/api/browser-control');
@@ -4374,13 +4403,9 @@ function renderBrowserControlCard(job) {
 	const canQueue = Boolean(job) && connected && externalBrowserControlAvailable() && !pending;
 	const canCopyCommand = window.parent === window;
 	const launchCommand = browserCompanionCommand();
-	const yoloEnabled = state.yoloModeEnabled === true;
-	const yoloLabel = yoloEnabled ? 'YOLO On' : 'YOLO Off';
-	const yoloCopy = yoloEnabled
-		? connected
-			? 'Pending permission prompts will be approved automatically and resumed when possible.'
-			: 'Auto approval is armed and will start once a browser companion connects.'
-		: 'Manual approval flow only.';
+	const yoloEnabled = yoloModeEnabled();
+	const yoloLabel = yoloDetailLabel();
+	const yoloCopy = yoloStatusCopy();
 	return `
 		<div class="detail-card simple-card">
 			<div class="stack-header">
@@ -4660,6 +4685,7 @@ function renderDashboardHeader() {
 				<div class="topbar-actions">
 					<button type="button" class="action-button" data-action="load-jobs"${buttonDisabledAttr(!toolAvailable('jobs_list'))}>${refreshIcon('inline-icon')}Load runs</button>
 					<button type="button" class="action-button secondary" data-action="retry-standalone-session"${buttonDisabledAttr(window.parent && window.parent !== window)}>Reconnect API</button>
+					${renderTopbarYoloButton()}
 					${renderStandaloneAuthAction()}
 				</div>
 			</div>
@@ -5137,11 +5163,11 @@ root.addEventListener('click', (event) => {
 		case 'toggle-yolo':
 			state.yoloModeEnabled = !state.yoloModeEnabled;
 			if (!state.yoloModeEnabled) {
-				state.message = 'YOLO auto approval disabled.';
+				state.message = 'YOLO all auto approval disabled.';
 			} else {
 				state.yoloHandledApprovalRequests = {};
 				state.yoloApprovalRetryAfter = {};
-				state.message = 'YOLO auto approval enabled.';
+				state.message = 'YOLO all auto approval enabled.';
 				void maybeQueueYoloApproval();
 			}
 			state.error = '';
