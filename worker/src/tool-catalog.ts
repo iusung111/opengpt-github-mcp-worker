@@ -1,4 +1,5 @@
 import catalog from './tool-catalog.json';
+import { canonicalizeRepoKey } from './repo-aliases';
 
 export type ToolGroup = {
 	id: string;
@@ -117,15 +118,16 @@ export function buildPermissionBundleMessage(input: {
 	capabilities?: string[] | undefined;
 	extraTools?: string[] | undefined;
 }) {
+	const normalizedRepos = Array.from(new Set(input.repos.map((repo) => canonicalizeRepoKey(repo)).filter(Boolean)));
 	const bundle = resolvePermissionBundle(input);
-	const repoList = input.repos.join(', ');
+	const repoList = normalizedRepos.join(', ');
 	const scopeSummary = bundle.groups.map((group) => group.label).join(', ');
 	const capabilitySummary = bundle.capabilities.join(', ');
 
 	return {
 		bundle_key: [
 			bundle.preset?.id ?? 'custom',
-			...input.repos.map((repo) => repo.replace(/[^\w/-]+/g, '-')),
+			...normalizedRepos.map((repo) => repo.replace(/[^\w/-]+/g, '-')),
 			...bundle.capabilities,
 		].join(':'),
 		preset: bundle.preset
@@ -135,7 +137,7 @@ export function buildPermissionBundleMessage(input: {
 					description: bundle.preset.description,
 			  }
 			: null,
-		repos: input.repos,
+		repos: normalizedRepos,
 		reason: input.reason,
 		capabilities: bundle.capabilities,
 		tool_groups: bundle.groups.map((group) => ({

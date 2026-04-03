@@ -47,11 +47,11 @@ describe('runtime mcp surface', () => {
 		expect(listJson).toMatchObject({
 			ok: true,
 			data: {
-				active_repo_key: 'iusung111/OpenGPT',
+				active_repo_key: 'iusung111/Project_OpenGPT',
 			},
 		});
 		expect(listJson.data.workspaces[0]).toMatchObject({
-			repo_key: 'iusung111/OpenGPT',
+			repo_key: 'iusung111/Project_OpenGPT',
 			is_active: true,
 		});
 		expect(listJson.data.workspaces[1]).toMatchObject({
@@ -82,7 +82,7 @@ describe('runtime mcp surface', () => {
 			is_active: true,
 		});
 		expect(listJson.data.workspaces[1]).toMatchObject({
-			repo_key: 'iusung111/OpenGPT',
+			repo_key: 'iusung111/Project_OpenGPT',
 			is_active: false,
 		});
 		await client.close();
@@ -222,7 +222,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/actions/workflows/pr-merge.yml') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/actions/workflows/pr-merge.yml') {
 				return new Response(
 					JSON.stringify({
 						id: 1,
@@ -233,7 +233,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/pr-merge.yml?ref=main') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/.github/workflows/pr-merge.yml?ref=main') {
 				return new Response(
 					JSON.stringify({
 						path: '.github/workflows/pr-merge.yml',
@@ -284,7 +284,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/actions/workflows/agent-run.yml') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/actions/workflows/agent-run.yml') {
 				return new Response(
 					JSON.stringify({
 						id: 2,
@@ -295,7 +295,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/agent-run.yml?ref=main') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/.github/workflows/agent-run.yml?ref=main') {
 				return new Response(
 					JSON.stringify({
 						path: '.github/workflows/agent-run.yml',

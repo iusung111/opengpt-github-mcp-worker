@@ -43,7 +43,12 @@ import {
 	workspaceStorageKey,
 } from './queue-helpers';
 import { findLatestWorkflowRunId, getWorkflowRunSnapshot } from './queue-github';
-import { listJobs as listQueueJobs, upsertJob as upsertQueueJob } from './queue-jobs';
+import {
+	jobRecordNeedsNormalization,
+	listJobs as listQueueJobs,
+	normalizeStoredJobRecord,
+	upsertJob as upsertQueueJob,
+} from './queue-jobs';
 import {
 	buildJobAudit as buildQueueJobAudit,
 	buildJobProgressSnapshot as buildQueueJobProgressSnapshot,
@@ -138,7 +143,16 @@ export class JobQueueDurableObject extends DurableObject<AppEnv> {
 	}
 
 	private async getJob(jobId: string): Promise<JobRecord | null> {
-		return getStoredJob(this.createQueueStoreContext(), jobId);
+		const job = await getStoredJob(this.createQueueStoreContext(), jobId);
+		if (!job) {
+			return null;
+		}
+		if (!jobRecordNeedsNormalization(job)) {
+			return job;
+		}
+		const normalized = normalizeStoredJobRecord(job);
+		await this.persistJob(normalized, job);
+		return normalized;
 	}
 
 	private async ensureJobIndexes(): Promise<void> {

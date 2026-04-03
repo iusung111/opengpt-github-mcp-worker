@@ -35,7 +35,7 @@ describe('runtime mcp surface', () => {
 					preset: {
 						id: 'implementation_with_workflow',
 					},
-					repos: ['iusung111/OpenGPT'],
+					repos: ['iusung111/Project_OpenGPT'],
 					approved_tools: expect.arrayContaining(['repo_create_branch', 'workflow_dispatch', 'job_append_note']),
 				},
 			},
@@ -319,7 +319,7 @@ describe('runtime mcp surface', () => {
 		expect(JSON.parse(bundleText)).toMatchObject({
 			ok: true,
 			data: {
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				scope: 'all_active',
 				runs: expect.arrayContaining([
 					expect.objectContaining({

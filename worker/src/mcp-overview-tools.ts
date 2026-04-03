@@ -7,6 +7,7 @@ import { repoIdentityInputSchema, withRepoIdentity } from './mcp-repo-identity';
 import { notificationWidgetToolMeta } from './mcp-widget-resources';
 import { listPermissionPresets, listToolGroups, buildPermissionBundleMessage } from './tool-catalog';
 import { AppEnv } from './contracts';
+import { canonicalizeRepoKey } from './repo-aliases';
 import {
 	activateRepoWorkspace,
 	errorCodeFor,
@@ -66,9 +67,10 @@ export function registerOverviewTools(
 	});
 	server.registerTool('request_permission_bundle', { description: 'Build a batch approval bundle for one or more repositories so the user can approve the smallest useful set of MCP actions in one step.', inputSchema: { repos: z.array(z.string()).min(1).describe('List of owner/repo'), preset: z.enum(listPermissionPresets().map((preset) => preset.id) as [string, ...string[]]).optional(), capabilities: z.array(z.enum(['read', 'write', 'workflow', 'review', 'workspace', 'queue', 'self_host'])).default([]), extra_tools: z.array(z.string()).default([]).describe('Optional extra tools to include explicitly'), reason: z.string().describe('Why are these permissions needed?'), job_id: z.string().optional(), blocked_action: z.string().optional() }, outputSchema: permissionBundleStructuredSchema, annotations: readAnnotations, _meta: notificationWidgetToolMeta({ 'openai/toolInvocation/invoking': 'Preparing approval bundle', 'openai/toolInvocation/invoked': 'Approval bundle ready' }) }, async ({ repos, preset, capabilities, extra_tools, reason, job_id, blocked_action }) => {
 		try {
+			const normalizedRepos = Array.from(new Set(repos.map((repo) => canonicalizeRepoKey(repo)).filter(Boolean)));
 			const requestId = crypto.randomUUID();
 			const bundle = buildPermissionBundleMessage({
-				repos,
+				repos: normalizedRepos,
 				reason,
 				preset,
 				capabilities,
@@ -84,7 +86,7 @@ export function registerOverviewTools(
 				if (!jobRepo) {
 					throw new Error(`job repo missing for ${job_id}`);
 				}
-				if (!repos.includes(jobRepo)) {
+				if (!normalizedRepos.includes(jobRepo)) {
 					throw new Error(`job repo ${jobRepo} must be included in repos`);
 				}
 				requestedAt = nowIso();

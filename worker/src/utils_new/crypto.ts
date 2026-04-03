@@ -1,3 +1,5 @@
+import { canonicalizeRepoName } from '../repo-aliases';
+
 export async function sha256Hex(text: string): Promise<string> {
 	const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
 	const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -12,9 +14,10 @@ export async function buildDispatchFingerprint(
 	inputs: Record<string, unknown>,
 	autoImproveCycle?: number,
 ): Promise<string> {
+	const normalizedOwner = owner.trim();
 	const payload = {
-		owner,
-		repo,
+		owner: normalizedOwner,
+		repo: canonicalizeRepoName(normalizedOwner, repo),
 		workflow_id: workflowId,
 		ref,
 		inputs,

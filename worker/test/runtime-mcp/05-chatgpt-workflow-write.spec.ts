@@ -28,7 +28,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/trees/main?recursive=false') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/git/trees/main?recursive=false') {
 				return new Response(
 					JSON.stringify({
 						sha: 'tree-sha',
@@ -41,7 +41,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/README.md') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/README.md') {
 				return new Response(
 					JSON.stringify({
 						path: 'README.md',
@@ -123,7 +123,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/test.yml') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/.github/workflows/test.yml') {
 				if ((init?.method ?? 'GET').toUpperCase() === 'PUT') {
 					const payload = JSON.parse(String(init?.body ?? '{}'));
 					return new Response(

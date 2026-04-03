@@ -64,7 +64,7 @@ describe('queue-state helpers', () => {
 		});
 		expect(getDispatchRequest(job)).toMatchObject({
 			owner: 'iusung111',
-			repo: 'OpenGPT',
+			repo: 'Project_OpenGPT',
 			workflow_id: 'agent-run.yml',
 		});
 		expect(isDryRunJob(job)).toBe(true);

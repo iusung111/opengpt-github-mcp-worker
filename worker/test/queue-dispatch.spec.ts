@@ -108,7 +108,7 @@ describe('queue dispatch helpers', () => {
 		expect(buildDispatchFingerprint).toHaveBeenCalled();
 		expect(githubPost).toHaveBeenCalledWith(
 			expect.anything(),
-			'/repos/iusung111/OpenGPT/actions/workflows/agent-run.yml/dispatches',
+			'/repos/iusung111/Project_OpenGPT/actions/workflows/agent-run.yml/dispatches',
 			{
 				ref: 'main',
 				inputs: { job_id: 'job-1' },

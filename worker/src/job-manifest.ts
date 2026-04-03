@@ -17,6 +17,7 @@ import {
 	WEB_SESSION_PROVIDERS,
 } from './contracts';
 import { normalizeBrowserRemoteControl } from './browser-remote-control';
+import { canonicalizeRepoName } from './repo-aliases';
 
 export const JOB_WORKER_MANIFEST_SCHEMA_VERSION = 1;
 
@@ -37,9 +38,10 @@ function normalizeDispatchRequest(value: unknown): DispatchRequestRecord | null 
 	) {
 		return null;
 	}
+	const owner = value.owner.trim();
 	return {
-		owner: value.owner,
-		repo: value.repo,
+		owner,
+		repo: canonicalizeRepoName(owner, value.repo),
 		workflow_id: value.workflow_id,
 		ref: value.ref,
 		inputs: isRecord(value.inputs) ? value.inputs : {},

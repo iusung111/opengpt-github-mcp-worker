@@ -70,7 +70,7 @@ describe('runtime mcp surface', () => {
 		expect(JSON.parse(text)).toMatchObject({
 			ok: true,
 			data: {
-				repo_key: 'iusung111/OpenGPT',
+				repo_key: 'iusung111/Project_OpenGPT',
 				file_based_entries: ['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml'],
 				effective_allowlist: expect.arrayContaining(['build-todo-exe.yml', 'opengpt-exec.yml', 'opengpt-package.yml']),
 				precedence: {
@@ -94,7 +94,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.opengpt/project-capabilities.json?ref=main') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/.opengpt/project-capabilities.json?ref=main') {
 				return new Response(
 					JSON.stringify({
 						path: '.opengpt/project-capabilities.json',
@@ -131,7 +131,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/package.json?ref=main') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/package.json?ref=main') {
 				return new Response(
 					JSON.stringify({
 						path: 'package.json',

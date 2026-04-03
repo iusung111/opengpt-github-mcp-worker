@@ -5,6 +5,7 @@ import { JobIndexPointer, jobBranchIndexKey, jobRepoIndexPrefix, jobRunIndexKey 
 import { applyPullRequestEventToJob } from './queue-events';
 import { applyCompletedWorkflowRunDecision, decideCompletedWorkflowRun } from './queue-workflow';
 import { canAdvanceJob, recordWorkflowSnapshot, transitionJob } from './queue-state';
+import { canonicalizeRepoKey } from './repo-aliases';
 import { nowIso } from './utils';
 
 export interface QueueWebhookContext {
@@ -36,22 +37,23 @@ export async function findByRepoAndBranch(
 	repo: string,
 	workBranch?: string,
 ): Promise<JobRecord | null> {
+	const canonicalRepo = canonicalizeRepoKey(repo);
 	if (!workBranch) {
 		return null;
 	}
 	await context.ensureJobIndexes();
-	const indexedPointer = await context.storageGetIndex<JobIndexPointer>(jobBranchIndexKey(repo, workBranch));
+	const indexedPointer = await context.storageGetIndex<JobIndexPointer>(jobBranchIndexKey(canonicalRepo, workBranch));
 	if (indexedPointer?.job_id) {
 		const indexedJob = await context.getJob(indexedPointer.job_id);
-		if (indexedJob?.repo === repo) {
+		if (indexedJob?.repo === canonicalRepo) {
 			return indexedJob;
 		}
 	}
-	const repoPointers = await context.listJobIndexPointers(jobRepoIndexPrefix(repo));
+	const repoPointers = await context.listJobIndexPointers(jobRepoIndexPrefix(canonicalRepo));
 	let bestMatch: { job: JobRecord; score: number; matchedLength: number } | null = null;
 	for (const pointer of repoPointers) {
 		const job = await context.getJob(pointer.job_id);
-		if (!job || job.repo !== repo) {
+		if (!job || job.repo !== canonicalRepo) {
 			continue;
 		}
 		const score = branchMatchScore(workBranch, job);
@@ -71,18 +73,19 @@ export async function findByRepoAndRun(
 	repo: string,
 	runId?: number,
 ): Promise<JobRecord | null> {
+	const canonicalRepo = canonicalizeRepoKey(repo);
 	if (!runId) {
 		return null;
 	}
 	await context.ensureJobIndexes();
-	const indexedPointer = await context.storageGetIndex<JobIndexPointer>(jobRunIndexKey(repo, runId));
+	const indexedPointer = await context.storageGetIndex<JobIndexPointer>(jobRunIndexKey(canonicalRepo, runId));
 	if (indexedPointer?.job_id) {
 		const indexedJob = await context.getJob(indexedPointer.job_id);
-		if (indexedJob?.repo === repo && indexedJob.workflow_run_id === runId) {
+		if (indexedJob?.repo === canonicalRepo && indexedJob.workflow_run_id === runId) {
 			return indexedJob;
 		}
 	}
-	return context.findJob((job) => job.repo === repo && job.workflow_run_id === runId, { reconcile: false });
+	return context.findJob((job) => job.repo === canonicalRepo && job.workflow_run_id === runId, { reconcile: false });
 }
 
 export async function findByRepoAndJobId(
@@ -90,11 +93,12 @@ export async function findByRepoAndJobId(
 	repo: string,
 	jobId?: string | null,
 ): Promise<JobRecord | null> {
+	const canonicalRepo = canonicalizeRepoKey(repo);
 	if (!jobId) {
 		return null;
 	}
 	const job = await context.getJob(jobId);
-	return job?.repo === repo ? job : null;
+	return job?.repo === canonicalRepo ? job : null;
 }
 
 export async function applyGithubEvent(
@@ -108,6 +112,7 @@ export async function applyGithubEvent(
 	if (!repoFullName) {
 		return { matched: false };
 	}
+	const canonicalRepoFullName = canonicalizeRepoKey(repoFullName);
 
 	if (payload.action === 'completed' && payload.workflow_run) {
 		const run = payload.workflow_run as
@@ -124,8 +129,8 @@ export async function applyGithubEvent(
 			return { matched: false };
 		}
 		const job =
-			(await findByRepoAndRun(context, repoFullName, run.id)) ??
-			(await findByRepoAndBranch(context, repoFullName, run.head_branch));
+			(await findByRepoAndRun(context, canonicalRepoFullName, run.id)) ??
+			(await findByRepoAndBranch(context, canonicalRepoFullName, run.head_branch));
 		if (job) {
 			const previous = structuredClone(job);
 			job.last_webhook_event_at = nowIso();
@@ -184,8 +189,8 @@ export async function applyGithubEvent(
 		if (pr?.head?.ref) {
 			const hintedJobId = parseJobIdFromPrBody(pr.body);
 			const job =
-				(await findByRepoAndJobId(context, repoFullName, hintedJobId)) ??
-				(await findByRepoAndBranch(context, repoFullName, pr.head.ref));
+				(await findByRepoAndJobId(context, canonicalRepoFullName, hintedJobId)) ??
+				(await findByRepoAndBranch(context, canonicalRepoFullName, pr.head.ref));
 			if (job) {
 				const previous = structuredClone(job);
 				applyPullRequestEventToJob(job, pr, nowIso(), canAdvanceJob(job));

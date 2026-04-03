@@ -28,7 +28,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/docs/new-file.md') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/docs/new-file.md') {
 				const payload = JSON.parse(String(init?.body ?? '{}'));
 				expect(payload).toMatchObject({
 					message: 'Create new file from MCP',
@@ -93,7 +93,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/docs/upsert-file.md?ref=agent%2Fupsert-file-test') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/docs/upsert-file.md?ref=agent%2Fupsert-file-test') {
 				return new Response(
 					JSON.stringify({
 						path: 'docs/upsert-file.md',
@@ -103,7 +103,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/docs/upsert-file.md') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/docs/upsert-file.md') {
 				const payload = JSON.parse(String(init?.body ?? '{}'));
 				expect(payload).toMatchObject({
 					message: 'Upsert file from MCP',
@@ -168,7 +168,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/ref/heads/agent/workflow-stream-test') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/git/ref/heads/agent/workflow-stream-test') {
 				return new Response(
 					JSON.stringify({
 						object: {
@@ -178,7 +178,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/contents/.github/workflows/test.yml?ref=agent%2Fworkflow-stream-test') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/.github/workflows/test.yml?ref=agent%2Fworkflow-stream-test') {
 				return new Response(
 					JSON.stringify({
 						path: '.github/workflows/test.yml',
@@ -188,7 +188,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/commits/workflow-base-ref-sha') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/git/commits/workflow-base-ref-sha') {
 				return new Response(
 					JSON.stringify({
 						tree: {
@@ -198,7 +198,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/blobs') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/git/blobs') {
 				const payload = JSON.parse(String(init?.body ?? '{}'));
 				expect(payload.encoding).toBe('base64');
 				return new Response(
@@ -208,7 +208,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/trees') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/git/trees') {
 				const payload = JSON.parse(String(init?.body ?? '{}'));
 				expect(payload.base_tree).toBe('workflow-base-tree-sha');
 				expect(payload.tree[0]).toMatchObject({
@@ -222,7 +222,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/commits' && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/git/commits' && (init?.method ?? 'GET').toUpperCase() === 'POST') {
 				const payload = JSON.parse(String(init?.body ?? '{}'));
 				expect(payload).toMatchObject({
 					message: 'Upload workflow via stream',
@@ -236,7 +236,7 @@ describe('runtime mcp surface', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } },
 				);
 			}
-			if (url === 'https://api.github.com/repos/iusung111/OpenGPT/git/refs/heads/agent/workflow-stream-test') {
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/git/refs/heads/agent/workflow-stream-test') {
 				if ((init?.method ?? 'GET').toUpperCase() === 'PATCH') {
 					return new Response(
 						JSON.stringify({

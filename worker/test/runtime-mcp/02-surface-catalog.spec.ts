@@ -148,7 +148,7 @@ describe('runtime mcp surface', () => {
 			data: {
 				job: {
 					job_id: 'job-mcp-1',
-					repo: 'iusung111/OpenGPT',
+					repo: 'iusung111/Project_OpenGPT',
 					worker_manifest: {
 						browser: {
 							target: 'https://chatgpt.com/c/example',
@@ -352,7 +352,7 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				workspace: {
-					repo_key: 'iusung111/OpenGPT',
+					repo_key: 'iusung111/Project_OpenGPT',
 					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 			},
@@ -369,13 +369,13 @@ describe('runtime mcp surface', () => {
 		expect(JSON.parse(resolveWorkspaceText)).toMatchObject({
 			ok: true,
 			data: {
-				repo_key: 'iusung111/OpenGPT',
+				repo_key: 'iusung111/Project_OpenGPT',
 				existing_workspace: {
-					repo_key: 'iusung111/OpenGPT',
+					repo_key: 'iusung111/Project_OpenGPT',
 					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 				requires_confirmation: true,
-				recommended_workspace_relative_path: 'projects/opengpt',
+				recommended_workspace_relative_path: 'projects/project-opengpt',
 				recommended_workspace_kind: 'project',
 				local_workspace_optional: true,
 			},

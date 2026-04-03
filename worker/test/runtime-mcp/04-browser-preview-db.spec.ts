@@ -273,7 +273,7 @@ describe('runtime mcp surface', () => {
 				);
 			}
 			if (
-				parsed.pathname === '/repos/iusung111/OpenGPT/contents/.opengpt/project-capabilities.json' &&
+				parsed.pathname === '/repos/iusung111/Project_OpenGPT/contents/.opengpt/project-capabilities.json' &&
 				parsed.searchParams.get('ref') === resetRef
 			) {
 				return new Response(
@@ -297,7 +297,7 @@ describe('runtime mcp surface', () => {
 				);
 			}
 			if (
-				parsed.pathname === '/repos/iusung111/OpenGPT/contents/package.json' &&
+				parsed.pathname === '/repos/iusung111/Project_OpenGPT/contents/package.json' &&
 				parsed.searchParams.get('ref') === resetRef
 			) {
 				return new Response(JSON.stringify({ message: 'not found' }), {
@@ -342,17 +342,17 @@ describe('runtime mcp surface', () => {
 		expect(prepareJson).toMatchObject({
 			ok: true,
 			data: {
-				repo: 'iusung111/OpenGPT',
+				repo: 'iusung111/Project_OpenGPT',
 				ref: resetRef,
 				confirm_token: expect.stringMatching(/^v1\./),
 				confirm: {
 					action: 'db_reset',
-					repo: 'iusung111/OpenGPT',
+					repo: 'iusung111/Project_OpenGPT',
 					ref: resetRef,
 				},
 			},
 		});
-		expect(prepareJson.data.confirm_token).not.toBe(`db-reset:iusung111/OpenGPT:${resetRef}`);
+		expect(prepareJson.data.confirm_token).not.toBe(`db-reset:iusung111/Project_OpenGPT:${resetRef}`);
 
 		const resetResult = await client.callTool({
 			name: 'db_reset',

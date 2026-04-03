@@ -75,7 +75,7 @@ describe('queue reconcile helpers', () => {
 		);
 		expect(candidate).toMatchObject({
 			owner: 'iusung111',
-			repo: 'OpenGPT',
+			repo: 'Project_OpenGPT',
 			workflow_id: 'agent-run.yml',
 			ref: 'main',
 		});

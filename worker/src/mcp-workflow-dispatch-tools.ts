@@ -26,6 +26,36 @@ import {
 	validateWorkflowInputs,
 } from './utils';
 
+async function matchesDispatchFingerprint(
+	existingDispatch: Partial<DispatchRequestRecord> | null,
+	expectedFingerprint: string,
+	autoImproveCycle: number,
+): Promise<boolean> {
+	if (existingDispatch?.fingerprint === expectedFingerprint) {
+		return true;
+	}
+	if (
+		typeof existingDispatch?.owner !== 'string' ||
+		typeof existingDispatch.repo !== 'string' ||
+		typeof existingDispatch.workflow_id !== 'string' ||
+		typeof existingDispatch.ref !== 'string' ||
+		typeof existingDispatch.inputs !== 'object' ||
+		!existingDispatch.inputs ||
+		Array.isArray(existingDispatch.inputs)
+	) {
+		return false;
+	}
+	const normalizedExistingFingerprint = await buildDispatchFingerprint(
+		existingDispatch.owner,
+		existingDispatch.repo,
+		existingDispatch.workflow_id,
+		existingDispatch.ref,
+		existingDispatch.inputs as Record<string, unknown>,
+		autoImproveCycle,
+	);
+	return normalizedExistingFingerprint === expectedFingerprint;
+}
+
 export function registerWorkflowDispatchTools(
 	server: McpServer,
 	env: AppEnv,
@@ -121,11 +151,12 @@ export function registerWorkflowDispatchTools(
 				const fingerprint = await buildDispatchFingerprint(owner, repo, workflow_id, ref, inputs, autoImproveCycle);
 				const existingDispatch = getManifestDispatchRequest(existingJob?.worker_manifest) as Partial<DispatchRequestRecord> | null;
 				const workflowState = getManifestWorkflowRun(existingJob?.worker_manifest);
+				const isDuplicateDispatch = await matchesDispatchFingerprint(existingDispatch, fingerprint, autoImproveCycle);
 				if (
 					jobId &&
 					existingJob?.status === 'working' &&
 					existingJob?.next_actor === 'system' &&
-					existingDispatch?.fingerprint === fingerprint &&
+					isDuplicateDispatch &&
 					workflowState?.status !== 'completed' &&
 					!isOlderThan(existingDispatch?.dispatched_at || nowIso(), getDispatchDedupeWindowMs(env))
 				) {

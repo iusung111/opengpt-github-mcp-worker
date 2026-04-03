@@ -2,6 +2,7 @@ import { JobRecord, JobStatus, NextActor } from './contracts';
 import { createEmptyWorkerManifest, mergeWorkerManifest, normalizeWorkerManifest } from './job-manifest';
 import { nowIso } from './utils';
 import { JobIndexPointer, jobAllIndexPrefix, jobStatusIndexPrefix } from './queue-index';
+import { canonicalizeRepoKey } from './repo-aliases';
 
 export interface QueueJobListContext {
 	ensureJobIndexes(): Promise<void>;
@@ -15,11 +16,26 @@ export interface QueueJobUpsertContext {
 	persistJob(job: JobRecord, previous?: JobRecord | null): Promise<void>;
 }
 
+export function normalizeStoredJobRecord(job: JobRecord): JobRecord {
+	const canonicalRepo = canonicalizeRepoKey(job.repo);
+	if (canonicalRepo === job.repo) {
+		return job;
+	}
+	return {
+		...job,
+		repo: canonicalRepo,
+	};
+}
+
+export function jobRecordNeedsNormalization(job: JobRecord): boolean {
+	return canonicalizeRepoKey(job.repo) !== job.repo;
+}
+
 export function normalizeJob(input: Partial<JobRecord> & { job_id: string }): JobRecord {
 	const timestamp = nowIso();
 	return {
 		job_id: input.job_id,
-		repo: input.repo ?? '',
+		repo: input.repo ? canonicalizeRepoKey(input.repo) : '',
 		base_branch: input.base_branch ?? 'main',
 		work_branch: input.work_branch,
 		pr_number: input.pr_number,
@@ -48,21 +64,26 @@ export async function upsertJob(
 	context: QueueJobUpsertContext,
 	job: Partial<JobRecord> & { job_id: string },
 ): Promise<void> {
+	const normalizedJob = {
+		...job,
+		repo: typeof job.repo === 'string' ? canonicalizeRepoKey(job.repo) : job.repo,
+	};
 	const existing = await context.getJob(job.job_id);
 	if (existing) {
 		const merged = {
 			...existing,
-			...job,
+			...normalizedJob,
+			repo: normalizedJob.repo ?? existing.repo,
 			worker_manifest:
-				job.worker_manifest !== undefined
-					? mergeWorkerManifest(existing.worker_manifest, job.worker_manifest)
+				normalizedJob.worker_manifest !== undefined
+					? mergeWorkerManifest(existing.worker_manifest, normalizedJob.worker_manifest)
 					: normalizeWorkerManifest(existing.worker_manifest),
 			updated_at: nowIso(),
 		};
 		await context.persistJob(merged, existing);
 		return;
 	}
-	await context.persistJob(normalizeJob(job));
+	await context.persistJob(normalizeJob(normalizedJob));
 }
 
 export async function listJobs(
