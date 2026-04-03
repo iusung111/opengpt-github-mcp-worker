@@ -16,6 +16,12 @@ describe('runtime http surface', () => {
 		expect(response.headers.get('location')).toBe('https://example.com/gui/');
 	});
 
+	it('redirects HEAD root requests to the GUI entrypoint', async () => {
+		const response = await SELF.fetch('https://example.com/', { method: 'HEAD', redirect: 'manual' });
+		expect(response.status).toBe(307);
+		expect(response.headers.get('location')).toBe('https://example.com/gui/');
+	});
+
 	it('returns healthz payload', async () => {
 		const response = await SELF.fetch('https://example.com/healthz');
 		expect(response.status).toBe(200);
@@ -30,6 +36,12 @@ describe('runtime http surface', () => {
 		chatgpt_allowed_emails_count: 1,
 	});
 });
+
+	it('returns success for HEAD healthz probes', async () => {
+		const response = await SELF.fetch('https://example.com/healthz', { method: 'HEAD' });
+		expect(response.status).toBe(200);
+		expect(response.headers.get('content-type')).toContain('application/json');
+	});
 
 	it('returns protocol negotiation error for unauthenticated direct MCP probes by default', async () => {
 		const response = await SELF.fetch('https://example.com/mcp');

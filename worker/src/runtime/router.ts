@@ -7,23 +7,27 @@ import { handleQueueApi } from './http/queue-api';
 import { handleWebhook } from './http/webhook';
 import { chatgptMcpBootstrapResponse, handleChatgptMcpRequest, handleMcpRequest } from './mcp/handlers';
 
+function isReadMethod(request: Request): boolean {
+	return request.method === 'GET' || request.method === 'HEAD';
+}
+
 export async function routeRequest(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
 	const url = new URL(request.url);
 
-	if (request.method === 'GET' && url.pathname === '/') {
+	if (isReadMethod(request) && url.pathname === '/') {
 		return Response.redirect(`${url.protocol}//${url.host}/gui/`, 307);
 	}
-	if (request.method === 'GET' && url.pathname === '/healthz') {
+	if (isReadMethod(request) && url.pathname === '/healthz') {
 		return handleHealth(env);
 	}
 	if (url.pathname.startsWith('/gui/api/')) {
 		return handleGuiApi(request, env);
 	}
-	if (request.method === 'GET' && url.pathname === '/github/app-installation') {
+	if (isReadMethod(request) && url.pathname === '/github/app-installation') {
 		return handleGitHubAppInstallation(env);
 	}
 	if (
-		request.method === 'GET' &&
+		isReadMethod(request) &&
 		(url.pathname === '/.well-known/oauth-protected-resource' ||
 			url.pathname === '/.well-known/oauth-protected-resource/chatgpt/mcp')
 	) {
