@@ -37,6 +37,14 @@ function isGitHubNotFoundError(error: unknown): boolean {
 	return message.includes('github request failed:') && message.includes(' 404 ');
 }
 
+function isGitHubWriteConflictError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return (
+		message.includes('github request failed: PUT ') &&
+		(message.includes('-> 409 ') || message.includes('-> 422 '))
+	);
+}
+
 function normalizeContentBase64(contentB64: string): string {
 	const compact = contentB64.replace(/\s+/g, '');
 	const decodedText = decodeBase64Text(compact);
@@ -109,7 +117,30 @@ export async function handleRepoFileWrite(env: AppEnv, writeAnnotations: ToolAnn
 	}
 	const payload: Record<string, unknown> = { message, content: normalizedContentB64, branch };
 	if (resolvedBlobSha) payload.sha = resolvedBlobSha;
-	return ok((await githubPut(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, payload)) as Record<string, unknown>, writeAnnotations);
+	try {
+		return ok((await githubPut(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, payload)) as Record<string, unknown>, writeAnnotations);
+	} catch (error) {
+		const canRetryWithFreshProbe = mode === 'upsert' && !expected_blob_sha && isGitHubWriteConflictError(error);
+		if (!canRetryWithFreshProbe) throw error;
+		const refreshedBlobSha = await probeExistingBlobSha(env, owner, repo, path, branch);
+		if (refreshedBlobSha === resolvedBlobSha) throw error;
+		const retryPayload: Record<string, unknown> = { message, content: normalizedContentB64, branch };
+		if (refreshedBlobSha) retryPayload.sha = refreshedBlobSha;
+		const retried = (await githubPut(
+			env,
+			`/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`,
+			retryPayload,
+		)) as Record<string, unknown>;
+		return ok({
+			...retried,
+			retry_metadata: {
+				write_retry_applied: true,
+				stale_blob_sha: resolvedBlobSha,
+				refreshed_blob_sha: refreshedBlobSha,
+				write_mode: mode,
+			},
+		}, writeAnnotations);
+	}
 }
 
 export function resolveBaseBranch(baseBranch: string | undefined, env: AppEnv) {
