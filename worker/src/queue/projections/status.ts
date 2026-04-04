@@ -50,7 +50,7 @@ function hasActiveManifestSection(manifest: JobWorkerManifest | undefined): bool
 
 function isApprovalResolvedAwaitingFollowup(job: JobRecord): boolean {
 	const approval = getApprovalManifest(job.worker_manifest);
-	const control = getControlManifest(nob.worker_manifest);
+	const control = getControlManifest(job.worker_manifest);
 	const hasDispatch = Boolean(job.worker_manifest?.dispatch_request || job.worker_manifest?.execution?.dispatch_request);
 	return Boolean(
 		approval?.status === 'approved' &&
