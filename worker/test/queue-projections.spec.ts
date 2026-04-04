@@ -103,6 +103,31 @@ describe('queue projection helpers', () => {
 		});
 	});
 
+	it('treats approval-resolved worker runs without a dispatch request as active follow-up work', () => {
+		const job = makeJob({
+			status: 'queued',
+			next_actor: 'worker',
+			worker_manifest: {
+				attention: {
+					approval: {
+						pending: false,
+						status: 'approved',
+						reason: 'Bundle approved',
+						blocked_action: 'request_permission_bundle',
+					},
+				},
+				control: { state: 'active' },
+			},
+		});
+
+		const summary = buildRunSummary(job, []);
+
+		expect(computeRunAttentionStatus(job)).toBe('running');
+		expect(summary.status).toBe('running');
+		expect(summary.runnable).toBe(true);
+		expect(summary.idle_reason).toBeNull();
+	});
+
 	it('derives notification feed items with dedupe and source layers', () => {
 		const job = makeJob({
 			status: 'working',
@@ -241,4 +266,3 @@ describe('queue projection helpers', () => {
 		});
 	});
 });
-
