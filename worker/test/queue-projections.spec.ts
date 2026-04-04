@@ -265,5 +265,4 @@ describe('queue projection helpers', () => {
 			cancelled: 1,
 		});
 	});
-}
-
+});
