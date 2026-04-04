@@ -48,6 +48,18 @@ function hasActiveManifestSection(manifest: JobWorkerManifest | undefined): bool
 	);
 }
 
+function isApprovalResolvedAwaitingFollowup(job: JobRecord): boolean {
+	const approval = getApprovalManifest(job.worker_manifest);
+	const control = getControlManifest(nob.worker_manifest);
+	const hasDispatch = Boolean(job.worker_manifest?.dispatch_request || job.worker_manifest?.execution?.dispatch_request);
+	return Boolean(
+		approval?.status === 'approved' &&
+		!approval.pending &&
+		control?.state !== 'paused' && control?.state !== 'cancelled' &&
+		job.status === 'queued' && job.next_actor === 'worker' && !hasDispatch,
+	);
+}
+
 export function computeRunAttentionStatus(job: JobRecord): RunAttentionStatus {
 	const control = getControlManifest(job.worker_manifest);
 	const approval = getApprovalManifest(job.worker_manifest);
@@ -70,6 +82,9 @@ export function computeRunAttentionStatus(job: JobRecord): RunAttentionStatus {
 	if (job.status === 'done') {
 		return 'completed';
 	}
+	if (isApprovalResolvedAwaitingFollowup(job)) {
+		return 'running';
+	}
 	if (job.status === 'working' || hasActiveManifestSection(job.worker_manifest)) {
 		return 'running';
 	}
@@ -80,6 +95,14 @@ export function computeRunnableDiagnostics(job: JobRecord) {
 	const approval = getApprovalManifest(job.worker_manifest);
 	const control = getControlManifest(job.worker_manifest);
 	const hasDispatch = Boolean(job.worker_manifest?.dispatch_request || job.worker_manifest?.execution?.dispatch_request);
+	if (isApprovalResolvedAwaitingFollowup(job)) {
+		return {
+			runnable: true,
+			idle_reason: null,
+			missing_requirements: [],
+			missing_capabilities: [],
+		};
+	}
 	const activeSection = hasActiveManifestSection(job.worker_manifest);
 	const runnable = Boolean(hasDispatch || approval?.pending || job.status === 'working' || job.status === 'rework_pending' || activeSection);
 	if (runnable) {
