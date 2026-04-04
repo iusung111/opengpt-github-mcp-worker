@@ -28,13 +28,22 @@ export interface RepoFileWriteArgs extends RepoIdentityInput {
 	content_b64: string;
 	expected_blob_sha?: string;
 	content_kind?: 'text' | 'binary';
-	mime_type?: string;
+
+mime_type?: string;
 	validate_only?: boolean;
 }
 
 function isGitHubNotFoundError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
 	return message.includes('github request failed:') && message.includes(' 404 ');
+}
+
+function isGitHubWriteConflictError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return (
+		message.includes('github request failed: PUT ') &&
+		(message.includes('-> 409 ') || message.includes('-> 422 '))
+	);
 }
 
 function normalizeContentBase64(contentB64: string): string {
@@ -64,7 +73,7 @@ export async function probeExistingBlobSha(env: AppEnv, owner: string, repo: str
 	try {
 		const data = (await githubGet(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, {
 			params: { ref: branch },
-		})) as { sha?: string; type?: string };
+	})) as { sha?: string; type?: string };
 		if (data.type && data.type !== 'file') throw new Error(`path is not a file: ${path}`);
 		return data.sha ?? null;
 	} catch (error) {
@@ -74,7 +83,7 @@ export async function probeExistingBlobSha(env: AppEnv, owner: string, repo: str
 }
 
 export async function handleRepoFileWrite(env: AppEnv, writeAnnotations: ToolAnnotations, mode: Phase2FileWriteMode, args: RepoFileWriteArgs) {
-	void PHASE2_FILE_WRITE_READY;
+void PHASE2_FILE_WRITE_READY;
 	const { owner, repo } = resolveRepoIdentityInput(args);
 	const { branch, path, message, content_b64, expected_blob_sha, content_kind, mime_type, validate_only } = args;
 	const repoKey = `${owner}/${repo}`;
@@ -109,7 +118,30 @@ export async function handleRepoFileWrite(env: AppEnv, writeAnnotations: ToolAnn
 	}
 	const payload: Record<string, unknown> = { message, content: normalizedContentB64, branch };
 	if (resolvedBlobSha) payload.sha = resolvedBlobSha;
-	return ok((await githubPut(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, payload)) as Record<string, unknown>, writeAnnotations);
+	try {
+		return ok((await githubPut(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, payload)) as Record<string, unknow>, writeAnnotations);
+	} catch (error) {
+		const canRetryWithFreshProbe = mode === 'upsert' && !expected_blob_sha && isGitHubWriteConflictError(error);
+		if (!canRetryWithFreshProbe) throw error;
+		const refreshedBlobSha = await probeExistingBlobSha(env, owner, repo, path, branch);
+		if (refreshedBlobSha === resolvedBlobSha) throw error;
+		const retryPayload: Record<string, unknown> = { message, content: normalizedContentB64, branch };
+		if (refreshedBlobSha) retryPayload.sha = refreshedBlobSha;
+		const retried = (await githubPut(
+			env,
+			`/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`,
+			retryPayload,
+		) as Record<string, unknown>;
+		return ok({
+			...retried,
+			retry_metadata: {
+				write_retry_applied: true,
+				stale_blob_sha: resolvedBlobSha,
+				refreshed_blob_sha: refreshedBlobSha,
+				write_mode: mode,
+			},
+		}, writeAnnotations);
+	}
 }
 
 export function resolveBaseBranch(baseBranch: string | undefined, env: AppEnv) {
