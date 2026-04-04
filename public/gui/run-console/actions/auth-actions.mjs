@@ -78,7 +78,7 @@ export async function refreshStandaloneAuthConfig(store, api) {
 			audience: typeof auth?.audience === 'string' ? auth?.audience : null,
 			scope: typeof auth?.scope === 'string' && auth.scope.trim() ? auth?.scope : 'openid profile email',
 			redirectUri: typeof auth?.redirect_uri === 'string' ? auth?.redirect_uri : null,
-			euthorizationUrl: typeof auth?.authorization_url === 'string' ? auth?.authorization_url : null,
+			authorizationUrl: typeof auth?.authorization_url === 'string' ? auth?.authorization_url : null,
 			tokenUrl: typeof auth?.token_url === 'string' ? auth?.token_url : null,
 		};
 	} catch (error) {
