@@ -30,6 +30,8 @@ export async function resolveApproval(store, api, resolution, jobId = store.sele
 	}
 	store.message = `Recording approval ${resolution}...`;
 	const progress = await api.resolveApproval(jobId, job.approval.requestId, resolution);
+	const applied = applyJobProgress(store, progress);
+	const refreshed = await refreshJob(store, api, jobId);
 	store.message = `Approval ${resolution} recorded.`;
-	return applyJobProgress(store, progress);
+	return refreshed || applied;
 }
