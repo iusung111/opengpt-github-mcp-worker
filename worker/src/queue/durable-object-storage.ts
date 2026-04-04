@@ -1,4 +1,3 @@
-import type { DurableObjectState } from '@cloudflare/workers-types';
 import type { AppEnv, JobRecord, MissionRecord, AuditRecord, DeliveryRecord } from '../contracts';
 import { getAuditRetentionCount, getDeliveryRetentionCount } from '../utils';
 import { incrementReadCounter } from '../read-observability';
