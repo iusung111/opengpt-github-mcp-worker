@@ -43,6 +43,9 @@ export async function handlePermissionRequestResolve(context: QueueRequestContex
 	const resolvedAt = nowIso();
 	const resolution = payload.resolution as PermissionResolution;
 	const note = typeof payload.note === 'string' ? payload.note : null;
+	const dispatchRequest = getDispatchRequest(job);
+	const shouldRedispatch = resolution === 'approved' && Boolean(dispatchRequest) && hasExecutionRelatedInterrupt(job);
+	const shouldActivateQueuedRun = resolution === 'approved' && !dispatchRequest && job.status === 'queued' && job.next_actor === 'worker';
 	job.worker_manifest = mergeWorkerManifest(job.worker_manifest, {
 		attention: {
 			approval: {
@@ -69,6 +72,22 @@ export async function handlePermissionRequestResolve(context: QueueRequestContex
 						},
 				  },
 	});
+	if (shouldRedispatch) {
+		if (!(await context.autoRedispatchJob(job, note ?? 'approval approved'))) {
+			return jsonResponse(fail('resume_unavailable', 'approved run could not be re-dispatched'), 409);
+		}
+	}
+	if (shouldActivateQueuedRun) {
+		transitionJob(job, 'working', 'system');
+	}
+	const approvalMessage =
+		resolution === 'approved'
+			? shouldRedispatch
+				? 'Approval was recorded and the run was re-dispatched.'
+				: shouldActivateQueuedRun
+					? 'Approval was recorded and the run was marked active for follow-up work.'
+					: 'Approval was recorded and the run can continue.'
+			: note ?? approval.reason ?? 'Approval resolution blocked the run.';
 	job.updated_at = resolvedAt;
 	await context.persistJob(job, previous);
 	await reconcileLinkedMission(context, job);
@@ -80,8 +99,10 @@ export async function handlePermissionRequestResolve(context: QueueRequestContex
 		note,
 		blocked_action: approval.blocked_action ?? null,
 		source_layer: 'gpt',
+		resume_strategy: shouldRedispatch ? 'redispatch' : shouldActivateQueuedRun ? 'activate_queued_run' : null,
+		follow_up_required: shouldRedispatch || shouldActivateQueuedRun,
 		attention_status: resolution === 'approved' ? computeRunAttentionStatus(job) : 'interrupted',
-		message: resolution === 'approved' ? 'Approval was recorded and the run can continue.' : note ?? approval.reason ?? 'Approval resolution blocked the run.',
+		message: approvalMessage,
 	});
 	return jsonResponse(ok({
 		request_id: approval.request_id,
@@ -97,8 +118,10 @@ export async function handlePermissionRequestResolve(context: QueueRequestContex
 			request_id: approval.request_id,
 			reason: note ?? approval.reason ?? null,
 			resolution,
+			resume_strategy: shouldRedispatch ? 'redispatch' : shouldActivateQueuedRun ? 'activate_queued_run' : null,
 			created_at: resolvedAt,
 		},
+		message: approvalMessage,
 		current_progress: context.buildJobProgressSnapshot(job, await context.listAuditRecords(undefined, job.job_id, 10)),
 	}));
 }
