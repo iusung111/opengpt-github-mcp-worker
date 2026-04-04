@@ -28,8 +28,7 @@ export interface RepoFileWriteArgs extends RepoIdentityInput {
 	content_b64: string;
 	expected_blob_sha?: string;
 	content_kind?: 'text' | 'binary';
-
-mime_type?: string;
+	mime_type?: string;
 	validate_only?: boolean;
 }
 
@@ -73,7 +72,7 @@ export async function probeExistingBlobSha(env: AppEnv, owner: string, repo: str
 	try {
 		const data = (await githubGet(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, {
 			params: { ref: branch },
-	})) as { sha?: string; type?: string };
+		})) as { sha?: string; type?: string };
 		if (data.type && data.type !== 'file') throw new Error(`path is not a file: ${path}`);
 		return data.sha ?? null;
 	} catch (error) {
@@ -83,7 +82,7 @@ export async function probeExistingBlobSha(env: AppEnv, owner: string, repo: str
 }
 
 export async function handleRepoFileWrite(env: AppEnv, writeAnnotations: ToolAnnotations, mode: Phase2FileWriteMode, args: RepoFileWriteArgs) {
-void PHASE2_FILE_WRITE_READY;
+	void PHASE2_FILE_WRITE_READY;
 	const { owner, repo } = resolveRepoIdentityInput(args);
 	const { branch, path, message, content_b64, expected_blob_sha, content_kind, mime_type, validate_only } = args;
 	const repoKey = `${owner}/${repo}`;
@@ -119,7 +118,7 @@ void PHASE2_FILE_WRITE_READY;
 	const payload: Record<string, unknown> = { message, content: normalizedContentB64, branch };
 	if (resolvedBlobSha) payload.sha = resolvedBlobSha;
 	try {
-		return ok((await githubPut(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, payload)) as Record<string, unknow>, writeAnnotations);
+		return ok((await githubPut(env, `/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`, payload)) as Record<string, unknown>, writeAnnotations);
 	} catch (error) {
 		const canRetryWithFreshProbe = mode === 'upsert' && !expected_blob_sha && isGitHubWriteConflictError(error);
 		if (!canRetryWithFreshProbe) throw error;
@@ -131,7 +130,7 @@ void PHASE2_FILE_WRITE_READY;
 			env,
 			`/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`,
 			retryPayload,
-		) as Record<string, unknown>;
+		)) as Record<string, unknown>;
 		return ok({
 			...retried,
 			retry_metadata: {
