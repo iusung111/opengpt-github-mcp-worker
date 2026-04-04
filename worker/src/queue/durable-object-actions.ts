@@ -1,4 +1,4 @@
-import type { DurableObjectState } from '@cloudflare/workers-types';
+import type { DurableObjectState } from 'cloudflare:workers';
 import type {
 	AppEnv,
 	JobRecord,
