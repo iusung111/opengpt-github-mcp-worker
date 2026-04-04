@@ -99,14 +99,20 @@ export async function commitUploadedFile(
 	env: AppEnv,
 	input: CommitUploadedFileInput,
 ): Promise<Record<string, unknown>> {
-	const currentRefSha = await getRefSha(env, input.owner, input.repo, input.branch);
+	let currentRefSha = await getRefSha(env, input.owner, input.repo, input.branch);
+	const currentBlobSha = await getCurrentBlobShaForPath(env, input.owner, input.repo, input.branch, input.path);
 	if (currentRefSha !== input.base_ref_sha) {
-		throw new Error(`upload branch head changed for ${input.branch}`);
+		if ((input.expected_blob_sha ?? null) !== currentBlobSha && input.expected_blob_sha !== undefined && input.expected_blob_sha !== null) {
+			throw new Error(
+				`upload branch head changed for ${input.branch}; current_ref_sha=${currentRefSha}; base_ref_sha=${input.base_ref_sha}; current_blob_sha=${currentBlobSha ?? 'null'}; expected_blob_sha=${input.expected_blob_sha}`,
+			);
+		}
 	}
 
-	const currentBlobSha = await getCurrentBlobShaForPath(env, input.owner, input.repo, input.branch, input.path);
 	if ((input.expected_blob_sha ?? null) !== currentBlobSha && input.expected_blob_sha !== undefined && input.expected_blob_sha !== null) {
-		throw new Error(`expected blob sha mismatch for ${input.path}`);
+		throw new Error(
+			`expected blob sha mismatch for ${input.path}; current_ref_sha=${currentRefSha}; current_blob_sha=${currentBlobSha ?? 'null'}; expected_blob_sha=${input.expected_blob_sha}`,
+		);
 	}
 
 	const baseTreeSha = await getTreeShaFromCommit(env, input.owner, input.repo, currentRefSha);
@@ -160,10 +166,10 @@ export async function commitUploadedFile(
 			sha: commit.sha,
 			message: input.message,
 			tree_sha: tree.sha,
+			base_ref_sha: input.base_ref_sha,
 			parent_sha: currentRefSha,
 		},
 		ref: refUpdate,
 		previous_blob_sha: currentBlobSha,
 	};
 }
-
