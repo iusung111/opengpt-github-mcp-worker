@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildFileSummary,
 	buildNavigationManifest,
+	buildPathScopedIndex,
 	classifyReadPath,
 	getReadBudgetStatus,
 	recordFileRead,
@@ -54,6 +55,23 @@ describe('read navigation helpers', () => {
 		expect(sliceFileChunk(text, { anchor: 'Details', max_lines: 2 })).toMatchObject({
 			start_line: 3,
 		});
+	});
+
+	it('matches multi-token tool queries against related paths', () => {
+		const tree = [
+			{ path: 'worker/src/tool-catalog.json', type: 'blob' },
+			{ path: 'worker/src/mcp/repo-read/navigation.ts', type: 'blob' },
+			{ path: 'worker/src/read-observability.ts', type: 'blob' },
+			{ path: 'docs/CHATGPT_MCP.md', type: 'blob' },
+		];
+		const index = buildPathScopedIndex(tree, 'tool', 'tool index, read observability, manifest, cache');
+		expect(index.length).toBeGreaterThan(0);
+		expect(index).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ path: 'worker/src/tool-catalog.json' }),
+			]),
+		);
+		expect(index.every((entry) => entry.classification === 'tool')).toBe(true);
 	});
 
 	it('tracks budget usage and prevents inline reads after limits are exceeded', () => {

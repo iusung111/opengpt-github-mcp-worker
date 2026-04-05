@@ -1,6 +1,8 @@
-import { getSelfRepoKey } from './utils';
 import { AppEnv } from './contracts';
+import { rankIndexMatches } from './read-index-match';
 import { incrementReadCounter } from './read-observability';
+import { prepareSearchQuery, shouldIncludePathForKind } from './read-query';
+import { getSelfRepoKey } from './utils';
 
 export type ReadPathClass =
 	| 'source'
@@ -310,21 +312,27 @@ export function buildPathScopedIndex(
 	kind: 'doc' | 'tool',
 	query?: string,
 ): Array<Record<string, unknown>> {
-	const normalizedQuery = (query ?? '').trim().toLowerCase();
-	return tree
+	const preparedQuery = prepareSearchQuery(query);
+	const matchingEntries = tree
 		.map((entry) => ({
 			path: String(entry.path ?? ''),
 			type: String(entry.type ?? ''),
 		}))
 		.filter((entry) => entry.type === 'blob')
-		.filter((entry) => (kind === 'doc' ? classifyReadPath(entry.path) === 'doc' : classifyReadPath(entry.path) === 'tool'))
-		.filter((entry) => !normalizedQuery || entry.path.toLowerCase().includes(normalizedQuery))
+		.filter((entry) => shouldIncludePathForKind(classifyReadPath(entry.path), kind));
+	return rankIndexMatches(
+		matchingEntries,
+		(entry) => ({
+				primaryText: entry.path,
+				secondaryText: [entry.path.split('/').pop() ?? entry.path],
+			}),
+		preparedQuery,
+	)
 		.slice(0, 50)
-		.map((entry) => ({
-			path: entry.path,
-			title: entry.path.split('/').pop() ?? entry.path,
-			classification: classifyReadPath(entry.path),
+		.map(({ value }) => ({
+			path: value.path,
+			title: value.path.split('/').pop() ?? value.path,
+			classification: classifyReadPath(value.path),
 			anchor: 'start',
 		}));
 }
-
