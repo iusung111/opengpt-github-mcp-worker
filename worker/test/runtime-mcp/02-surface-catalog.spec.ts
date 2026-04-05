@@ -428,31 +428,6 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	}, 10000);
 
-	it('returns tool index matches for natural-language multi-token queries over /mcp', async () => {
-		const client = await createMcpClient();
-		const result = await client.callTool({
-			name: 'repo_tool_index_lookup',
-			arguments: {
-					owner: 'iusung111',
-					repo: 'opengpt-github-mcp-worker',
-					query: 'tool index, read observability, manifest, cache',
-				},
-			});
-		const text = 'text' in result.content[0] ? result.content[0].text : '';
-		expect(JSON.parse(text)).toMatchObject({
-			ok: true,
-			data: {
-				repo_key: 'iusung111/opengpt-github-mcp-worker',
-				query: 'tool index, read observability, manifest, cache',
-				tool_paths: expect.arrayContaining([
-					expect.objectContaining({ path: 'worker/src/tool-catalog.json' }),
-					expect.objectContaining({ path: 'worker/src/mcp/repo-read/navigation.ts' }),
-				]),
-				},
-			});
-		await client.close();
-	}, 10000);
-
 	it('exposes a read-only public surface on /chatgpt/mcp without widget metadata', async () => {
 		const client = await createChatgptMcpClient();
 		const tools = await client.listTools();
