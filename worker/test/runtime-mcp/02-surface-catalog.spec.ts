@@ -108,7 +108,7 @@ describe('runtime mcp surface', () => {
 			'openai/widgetAccessible': true,
 		});
 
-		const resources = await client.listResources();
+ 		const resources = await client.listResources();
 		expect(resources.resources.some((resource) => resource.uri === widgetUri)).toBe(true);
 		const resourceResult = await client.readResource({ uri: widgetUri });
 		const widgetResource = resourceResult.contents.find((resource) => resource.uri === widgetUri);
@@ -124,7 +124,7 @@ describe('runtime mcp surface', () => {
 		});
 		expect('text' in (widgetResource ?? {}) ? widgetResource.text : '').toContain('/gui/app.js');
 
-		const createResult = await client.callTool({
+  		const createResult = await client.callTool({
 			name: 'job_create',
 			arguments: {
 				job_id: 'job-mcp-1',
@@ -168,7 +168,7 @@ describe('runtime mcp surface', () => {
 			},
 		});
 
-		const getResult = await client.callTool({
+ 		const getResult = await client.callTool({
 			name: 'job_get',
 			arguments: { job_id: 'job-mcp-1' },
 		});
@@ -189,7 +189,7 @@ describe('runtime mcp surface', () => {
 			},
 		});
 
-		const missionResult = await client.callTool({
+  	const missionResult = await client.callTool({
 			name: 'mission_create',
 			arguments: {
 				mission_id: 'mission-mcp-1',
@@ -214,17 +214,17 @@ describe('runtime mcp surface', () => {
 							current_job_id: expect.any(String),
 						}),
 					]),
+					},
 				},
-			},
-		});
+			});
 		expect((missionResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.mission_progress',
 			progress: {
-				mission_id: 'mission-mcp-1',
+					mission_id: 'mission-mcp-1',
 			},
 		});
 
-		const openResult = await client.callTool({
+ 		const openResult = await client.callTool({
 			name: 'run_console_open',
 			arguments: {
 				include_healthz: true,
@@ -235,11 +235,11 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				gui_url: expect.stringContaining('/gui/'),
-				missions: expect.arrayContaining([
+				mssions: expect.arrayContaining([
 					expect.objectContaining({
 						mission_id: 'mission-mcp-1',
 					}),
-				]),
+					]),
 				jobs: expect.any(Array),
 				include_healthz: true,
 				selected_mission_id: expect.anything(),
@@ -247,17 +247,17 @@ describe('runtime mcp surface', () => {
 				selected_job_id: expect.anything(),
 				selected_job_url: expect.stringContaining('/gui/?job='),
 			},
-		});
+			});
 		expect((openResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.jobs_list',
 			gui_url: expect.stringContaining('/gui/'),
-			missions: expect.any(Array),
-			selected_mission_id: expect.anything(),
-			selected_mission_url: expect.stringContaining('/gui/?mission='),
-			jobs: expect.any(Array),
-			selected_job_id: expect.anything(),
-			selected_job_url: expect.stringContaining('/gui/?job='),
-		});
+				missions: expect.any(Array),
+				selected_mission_id: expect.anything(),
+				selected_mission_url: expect.stringContaining('/gui/?mission='),
+				jobs: expect.any(Array),
+				selected_job_id: expect.anything(),
+				selected_job_url: expect.stringContaining('/gui/?job='),
+			});
 		expect((openResult as { _meta?: Record<string, unknown> })._meta ?? {}).not.toHaveProperty('opengpt/widget');
 		expect(
 			(
@@ -265,7 +265,7 @@ describe('runtime mcp surface', () => {
 			).some((job) => job.job_id === 'smoke-003'),
 		).toBe(false);
 
-		await client.callTool({
+ 		await client.callTool({
 			name: 'job_append_note',
 			arguments: {
 				job_id: 'job-mcp-1',
@@ -273,7 +273,7 @@ describe('runtime mcp surface', () => {
 			},
 		});
 
-		const progressResult = await client.callTool({
+ 		const progressResult = await client.callTool({
 			name: 'job_progress',
 			arguments: { job_id: 'job-mcp-1' },
 		});
@@ -296,17 +296,17 @@ describe('runtime mcp surface', () => {
 					notification_counts: {
 						idle: expect.any(Number),
 					},
+					},
 				},
-			},
-		});
+			});
 		expect((progressResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.job_progress',
 			run_summary: {
-				run_id: 'job-mcp-1',
-			},
-		});
+					run_id: 'job-mcp-1',
+				},
+			});
 
-		const eventFeedResult = await client.callTool({
+ 		const eventFeedResult = await client.callTool({
 			name: 'job_event_feed',
 			arguments: {
 				job_id: 'job-mcp-1',
@@ -315,25 +315,25 @@ describe('runtime mcp surface', () => {
 		});
 		expect((eventFeedResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.job_event_feed',
-		});
+			});
 		expect((eventFeedResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
-			'opengpt/widget': {
-				kind: 'opengpt.notification_contract.job_event_feed',
-			},
-		});
+				'opengpt/widget': {
+					kind: 'opengpt.notification_contract.job_event_feed',
+				},
+			});
 		const eventFeedText = 'text' in eventFeedResult.content[0] ? eventFeedResult.content[0].text : '';
 		expect(JSON.parse(eventFeedText)).toMatchObject({
 			ok: true,
 			data: {
 				items: expect.any(Array),
 				logs: expect.any(Array),
-				counts: {
-					idle: expect.any(Number),
+					counts: {
+						idle: expect.any(Number),
+					},
 				},
-			},
-		});
+			});
 
-		const selfHostStatusResult = await client.callTool({
+ 		const selfHostStatusResult = await client.callTool({
 			name: 'self_host_status',
 			arguments: {
 				include_healthz: true,
@@ -343,22 +343,22 @@ describe('runtime mcp surface', () => {
 			kind: 'opengpt.notification_contract.self_host_status',
 			self_repo_key: 'iusung111/opengpt-github-mcp-worker',
 			current_deploy: {
-				environment: expect.any(String),
-			},
+					environment: expect.any(String),
+				},
 			workflow_allowlist: {
-				self_repo: expect.any(Array),
-			},
+					self_repo: expect.any(Array),
+				},
 			read_observability: {
-				counters: expect.any(Object),
-			},
-		});
+					sounters: expect.any(Object),
+				},
+			});
 		expect((selfHostStatusResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
 			'opengpt/widget': {
-				kind: 'opengpt.notification_contract.self_host_status',
-			},
-		});
+					kind: 'opengpt.notification_contract.self_host_status',
+				},
+			});
 
-		const auditResult = await client.callTool({
+ 		const auditResult = await client.callTool({
 			name: 'audit_list',
 			arguments: {
 				job_id: 'job-mcp-1',
@@ -370,20 +370,20 @@ describe('runtime mcp surface', () => {
 		expect(auditJson.ok).toBe(true);
 		expect(
 			auditJson.data.audits.some(
-				(item: { event_type: string; payload: { job_id?: string } }) =>
+				\(item: { event_type: string; payload: { job_id?: string } }) =>
 					item.event_type === 'job_create' && item.payload.job_id === 'job-mcp-1',
 			),
-		).toBe(true);
+			).toBe(true);
 		expect(
 			auditJson.data.audits.some(
 				(item: { event_type: string; payload: { session_url?: string; conversation_id?: string | null } }) =>
 					item.event_type === 'browser_session_seeded' &&
 					item.payload.session_url === 'https://chatgpt.com/c/example' &&
 					item.payload.conversation_id === 'convo-123',
-			),
+			)),
 		).toBe(true);
 
-		const registerWorkspaceResult = await client.callTool({
+ 		const registerWorkspaceResult = await client.callTool({
 			name: 'workspace_register',
 			arguments: {
 				repo_key: 'iusung111/OpenGPT',
@@ -401,16 +401,16 @@ describe('runtime mcp surface', () => {
 					workspace_path: '/home/uieseong/workspace/projects/opengpt-sandbox',
 				},
 			},
-		});
+			});
 
-		const resolveWorkspaceResult = await client.callTool({
+ 		const resolveWorkspaceResult = await client.callTool({
 			name: 'workspace_resolve',
 			arguments: {
 				repo_key: 'iusung111/OpenGPT',
 			},
 		});
 		const resolveWorkspaceText =
-			'text' in resolveWorkspaceResult.content[0] ? resolveWorkspaceResult.content[0].text : '';
+			 'text' in resolveWorkspaceResult.content[0] ? resolveWorkspaceResult.content[0].text : '';
 		expect(JSON.parse(resolveWorkspaceText)).toMatchObject({
 			ok: true,
 			data: {
@@ -423,8 +423,33 @@ describe('runtime mcp surface', () => {
 				recommended_workspace_relative_path: 'projects/project-opengpt',
 				recommended_workspace_kind: 'project',
 				local_workspace_optional: true,
-			},
-		});
+				},
+			});
+		await client.close();
+	}, 10000);
+
+	it('returns tool index matches for natural-language multi-token queries over /mcp', async () => {
+		const client = await createMcpClient();
+		const result = await client.callTool({
+			name: 'repo_tool_index_lookup',
+			arguments: {
+					owner: 'iusung111',
+					repo: 'opengpt-github-mcp-worker',
+					query: 'tool index, read observability, manifest, cache',
+				},
+			});
+		const text = 'text' in result.content[0] ? result.content[0].text : '';
+		expect(JSON.parse(text)).toMatchObject({
+			ok: true,
+			data: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+				query: 'tool index, read observability, manifest, cache',
+				tool_paths: expect.arrayContaining([
+					expect.objectContaining({ path: 'worker/src/tool-catalog.json' }),
+					expect.objectContaining({ path: 'worker/src/mcp/repo-read/navigation.ts' }),
+			]),
+				},
+			});
 		await client.close();
 	}, 10000);
 
@@ -438,9 +463,9 @@ describe('runtime mcp surface', () => {
 		expect(tools.tools.some((tool) => tool.name === 'job_progress')).toBe(false);
 		expect(tools.tools.some((tool) => tool.name === 'run_console_open')).toBe(false);
 
-		await expect(client.listResources()).rejects.toThrow('Method not found');
+ 		await expect(client.listResources()).rejects.toThrow('Method not found');
 
-		await client.close();
+ 		await client.close();
 	}, 10000);
 
 });
