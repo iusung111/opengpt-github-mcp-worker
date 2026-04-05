@@ -3,17 +3,18 @@ import type { AppEnv } from '../../contracts';
 import { authorizeChatgptMcpRequest, authorizeDirectMcpRequest } from '../../auth';
 import { preflightMcpToolCallRequest } from '../../mcp-tool-contracts';
 import { buildMcpServer } from '../../mcp-tools';
+import { incrementReadCounter } from '../../read-observability';
 import { buildOidcEndpointUrl, diagnosticLog, fail, jsonResponse } from '../../utils';
 
 export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
-	return createMcpHandler(buildMcpServer(env, { enableWidgets: true }) as never, {
+	return createMcpHandler(buildMcpServer(env, { enableWidgets: true, profile: 'direct_full' }) as never, {
 		route: '/mcp',
 		enableJsonResponse: true,
 	});
 }
 
 export function getChatgptMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
-	return createMcpHandler(buildMcpServer(env, { enableWidgets: false }) as never, {
+	return createMcpHandler(buildMcpServer(env, { enableWidgets: false, profile: 'chatgpt_public' }) as never, {
 		route: '/chatgpt/mcp',
 		enableJsonResponse: true,
 	});
@@ -87,7 +88,9 @@ export async function handleMcpRequest(
 		return jsonResponse(fail(auth.code ?? 'unauthorized', auth.error ?? 'unauthorized'), auth.status ?? 401);
 	}
 	const handler = getMcpHandler(env);
-	const nextRequest = await preflightMcpToolCallRequest(request);
+	const nextRequest = await preflightMcpToolCallRequest(request, {
+		routePolicy: 'direct_full',
+	});
 	if (nextRequest instanceof Response) {
 		return nextRequest;
 	}
@@ -107,10 +110,12 @@ export async function handleChatgptMcpRequest(
 			method: request.method,
 			accept,
 			has_bearer_token: false,
+			profile: 'chatgpt_public',
 		});
 		return chatgptMcpBootstrapResponse(request, env);
 	}
 	if (!hasBearerToken && rpcMethod !== 'tools/call') {
+		incrementReadCounter('mcp_public_rpc_count');
 		diagnosticLog('chatgpt_mcp_public_rpc', {
 			method: request.method,
 			accept,
@@ -123,6 +128,7 @@ export async function handleChatgptMcpRequest(
 
 	const auth = await authorizeChatgptMcpRequest(request, env);
 	if (!auth.ok) {
+		incrementReadCounter('mcp_auth_fail_count');
 		diagnosticLog('chatgpt_mcp_auth_failed', {
 			method: request.method,
 			accept,
@@ -140,15 +146,20 @@ export async function handleChatgptMcpRequest(
 		}
 		return response;
 	}
+	incrementReadCounter('mcp_auth_ok_count');
 	diagnosticLog('chatgpt_mcp_auth_ok', {
 		method: request.method,
 		accept,
 		rpc_method: rpcMethod,
 		has_bearer_token: hasBearerToken,
 		email: auth.email ?? null,
+		profile: 'chatgpt_public',
 	});
 	const handler = getChatgptMcpHandler(env);
-	const nextRequest = await preflightMcpToolCallRequest(ensureChatgptMcpAcceptHeader(request));
+	const nextRequest = await preflightMcpToolCallRequest(
+		ensureChatgptMcpAcceptHeader(request),
+		{ routePolicy: 'chatgpt_public' },
+	);
 	if (nextRequest instanceof Response) {
 		return nextRequest;
 	}
