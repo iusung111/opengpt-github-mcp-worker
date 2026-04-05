@@ -22,6 +22,10 @@ Use this connector as a GitHub operations MCP, not as a generic browser, shell, 
 - Environment choice:
   - use live for normal production work
   - use mirror for validation, pre-promotion checks, and self-host testing
+- Web connector policy:
+  - attach only the live connector in normal ChatGPT web use
+  - attach mirror only when you are explicitly validating mirror behavior, self-host recovery, or promotion safety
+  - do not keep both live and mirror attached in the same normal web workflow; session-scoped connector handles such as `link_<id>` can be regenerated and make path or tool reuse look unstable
 - Do not present this connector as a Google Drive, web search, or generic local IDE connector unless another tool explicitly provides that capability.
 
 ## Default Chat UX

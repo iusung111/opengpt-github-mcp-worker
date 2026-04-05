@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildFileSummary,
+	buildPathScopedIndex,
 	buildNavigationManifest,
 	buildPathScopedIndex,
 	classifyReadPath,
@@ -15,7 +16,28 @@ describe('read navigation helpers', () => {
 		expect(classifyReadPath('docs/guide.md')).toBe('doc');
 		expect(classifyReadPath('.github/workflows/ci.yml')).toBe('workflow');
 		expect(classifyReadPath('worker/src/mcp-tools.ts')).toBe('tool');
+		expect(classifyReadPath('worker/src/mcp/fullstack/api.ts')).toBe('tool');
+		expect(classifyReadPath('worker/src/runtime/mcp/handlers.ts')).toBe('tool');
 		expect(classifyReadPath('worker/src/index.ts')).toBe('source');
+	});
+
+	it('indexes tool implementation paths under worker/src/mcp', () => {
+		expect(
+			buildPathScopedIndex(
+				[
+					{ path: 'worker/src/mcp/fullstack/api.ts', type: 'blob' },
+					{ path: 'worker/src/runtime/mcp/handlers.ts', type: 'blob' },
+					{ path: 'worker/src/index.ts', type: 'blob' },
+				],
+				'tool',
+				'api',
+			),
+		).toEqual([
+			expect.objectContaining({
+				path: 'worker/src/mcp/fullstack/api.ts',
+				classification: 'tool',
+			}),
+		]);
 	});
 
 	it('builds manifest-first navigation for the self repo', () => {

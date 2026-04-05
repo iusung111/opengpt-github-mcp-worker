@@ -19,7 +19,11 @@ export interface UploadSessionRecord {
 	next_byte_offset: number;
 	received_bytes: number;
 	chunk_count: number;
+	chunk_byte_lengths?: number[];
+	commit_attempts?: number;
 	created_at: string;
 	expires_at: string;
 	committed_at?: string | null;
+	last_error?: string | null;
+	last_failed_at?: string | null;
 }

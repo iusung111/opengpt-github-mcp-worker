@@ -6,21 +6,119 @@ import { buildMcpServer } from '../../mcp-tools';
 import { incrementReadCounter } from '../../read-observability';
 import { buildOidcEndpointUrl, diagnosticLog, fail, jsonResponse } from '../../utils';
 
-export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
+const DIRECT_MCP_ROUTE = '/mcp';
+const CHATGPT_MCP_ROUTE = '/chatgpt/mcp';
+const CHATGPT_OAUTH_METADATA_ROUTE = '/.well-known/oauth-protected-resource/chatgpt/mcp';
+const GUI_ROUTE = '/gui';
+
+function normalizePathname(pathname: string): string {
+	const collapsed = pathname.replace(/\/{2,}/g, '/');
+	if (collapsed === '/') {
+		return '/';
+	}
+	return collapsed.replace(/\/+$/, '') || '/';
+}
+
+function matchRoutePrefix(pathname: string, route: string): string | null {
+	if (pathname === route) {
+		return '';
+	}
+	if (!pathname.endsWith(route)) {
+		return null;
+	}
+	const prefix = pathname.slice(0, -route.length);
+	return prefix.startsWith('/') ? prefix : null;
+}
+
+type RuntimeRouteInfo = {
+	normalizedPath: string;
+	directMcpRoute: string;
+	chatgptMcpRoute: string;
+	chatgptOauthMetadataRoute: string;
+	guiRoute: string;
+	guiRouteWithSlash: string;
+	isRoot: boolean;
+	isDirectMcp: boolean;
+	isChatgptMcp: boolean;
+	isChatgptOauthMetadata: boolean;
+	isGuiRoot: boolean;
+	isGuiApi: boolean;
+};
+
+export function resolveRuntimeRouteInfo(input: Request | URL | string): RuntimeRouteInfo {
+	const pathname =
+		typeof input === 'string' ? input : input instanceof Request ? new URL(input.url).pathname : input.pathname;
+	const normalizedPath = normalizePathname(pathname);
+	const oauthPrefix = matchRoutePrefix(normalizedPath, CHATGPT_OAUTH_METADATA_ROUTE);
+	const chatgptPrefix = matchRoutePrefix(normalizedPath, CHATGPT_MCP_ROUTE);
+	const directPrefix = chatgptPrefix === null ? matchRoutePrefix(normalizedPath, DIRECT_MCP_ROUTE) : null;
+	const guiPrefix = matchRoutePrefix(normalizedPath, GUI_ROUTE);
+	const guiApiMatch =
+		normalizedPath === '/gui/api' || normalizedPath.startsWith('/gui/api/')
+			? ''
+			: normalizedPath.match(/^(.*)\/gui\/api(?:\/.*)?$/)?.[1] ?? null;
+	const prefix = oauthPrefix ?? chatgptPrefix ?? directPrefix ?? guiPrefix ?? guiApiMatch ?? '';
+	const directMcpRoute = `${prefix}${DIRECT_MCP_ROUTE}` || DIRECT_MCP_ROUTE;
+	const chatgptMcpRoute = `${prefix}${CHATGPT_MCP_ROUTE}` || CHATGPT_MCP_ROUTE;
+	const chatgptOauthMetadataRoute = `${prefix}${CHATGPT_OAUTH_METADATA_ROUTE}` || CHATGPT_OAUTH_METADATA_ROUTE;
+	const guiRoute = `${prefix}${GUI_ROUTE}` || GUI_ROUTE;
+	return {
+		normalizedPath,
+		directMcpRoute,
+		chatgptMcpRoute,
+		chatgptOauthMetadataRoute,
+		guiRoute,
+		guiRouteWithSlash: `${guiRoute}/`,
+		isRoot: normalizedPath === '/',
+		isDirectMcp: directPrefix !== null,
+		isChatgptMcp: chatgptPrefix !== null,
+		isChatgptOauthMetadata: oauthPrefix !== null,
+		isGuiRoot: guiPrefix !== null,
+		isGuiApi: guiApiMatch !== null,
+	};
+}
+
+export function canonicalizeRequestPath(request: Request, pathname: string): Request {
+	const url = new URL(request.url);
+	const nextPathname = normalizePathname(pathname);
+	if (url.pathname === nextPathname) {
+		return request;
+	}
+	url.pathname = nextPathname;
+	return new Request(url.toString(), request);
+}
+
+export function getMcpHandler(env: AppEnv, route = DIRECT_MCP_ROUTE): ReturnType<typeof createMcpHandler> {
 	return createMcpHandler(buildMcpServer(env, { enableWidgets: true, profile: 'direct_full' }) as never, {
-		route: '/mcp',
+		route,
 		enableJsonResponse: true,
 	});
 }
 
-export function getChatgptMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
-	return createMcpHandler(buildMcpServer(env, { enableWidgets: false, profile: 'chatgpt_public' }) as never, {
-		route: '/chatgpt/mcp',
+export function getChatgptMcpHandler(env: AppEnv, route = CHATGPT_MCP_ROUTE): ReturnType<typeof createMcpHandler> {
+	return createMcpHandler(buildMcpServer(env, {
+		enableWidgets: false,
+		stripWidgets: true,
+		profile: 'direct_full',
+	}) as never, {
+		route,
+		enableJsonResponse: true,
+	});
+}
+
+export function getChatgptPublicMcpHandler(env: AppEnv, route = CHATGPT_MCP_ROUTE): ReturnType<typeof createMcpHandler> {
+	return createMcpHandler(buildMcpServer(env, {
+		enableWidgets: true,
+		stripWidgets: false,
+		profile: 'chatgpt_public',
+	}) as never, {
+		route,
 		enableJsonResponse: true,
 	});
 }
 
 export function chatgptMcpBootstrapResponse(request: Request, env: AppEnv): Response {
+	const runtimeRoutes = resolveRuntimeRouteInfo(request);
 	const headers = new Headers({
 		'access-control-allow-origin': '*',
 		'access-control-allow-headers': 'Content-Type, Accept, Authorization, mcp-session-id, MCP-Protocol-Version',
@@ -38,7 +136,7 @@ export function chatgptMcpBootstrapResponse(request: Request, env: AppEnv): Resp
 		JSON.stringify({
 			ok: true,
 			service: 'opengpt-github-mcp-worker',
-			route: '/chatgpt/mcp',
+			route: runtimeRoutes.chatgptMcpRoute,
 			auth_type: 'oauth',
 			oauth: {
 				issuer: env.CHATGPT_MCP_ISSUER ?? null,
@@ -83,18 +181,20 @@ export async function handleMcpRequest(
 	env: AppEnv,
 	ctx: ExecutionContext,
 ): Promise<Response> {
-	const auth = await authorizeDirectMcpRequest(request, env);
+	const runtimeRoutes = resolveRuntimeRouteInfo(request);
+	const nextRequest = canonicalizeRequestPath(request, runtimeRoutes.directMcpRoute);
+	const auth = await authorizeDirectMcpRequest(nextRequest, env);
 	if (!auth.ok) {
 		return jsonResponse(fail(auth.code ?? 'unauthorized', auth.error ?? 'unauthorized'), auth.status ?? 401);
 	}
-	const handler = getMcpHandler(env);
-	const nextRequest = await preflightMcpToolCallRequest(request, {
+	const handler = getMcpHandler(env, runtimeRoutes.directMcpRoute);
+	const preflightRequest = await preflightMcpToolCallRequest(nextRequest, {
 		routePolicy: 'direct_full',
 	});
-	if (nextRequest instanceof Response) {
-		return nextRequest;
+	if (preflightRequest instanceof Response) {
+		return preflightRequest;
 	}
-	return handler(nextRequest, env, ctx);
+	return handler(preflightRequest, env, ctx);
 }
 
 export async function handleChatgptMcpRequest(
@@ -102,35 +202,37 @@ export async function handleChatgptMcpRequest(
 	env: AppEnv,
 	ctx: ExecutionContext,
 ): Promise<Response> {
-	const hasBearerToken = Boolean(request.headers.get('authorization')?.trim().startsWith('Bearer '));
-	const accept = request.headers.get('accept') ?? '';
-	const rpcMethod = await getChatgptRpcMethod(request);
-	if ((request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') && !hasBearerToken) {
+	const runtimeRoutes = resolveRuntimeRouteInfo(request);
+	const nextRequest = canonicalizeRequestPath(request, runtimeRoutes.chatgptMcpRoute);
+	const hasBearerToken = Boolean(nextRequest.headers.get('authorization')?.trim().startsWith('Bearer '));
+	const accept = nextRequest.headers.get('accept') ?? '';
+	const rpcMethod = await getChatgptRpcMethod(nextRequest);
+	if ((nextRequest.method === 'GET' || nextRequest.method === 'HEAD' || nextRequest.method === 'OPTIONS') && !hasBearerToken) {
 		diagnosticLog('chatgpt_mcp_bootstrap', {
-			method: request.method,
+			method: nextRequest.method,
 			accept,
 			has_bearer_token: false,
 			profile: 'chatgpt_public',
 		});
-		return chatgptMcpBootstrapResponse(request, env);
+		return chatgptMcpBootstrapResponse(nextRequest, env);
 	}
 	if (!hasBearerToken && rpcMethod !== 'tools/call') {
 		incrementReadCounter('mcp_public_rpc_count');
 		diagnosticLog('chatgpt_mcp_public_rpc', {
-			method: request.method,
+			method: nextRequest.method,
 			accept,
 			rpc_method: rpcMethod,
 			has_bearer_token: false,
 		});
-		const handler = getChatgptMcpHandler(env);
-		return handler(ensureChatgptMcpAcceptHeader(request), env, ctx);
+		const handler = getChatgptPublicMcpHandler(env, runtimeRoutes.chatgptMcpRoute);
+		return handler(ensureChatgptMcpAcceptHeader(nextRequest), env, ctx);
 	}
 
-	const auth = await authorizeChatgptMcpRequest(request, env);
+	const auth = await authorizeChatgptMcpRequest(nextRequest, env);
 	if (!auth.ok) {
 		incrementReadCounter('mcp_auth_fail_count');
 		diagnosticLog('chatgpt_mcp_auth_failed', {
-			method: request.method,
+			method: nextRequest.method,
 			accept,
 			rpc_method: rpcMethod,
 			has_bearer_token: hasBearerToken,
@@ -140,28 +242,28 @@ export async function handleChatgptMcpRequest(
 		});
 		const response = jsonResponse(fail(auth.code ?? 'unauthorized', auth.error ?? 'unauthorized'), auth.status ?? 401);
 		if ((auth.status ?? 401) === 401) {
-			const url = new URL(request.url);
-			const resourceMetadataUrl = `${url.protocol}//${url.host}/.well-known/oauth-protected-resource/chatgpt/mcp`;
+			const url = new URL(nextRequest.url);
+			const resourceMetadataUrl = `${url.protocol}//${url.host}${runtimeRoutes.chatgptOauthMetadataRoute}`;
 			response.headers.set('WWW-Authenticate', `Bearer resource_metadata=\"${resourceMetadataUrl}\"`);
 		}
 		return response;
 	}
 	incrementReadCounter('mcp_auth_ok_count');
 	diagnosticLog('chatgpt_mcp_auth_ok', {
-		method: request.method,
+		method: nextRequest.method,
 		accept,
 		rpc_method: rpcMethod,
 		has_bearer_token: hasBearerToken,
 		email: auth.email ?? null,
-		profile: 'chatgpt_public',
+		profile: 'direct_full',
 	});
-	const handler = getChatgptMcpHandler(env);
-	const nextRequest = await preflightMcpToolCallRequest(
-		ensureChatgptMcpAcceptHeader(request),
-		{ routePolicy: 'chatgpt_public' },
+	const handler = getChatgptMcpHandler(env, runtimeRoutes.chatgptMcpRoute);
+	const preflightRequest = await preflightMcpToolCallRequest(
+		ensureChatgptMcpAcceptHeader(nextRequest),
+		{ routePolicy: 'direct_full' },
 	);
-	if (nextRequest instanceof Response) {
-		return nextRequest;
+	if (preflightRequest instanceof Response) {
+		return preflightRequest;
 	}
-	return handler(nextRequest, env, ctx);
+	return handler(preflightRequest, env, ctx);
 }

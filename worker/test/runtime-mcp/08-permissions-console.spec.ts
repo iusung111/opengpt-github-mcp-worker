@@ -349,6 +349,11 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				title: 'GitHub MCP work selection guide',
+				connector_identity: {
+					recommended_chatgpt_web_connector: 'live',
+					mirror_usage: 'validation_only',
+					dual_registration_warning: expect.stringContaining('Do not keep both live and mirror connectors attached'),
+				},
 				recommended_workflow: 'real_change',
 				request_checklist: expect.arrayContaining(['repo', 'request', 'target_paths']),
 				reviewer_workflow: expect.arrayContaining(['call review_prepare_context when a branch or PR is ready for review']),

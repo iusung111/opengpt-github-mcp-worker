@@ -254,7 +254,7 @@ function helpContextForWorkflow(workflow: 'real_change' | 'main_ready' | 'dry_ru
 	};
 }
 
-export function buildHelpPayload(query: string | undefined): Record<string, unknown> {
+export function buildHelpPayload(query: string | undefined, env?: AppEnv): Record<string, unknown> {
 	const normalized = normalizeHelpQuery(query);
 	const reviewSkillGuidance = buildReviewSkillGuidance();
 	const templates = {
@@ -331,9 +331,23 @@ export function buildHelpPayload(query: string | undefined): Record<string, unkn
 	}
 
 	const context = helpContextForWorkflow(recommendedWorkflow);
+	const currentDeployEnvironment = env ? getSelfDeployEnv(env) : 'unknown';
+	const currentUrl = env ? getSelfCurrentUrl(env) : null;
+	const liveUrl = env ? getSelfLiveUrl(env) : null;
+	const mirrorUrl = env ? getSelfMirrorUrl(env) : null;
 	return {
 		title: 'GitHub MCP work selection guide',
 		summary,
+		connector_identity: {
+			current_environment: currentDeployEnvironment,
+			current_url: currentUrl,
+			live_url: liveUrl,
+			mirror_url: mirrorUrl,
+			recommended_chatgpt_web_connector: 'live',
+			mirror_usage: 'validation_only',
+			dual_registration_warning:
+				'Do not keep both live and mirror connectors attached in the same normal ChatGPT web workflow. Prefer live for routine work and attach mirror only for validation or self-host testing.',
+		},
 		recommended_workflow: recommendedWorkflow,
 		recommended_template: templates[recommendedWorkflow],
 		related_workflows: relatedWorkflows,

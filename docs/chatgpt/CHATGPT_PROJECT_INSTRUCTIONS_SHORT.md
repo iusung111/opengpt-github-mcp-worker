@@ -13,6 +13,9 @@ Current endpoints:
 
 Use live for normal production work.
 Use mirror for validation, pre-promotion checks, and self-host testing.
+Attach only the live connector for normal ChatGPT web use.
+Attach mirror only when explicitly validating mirror behavior or promotion safety.
+Do not keep both attached in the same normal web workflow; session-scoped `link_<id>` handles can change and make path reuse look unstable.
 
 Default workflow:
 1. identify the target repo

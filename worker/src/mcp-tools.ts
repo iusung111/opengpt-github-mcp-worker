@@ -11,9 +11,11 @@ import { registerWidgetResources, stripNotificationWidgetMeta, stripNotification
 import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
 import { registerWriteTools } from './mcp-write-tools';
+import type { ToolAnnotations } from './mcp/contracts';
 
 type McpServerBuildOptions = {
 	enableWidgets?: boolean;
+	stripWidgets?: boolean;
 	profile?: 'direct_full' | 'chatgpt_public';
 };
 
@@ -35,7 +37,7 @@ function disableWidgetRegistrations(server: McpServer): void {
 			typeof handler === 'function'
 				? async (...args: any[]) =>
 						stripNotificationWidgetResult(
-						(await (handler as (...innerArgs: any[]) => Promise<Record<string, unknown> | null | undefined>).apply(
+							(await (handler as (...innerArgs: any[]) => Promise<Record<string, unknown> | null | undefined>).apply(
 								server,
 								args,
 							)) as Record<string, unknown> | null | undefined,
@@ -48,8 +50,8 @@ function disableWidgetRegistrations(server: McpServer): void {
 function registerDirectFullTools(
 	server: McpServer,
 	env: AppEnv,
-	readAnnotations: Record<string, unknown>,
-	writeAnnotations: Record<string, unknown>,
+	readAnnotations: ToolAnnotations,
+	writeAnnotations: ToolAnnotations,
 ): void {
 	registerOverviewTools(server, env, readAnnotations, writeAnnotations);
 	registerRepoReadTools(server, env, readAnnotations);
@@ -65,10 +67,13 @@ function registerDirectFullTools(
 function registerChatgptPublicTools(
 	server: McpServer,
 	env: AppEnv,
-	readAnnotations: Record<string, unknown>,
+	readAnnotations: ToolAnnotations,
+	writeAnnotations: ToolAnnotations,
 ): void {
-	registerRepoReadTools(server, env, readAnnotations);
-	registerWorkflowReadTools(server, env, readAnnotations);
+	// ChatGPT caches public discovery responses during bootstrap, so the public
+	// catalog must match the authenticated surface even though tools/call stays
+	// auth-gated by route policy.
+	registerDirectFullTools(server, env, readAnnotations, writeAnnotations);
 }
 
 export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {}): McpServer {
@@ -79,12 +84,12 @@ export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {})
 	});
 	decorateToolRegistration(server);
 	const enableWidgets = options.enableWidgets ?? true;
-	if (!enableWidgets) {
+	if (options.stripWidgets ?? !enableWidgets) {
 		disableWidgetRegistrations(server);
 	}
 
-	const readAnnotations = { readOnlyHint: true, openWorldHint: false };
-	const writeAnnotations = {
+	const readAnnotations: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
+	const writeAnnotations: ToolAnnotations = {
 		readOnlyHint: false,
 		openWorldHint: false,
 		destructiveHint: false,
@@ -94,7 +99,7 @@ export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {})
 		registerWidgetResources(server, env);
 	}
 	if (profile === 'chatgpt_public') {
-		registerChatgptPublicTools(server, env, readAnnotations);
+		registerChatgptPublicTools(server, env, readAnnotations, writeAnnotations);
 	} else {
 		registerDirectFullTools(server, env, readAnnotations, writeAnnotations);
 	}

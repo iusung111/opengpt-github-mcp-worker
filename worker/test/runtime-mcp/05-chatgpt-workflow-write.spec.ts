@@ -15,7 +15,7 @@ describe('runtime mcp surface', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('serves a read-only public MCP surface over /chatgpt/mcp with bearer auth', async () => {
+	it('serves the full MCP surface over authenticated /chatgpt/mcp', async () => {
 		const originalFetch = globalThis.fetch;
 		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = input instanceof Request ? input.url : String(input);
@@ -60,9 +60,9 @@ describe('runtime mcp surface', () => {
 		const tools = await client.listTools();
 		expect(tools.tools.some((tool) => tool.name === 'repo_list_tree')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file_summary')).toBe(true);
-		expect(tools.tools.some((tool) => tool.name === 'repo_update_file')).toBe(false);
-		expect(tools.tools.some((tool) => tool.name === 'workflow_dispatch')).toBe(false);
-		expect(tools.tools.some((tool) => tool.name === 'self_deploy')).toBe(false);
+		expect(tools.tools.some((tool) => tool.name === 'repo_update_file')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'workflow_dispatch')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'self_deploy')).toBe(true);
 
 		const treeResult = await client.callTool({
 			name: 'repo_list_tree',
@@ -113,7 +113,7 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	});
 
-	it('reads workflow files but blocks workflow write tools over /chatgpt/mcp', async () => {
+	it('reads and updates workflow files over authenticated /chatgpt/mcp', async () => {
 		const originalFetch = globalThis.fetch;
 		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = input instanceof Request ? input.url : String(input);
@@ -127,6 +127,22 @@ describe('runtime mcp surface', () => {
 				);
 			}
 			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/.github/workflows/test.yml') {
+				if ((init?.method ?? 'GET').toUpperCase() === 'PUT') {
+					const payload = JSON.parse(String(init?.body ?? '{}'));
+					return new Response(
+						JSON.stringify({
+							content: {
+								path: '.github/workflows/test.yml',
+								sha: 'workflow-blob-updated',
+							},
+							commit: {
+								sha: 'commit-workflow-update',
+								message: payload.message,
+							},
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } },
+					);
+				}
 				return new Response(
 					JSON.stringify({
 						path: '.github/workflows/test.yml',
@@ -161,20 +177,100 @@ describe('runtime mcp surface', () => {
 			},
 		});
 
-		await expect(
-			client.callTool({
-				name: 'repo_update_file',
-				arguments: {
-					repo_key: 'iusung111/OpenGPT',
-					branch: 'agent/workflow-edit-test',
+		const workflowUpdateResult = await client.callTool({
+			name: 'repo_update_file',
+			arguments: {
+				repo_key: 'iusung111/OpenGPT',
+				branch: 'agent/workflow-edit-test',
+				path: '.github/workflows/test.yml',
+				message: 'Update workflow from MCP',
+				content_b64: btoa('name: test\non: workflow_dispatch\njobs: {}\n'),
+				expected_blob_sha: 'workflow-blob-sha',
+			},
+		});
+		const workflowUpdateText =
+			'text' in workflowUpdateResult.content[0] ? workflowUpdateResult.content[0].text : '';
+		expect(JSON.parse(workflowUpdateText)).toMatchObject({
+			ok: true,
+			data: {
+				content: {
 					path: '.github/workflows/test.yml',
+				},
+				commit: {
 					message: 'Update workflow from MCP',
-					content_b64: btoa('name: test\non: workflow_dispatch\njobs: {}\n'),
-					expected_blob_sha: 'workflow-blob-sha',
+				},
+			},
+		});
+		await client.close();
+	});
+
+	it('keeps unauthenticated ChatGPT bootstrap discovery on the full tool catalog and widget resources', async () => {
+		const toolsResponse = await SELF.fetch('https://example.com/chatgpt/mcp', {
+			method: 'POST',
+			headers: {
+				accept: 'application/json, text/event-stream',
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 'chatgpt-public-tools-list',
+				method: 'tools/list',
+				params: {},
+			}),
+		});
+		expect(toolsResponse.status).toBe(200);
+		const toolsPayload = (await toolsResponse.json()) as { result?: { tools?: Array<{ name?: string }> } };
+		const toolNames = (toolsPayload.result?.tools ?? []).map((tool) => tool.name);
+		expect(toolNames).toContain('repo_get_file_summary');
+		expect(toolNames).toContain('repo_create_branch');
+		expect(toolNames).toContain('repo_update_file');
+		expect(toolNames).toContain('workflow_dispatch');
+		expect(toolNames).toContain('run_console_open');
+
+		const resourcesResponse = await SELF.fetch('https://example.com/chatgpt/mcp', {
+			method: 'POST',
+			headers: {
+				accept: 'application/json, text/event-stream',
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 'chatgpt-public-resources-list',
+				method: 'resources/list',
+				params: {},
+			}),
+		});
+		expect(resourcesResponse.status).toBe(200);
+		const resourcesPayload = (await resourcesResponse.json()) as {
+			result?: { resources?: Array<{ uri?: string }> };
+		};
+		expect((resourcesPayload.result?.resources ?? []).map((resource) => resource.uri)).toContain(
+			'ui://widget/notification-center.html',
+		);
+
+		const readResponse = await SELF.fetch('https://example.com/chatgpt/mcp', {
+			method: 'POST',
+			headers: {
+				accept: 'application/json, text/event-stream',
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 'chatgpt-public-resource-read',
+				method: 'resources/read',
+				params: {
+					uri: 'ui://widget/notification-center.html',
 				},
 			}),
-		).rejects.toThrow(/not exposed on the public ChatGPT MCP route|invalid params/i);
-		await client.close();
+		});
+		expect(readResponse.status).toBe(200);
+		const readPayload = (await readResponse.json()) as {
+			result?: { contents?: Array<{ uri?: string; text?: string }> };
+		};
+		expect(
+			(readPayload.result?.contents ?? []).find((resource) => resource.uri === 'ui://widget/notification-center.html')
+				?.text ?? '',
+		).toContain('/gui/app.js');
 	});
 
 	it('keeps workflow write tools available over direct /mcp', async () => {
@@ -268,7 +364,7 @@ describe('runtime mcp surface', () => {
 						path: 'D:\\VScode\\OpenGPT\\README.md',
 					},
 				}),
-			)).rejects.toThrow(/invalid repo path/i);
+			).rejects.toThrow(/invalid repo path/i);
 
 			await expect(
 				client.callTool({

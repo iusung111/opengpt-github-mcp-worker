@@ -22,6 +22,12 @@ describe('runtime http surface', () => {
 		expect(response.headers.get('location')).toBe('https://example.com/gui/');
 	});
 
+	it('redirects /gui to the canonical GUI trailing-slash route', async () => {
+		const response = await SELF.fetch('https://example.com/gui', { redirect: 'manual' });
+		expect(response.status).toBe(307);
+		expect(response.headers.get('location')).toBe('/gui/');
+	});
+
 	it('returns healthz payload', async () => {
 		const response = await SELF.fetch('https://example.com/healthz');
 		expect(response.status).toBe(200);
@@ -48,6 +54,11 @@ describe('runtime http surface', () => {
 		expect(response.status).toBe(406);
 	});
 
+	it('normalizes direct MCP requests with a trailing slash', async () => {
+		const response = await SELF.fetch('https://example.com/mcp/');
+		expect(response.status).toBe(406);
+	});
+
 	it('rejects unauthenticated ChatGPT MCP requests when bearer auth is required', async () => {
 		const response = await SELF.fetch('https://example.com/chatgpt/mcp');
 		expect(response.status).toBe(200);
@@ -55,6 +66,34 @@ describe('runtime http surface', () => {
 			ok: true,
 			route: '/chatgpt/mcp',
 			auth_type: 'oauth',
+		});
+	});
+
+	it('normalizes ChatGPT MCP bootstrap requests with a trailing slash', async () => {
+		const response = await SELF.fetch('https://example.com/chatgpt/mcp/');
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({
+			ok: true,
+			route: '/chatgpt/mcp',
+			auth_type: 'oauth',
+		});
+	});
+
+	it('builds prefixed ChatGPT bootstrap metadata from the request path', async () => {
+		const bootstrapResponse = await SELF.fetch('https://example.com/mirror/chatgpt/mcp/');
+		expect(bootstrapResponse.status).toBe(200);
+		await expect(bootstrapResponse.json()).resolves.toMatchObject({
+			ok: true,
+			route: '/mirror/chatgpt/mcp',
+			auth_type: 'oauth',
+		});
+
+		const metadataResponse = await SELF.fetch(
+			'https://example.com/mirror/.well-known/oauth-protected-resource/chatgpt/mcp',
+		);
+		expect(metadataResponse.status).toBe(200);
+		await expect(metadataResponse.json()).resolves.toMatchObject({
+			resource: 'https://example.com/mirror/chatgpt/mcp',
 		});
 	});
 
