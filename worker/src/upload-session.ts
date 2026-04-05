@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { commitUploadedFile } from './github-file-commit';
 import { AppEnv, UploadSessionRecord } from './contracts';
-import { nowIso } from './utils';
+import { buildErrorFingerprint, errorCodeFor, normalizeErrorMessage, nowIso, recordRuntimeEvent } from './utils';
 
 export const UPLOAD_SESSION_TTL_MS = 15 * 60 * 1000;
 export const RECOMMENDED_UPLOAD_CHUNK_BYTES = 96 * 1024;
@@ -55,6 +55,18 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
 	return merged;
 }
 
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+	if (left.byteLength !== right.byteLength) {
+		return false;
+	}
+	for (let index = 0; index < left.byteLength; index += 1) {
+		if (left[index] !== right[index]) {
+			return false;
+		}
+	}
+	return true;
+}
+
 export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 	constructor(ctx: DurableObjectState, env: AppEnv) {
 		super(ctx, env);
@@ -88,9 +100,103 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 		return session;
 	}
 
+	private async recordSessionError(
+		session: UploadSessionRecord,
+		error: unknown,
+		featureArea: 'upload_append' | 'upload_commit' | 'upload_abort',
+		extra: Record<string, unknown> = {},
+	): Promise<string> {
+		const message = normalizeErrorMessage(error);
+		const code = errorCodeFor(error, 'upload_session_error');
+		const fingerprint = buildErrorFingerprint([
+			featureArea,
+			code,
+			session.upload_id,
+			extra.chunk_index,
+			extra.byte_offset,
+			message,
+		]);
+		session.last_error = message;
+		session.last_failed_at = nowIso();
+		if (featureArea === 'upload_commit') {
+			session.last_commit_error_fingerprint = fingerprint;
+		} else {
+			session.last_chunk_error_fingerprint = fingerprint;
+		}
+		await this.putSession(session);
+		recordRuntimeEvent('upload_session_error', {
+			feature_area: featureArea,
+			upload_id: session.upload_id,
+			repo: `${session.owner}/${session.repo}`,
+			branch: session.branch,
+			path: session.path,
+			state: session.state,
+			error_code: code,
+			error_message: message,
+			error_fingerprint: fingerprint,
+			recoverable: featureArea !== 'upload_abort',
+			...extra,
+		});
+		return fingerprint;
+	}
+
+	private async maybeHandleDuplicateAppend(
+		session: UploadSessionRecord,
+		payload: AppendUploadPayload,
+		bytes: Uint8Array,
+	): Promise<Response | null> {
+		if (session.next_chunk_index <= 0 || payload.chunk_index !== session.next_chunk_index - 1) {
+			return null;
+		}
+		const existingChunk = await this.ctx.storage.get<Uint8Array>(chunkStorageKey(payload.chunk_index));
+		if (!existingChunk) {
+			return null;
+		}
+		const expectedOffset = session.next_byte_offset - existingChunk.byteLength;
+		if (payload.byte_offset !== expectedOffset) {
+			return null;
+		}
+		if (!bytesEqual(existingChunk, bytes)) {
+			const error = new Error(`duplicate upload chunk content mismatch: index ${payload.chunk_index}`);
+			await this.recordSessionError(session, error, 'upload_append', {
+				chunk_index: payload.chunk_index,
+				byte_offset: payload.byte_offset,
+				is_duplicate_chunk: true,
+				duplicate_policy: 'reject_conflict',
+			});
+			throw error;
+		}
+		recordRuntimeEvent('upload_duplicate_chunk_accepted', {
+			feature_area: 'upload_append',
+			upload_id: session.upload_id,
+			chunk_index: payload.chunk_index,
+			byte_offset: payload.byte_offset,
+			state: session.state,
+			is_duplicate_chunk: true,
+			duplicate_policy: 'accept_idempotent',
+		});
+		return Response.json({
+			ok: true,
+			upload_id: session.upload_id,
+			received_bytes: session.received_bytes,
+			next_chunk_index: session.next_chunk_index,
+			next_byte_offset: session.next_byte_offset,
+			complete: session.total_bytes !== null && session.total_bytes !== undefined ? session.received_bytes === session.total_bytes : false,
+			duplicate: true,
+		});
+	}
+
 	private async handleStart(request: Request): Promise<Response> {
 		const payload = (await request.json()) as StartUploadPayload;
 		await this.putSession(payload.session);
+		recordRuntimeEvent('upload_session_started', {
+			feature_area: 'upload_start',
+			upload_id: payload.session.upload_id,
+			repo: `${payload.session.owner}/${payload.session.repo}`,
+			branch: payload.session.branch,
+			path: payload.session.path,
+			total_bytes: payload.session.total_bytes ?? null,
+		});
 		return Response.json({
 			ok: true,
 			upload_id: payload.session.upload_id,
@@ -105,23 +211,63 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 		const payload = (await request.json()) as AppendUploadPayload;
 		const session = await this.expireIfNeeded(await this.requireSession());
 		if (session.state !== 'open') {
-			throw new Error(`upload session is not open: ${session.state}`);
-		}
-		if (payload.chunk_index !== session.next_chunk_index) {
-			throw new Error(`unexpected upload chunk index: expected ${session.next_chunk_index}`);
-		}
-		if (payload.byte_offset !== session.next_byte_offset) {
-			throw new Error(`unexpected upload byte offset: expected ${session.next_byte_offset}`);
+			const error = new Error(`upload session is not open: ${session.state}`);
+			await this.recordSessionError(session, error, 'upload_append', {
+				chunk_index: payload.chunk_index,
+				byte_offset: payload.byte_offset,
+			});
+			throw error;
 		}
 		const bytes = decodeBase64Bytes(payload.chunk_b64);
+		const duplicateResponse = await this.maybeHandleDuplicateAppend(session, payload, bytes);
+		if (duplicateResponse) {
+			return duplicateResponse;
+		}
+		if (payload.chunk_index !== session.next_chunk_index) {
+			const error = new Error(`unexpected upload chunk index: expected ${session.next_chunk_index}`);
+			await this.recordSessionError(session, error, 'upload_append', {
+				chunk_index: payload.chunk_index,
+				byte_offset: payload.byte_offset,
+				expected_chunk_index: session.next_chunk_index,
+			});
+			throw error;
+		}
+		if (payload.byte_offset !== session.next_byte_offset) {
+			const error = new Error(`unexpected upload byte offset: expected ${session.next_byte_offset}`);
+			await this.recordSessionError(session, error, 'upload_append', {
+				chunk_index: payload.chunk_index,
+				byte_offset: payload.byte_offset,
+				expected_byte_offset: session.next_byte_offset,
+			});
+			throw error;
+		}
 		if (bytes.byteLength > MAX_UPLOAD_CHUNK_BYTES) {
-			throw new Error(`upload chunk too large: ${bytes.byteLength} bytes`);
+			const error = new Error(`upload chunk too large: ${bytes.byteLength} bytes`);
+			await this.recordSessionError(session, error, 'upload_append', {
+				chunk_index: payload.chunk_index,
+				byte_offset: payload.byte_offset,
+				chunk_size: bytes.byteLength,
+			});
+			throw error;
 		}
 		if (session.total_bytes !== null && session.total_bytes !== undefined && payload.byte_offset + bytes.byteLength > session.total_bytes) {
-			throw new Error(`upload exceeds declared total bytes for ${session.upload_id}`);
+			const error = new Error(`upload exceeds declared total bytes for ${session.upload_id}`);
+			await this.recordSessionError(session, error, 'upload_append', {
+				chunk_index: payload.chunk_index,
+				byte_offset: payload.byte_offset,
+				chunk_size: bytes.byteLength,
+				total_bytes: session.total_bytes,
+			});
+			throw error;
 		}
 		if (session.received_bytes + bytes.byteLength > MAX_STREAMED_UPLOAD_BYTES) {
-			throw new Error(`upload exceeds max bytes for ${session.upload_id}`);
+			const error = new Error(`upload exceeds max bytes for ${session.upload_id}`);
+			await this.recordSessionError(session, error, 'upload_append', {
+				chunk_index: payload.chunk_index,
+				byte_offset: payload.byte_offset,
+				chunk_size: bytes.byteLength,
+			});
+			throw error;
 		}
 
 		await this.ctx.storage.put(chunkStorageKey(payload.chunk_index), bytes);
@@ -155,22 +301,39 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 			throw new Error(`upload is incomplete: expected ${session.total_bytes} bytes, received ${session.received_bytes}`);
 		}
 
+		session.commit_attempts = (session.commit_attempts ?? 0) + 1;
 		session.state = 'committing';
 		await this.putSession(session);
 		const chunks: Uint8Array[] = [];
 		for (let index = 0; index < session.chunk_count; index += 1) {
 			const chunk = await this.ctx.storage.get<Uint8Array>(chunkStorageKey(index));
 			if (!chunk) {
-				throw new Error(`upload chunk missing for ${session.upload_id}: ${index}`);
+				const error = new Error(`upload chunk missing for ${session.upload_id}: ${index}`);
+				session.state = 'open';
+				await this.recordSessionError(session, error, 'upload_commit', {
+					chunk_index: index,
+					commit_attempts: session.commit_attempts,
+				});
+				throw error;
 			}
 			chunks.push(chunk);
 		}
 		if (chunks.length !== session.chunk_count) {
-			throw new Error(`upload chunk count mismatch for ${session.upload_id}`);
+			const error = new Error(`upload chunk count mismatch for ${session.upload_id}`);
+			session.state = 'open';
+			await this.recordSessionError(session, error, 'upload_commit', {
+				commit_attempts: session.commit_attempts,
+			});
+			throw error;
 		}
 		const bytes = concatBytes(chunks);
 		if (bytes.byteLength !== session.received_bytes) {
-			throw new Error(`upload byte count mismatch for ${session.upload_id}`);
+			const error = new Error(`upload byte count mismatch for ${session.upload_id}`);
+			session.state = 'open';
+			await this.recordSessionError(session, error, 'upload_commit', {
+				commit_attempts: session.commit_attempts,
+			});
+			throw error;
 		}
 
 		try {
@@ -187,8 +350,18 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 
 			session.state = 'committed';
 			session.committed_at = nowIso();
+			session.last_error = null;
+			session.last_failed_at = null;
 			await this.putSession(session);
 			await this.deleteChunkData();
+			recordRuntimeEvent('upload_session_committed', {
+				feature_area: 'upload_commit',
+				upload_id: session.upload_id,
+				repo: `${session.owner}/${session.repo}`,
+				branch: session.branch,
+				path: session.path,
+				commit_attempts: session.commit_attempts,
+			});
 			return Response.json({
 				ok: true,
 				upload_id: session.upload_id,
@@ -197,7 +370,9 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 			});
 		} catch (error) {
 			session.state = 'open';
-			await this.putSession(session);
+			await this.recordSessionError(session, error, 'upload_commit', {
+				commit_attempts: session.commit_attempts,
+			});
 			throw error;
 		}
 	}
@@ -209,6 +384,13 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 		}
 		session.state = 'aborted';
 		await this.putSession(session);
+		recordRuntimeEvent('upload_session_aborted', {
+			feature_area: 'upload_abort',
+			upload_id: session.upload_id,
+			repo: `${session.owner}/${session.repo}`,
+			branch: session.branch,
+			path: session.path,
+		});
 		await this.deleteAllSessionState();
 		return Response.json({ ok: true, aborted: true, upload_id: session.upload_id });
 	}
@@ -256,4 +438,3 @@ export class UploadSessionDurableObject extends DurableObject<AppEnv> {
 		}
 	}
 }
-
