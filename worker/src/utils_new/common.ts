@@ -16,7 +16,7 @@ export function normalizeErrorMessage(error: unknown): string {
 	return String(error);
 }
 
-export function buildErrorFingerprint(parts: Array<string | number | boolean | null | undefined>): string {
+export function buildErrorFingerprint(parts: Array<unknown>): string {
 	return parts
 		.map((value) => String(value ?? ''))
 		.map((value) => value.trim().toLowerCase().replace(/\s+/g, ' '))
