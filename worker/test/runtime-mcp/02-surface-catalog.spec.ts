@@ -457,4 +457,89 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	}, 10000);
 
+	it('returns api tool implementation paths from repo_tool_index_lookup for the self repo', async () => {
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker/git/trees/main?recursive=true') {
+				return new Response(
+					JSON.stringify({
+						sha: 'main-tree-sha',
+						tree: [
+							{ path: 'worker/src/mcp/fullstack/api.ts', type: 'blob' },
+							{ path: 'worker/src/runtime/mcp/handlers.ts', type: 'blob' },
+							{ path: 'worker/src/tool-catalog.json', type: 'blob' },
+						],
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/opengpt-github-mcp-worker/contents/worker/src/tool-catalog.json?ref=main') {
+				return new Response(
+					JSON.stringify({
+						path: 'worker/src/tool-catalog.json',
+						type: 'file',
+						sha: 'tool-catalog-sha',
+						content: Buffer.from(
+							JSON.stringify({
+								groups: [
+									{
+										id: 'api_backend',
+										label: 'API and backend',
+										tools: ['api_contract_list', 'api_contract_get', 'api_request_run', 'api_contract_validate'],
+									},
+								],
+							}),
+							'utf8',
+						).toString('base64'),
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return new Response(JSON.stringify({ message: `unexpected url: ${url}`, method: init?.method ?? 'GET' }), {
+				status: 404,
+				headers: { 'content-type': 'application/json' },
+			});
+		});
+
+		const client = await createMcpClient();
+		const result = await client.callTool({
+			name: 'repo_tool_index_lookup',
+			arguments: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+				query: 'api',
+			},
+		});
+		const text = 'text' in result.content[0] ? result.content[0].text : '';
+		expect(JSON.parse(text)).toMatchObject({
+			ok: true,
+			data: {
+				repo_key: 'iusung111/opengpt-github-mcp-worker',
+				query: 'api',
+				tool_paths: expect.arrayContaining([
+					expect.objectContaining({
+						path: 'worker/src/mcp/fullstack/api.ts',
+						classification: 'tool',
+					}),
+				]),
+				tool_entries: expect.arrayContaining([
+					expect.objectContaining({
+						tool_name: 'api_request_run',
+						group_id: 'api_backend',
+					}),
+				]),
+			},
+		});
+
+		await client.close();
+	}, 10000);
+
 });

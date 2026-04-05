@@ -68,7 +68,11 @@ export function classifyReadPath(path: string): ReadPathClass {
 	if (normalized.includes('.github/workflows/')) {
 		return 'workflow';
 	}
-	if (normalized.includes('tool-catalog') || normalized.includes('/mcp-')) {
+	if (
+		normalized.includes('tool-catalog') ||
+		normalized.includes('/mcp-') ||
+		normalized.includes('/mcp/')
+	) {
 		return 'tool';
 	}
 	if (
