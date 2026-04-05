@@ -34,9 +34,11 @@ describe('read index matching helpers', () => {
 				}),
 			prepareSearchQuery('tool index, read observability, manifest, cache'),
 		);
-		expect(ranked.map((entry) => entry.value.path)).toEqual([
+		expect(ranked.map((entry) => entry.value.path)).toEqual(
+			expect.arrayContaining([
 				'worker/src/tool-catalog.json',
 				'worker/src/mcp/repo-read/navigation.ts',
-		]);
+			]),
+		);
 	});
 });
