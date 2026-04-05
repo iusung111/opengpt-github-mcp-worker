@@ -11,6 +11,7 @@ import { registerWidgetResources, stripNotificationWidgetMeta, stripNotification
 import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
 import { registerWriteTools } from './mcp-write-tools';
+import type { ToolAnnotations } from './mcp/contracts';
 
 type McpServerBuildOptions = {
 	enableWidgets?: boolean;
@@ -48,8 +49,8 @@ function disableWidgetRegistrations(server: McpServer): void {
 function registerDirectFullTools(
 	server: McpServer,
 	env: AppEnv,
-	readAnnotations: Record<string, unknown>,
-	writeAnnotations: Record<string, unknown>,
+	readAnnotations: ToolAnnotations,
+	writeAnnotations: ToolAnnotations,
 ): void {
 	registerOverviewTools(server, env, readAnnotations, writeAnnotations);
 	registerRepoReadTools(server, env, readAnnotations);
@@ -65,7 +66,7 @@ function registerDirectFullTools(
 function registerChatgptPublicTools(
 	server: McpServer,
 	env: AppEnv,
-	readAnnotations: Record<string, unknown>,
+	readAnnotations: ToolAnnotations,
 ): void {
 	registerRepoReadTools(server, env, readAnnotations);
 	registerWorkflowReadTools(server, env, readAnnotations);
@@ -83,8 +84,8 @@ export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {})
 		disableWidgetRegistrations(server);
 	}
 
-	const readAnnotations = { readOnlyHint: true, openWorldHint: false };
-	const writeAnnotations = {
+	const readAnnotations: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
+	const writeAnnotations: ToolAnnotations = {
 		readOnlyHint: false,
 		openWorldHint: false,
 		destructiveHint: false,
