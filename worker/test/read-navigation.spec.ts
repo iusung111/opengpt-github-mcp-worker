@@ -69,9 +69,9 @@ describe('read navigation helpers', () => {
 		expect(index).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ path: 'worker/src/tool-catalog.json' }),
-				expect.objectContaining({ path: 'worker/src/mcp/repo-read/navigation.ts' }),
 			]),
 		);
+		expect(index.every((entry) => entry.classification === 'tool')).toBe(true);
 	});
 
 	it('tracks budget usage and prevents inline reads after limits are exceeded', () => {
