@@ -311,13 +311,13 @@ describe('runtime mcp surface', () => {
 			arguments: {
 				job_id: 'job-mcp-1',
 				limit: 10,
-			},
-		});
+            },
+        });
 		expect((eventFeedResult as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({
 			kind: 'opengpt.notification_contract.job_event_feed',
 			});
 		expect((eventFeedResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
-				'opengpt/widget': {
+			'opengpt/widget': {
 					kind: 'opengpt.notification_contract.job_event_feed',
 				},
 			});
@@ -349,7 +349,7 @@ describe('runtime mcp surface', () => {
 					self_repo: expect.any(Array),
 				},
 			read_observability: {
-					sounters: expect.any(Object),
+					counters: expect.any(Object),
 				},
 			});
 		expect((selfHostStatusResult as { _meta?: Record<string, unknown> })._meta).toMatchObject({
@@ -370,17 +370,17 @@ describe('runtime mcp surface', () => {
 		expect(auditJson.ok).toBe(true);
 		expect(
 			auditJson.data.audits.some(
-				\(item: { event_type: string; payload: { job_id?: string } }) =>
+				(item: { event_type: string; payload: { job_id?: string } }) =>
 					item.event_type === 'job_create' && item.payload.job_id === 'job-mcp-1',
 			),
-			).toBe(true);
+		).toBe(true);
 		expect(
 			auditJson.data.audits.some(
 				(item: { event_type: string; payload: { session_url?: string; conversation_id?: string | null } }) =>
 					item.event_type === 'browser_session_seeded' &&
 					item.payload.session_url === 'https://chatgpt.com/c/example' &&
 					item.payload.conversation_id === 'convo-123',
-			)),
+			),
 		).toBe(true);
 
  		const registerWorkspaceResult = await client.callTool({
@@ -447,7 +447,7 @@ describe('runtime mcp surface', () => {
 				tool_paths: expect.arrayContaining([
 					expect.objectContaining({ path: 'worker/src/tool-catalog.json' }),
 					expect.objectContaining({ path: 'worker/src/mcp/repo-read/navigation.ts' }),
-			]),
+							)]),
 				},
 			});
 		await client.close();
