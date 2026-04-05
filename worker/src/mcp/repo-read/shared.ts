@@ -1,6 +1,8 @@
 import type { AppEnv } from '../../contracts';
+import { rankIndexMatches } from '../../read-index-match';
 import { buildPathScopedIndex } from '../../read-navigation';
 import { incrementReadCounter, recordToolMetric } from '../../read-observability';
+import { prepareSearchQuery } from '../../read-query';
 import { decodeBase64Text, encodeGitHubPath, getSelfRepoKey, githubGet } from '../../utils';
 
 export function normalizeTreePath(path: string | undefined): string {
@@ -74,7 +76,7 @@ export async function getRepoFile(env: AppEnv, owner: string, repo: string, path
 		params: ref ? { ref } : {},
 	})) as Record<string, unknown> & {
 		content?: string;
-		path?: string;
+		Path?: string;
 		name?: string;
 		type?: string;
 		sha?: string;
@@ -84,26 +86,35 @@ export async function getRepoFile(env: AppEnv, owner: string, repo: string, path
 
 export async function resolveToolIndex(env: AppEnv, owner: string, repo: string, ref: string, query?: string): Promise<Record<string, unknown>> {
 	const repoKey = `${owner}/${repo}`;
-	const normalizedQuery = (query ?? '').trim().toLowerCase();
+	const preparedQuery = prepareSearchQuery(query);
 	const treeResult = await getRepoTree(env, owner, repo, ref, true);
 	const treeEntries = treeResult.tree ?? [];
-	const pathMatches = buildPathScopedIndex(treeEntries, 'tool', normalizedQuery);
+	const pathMatches = buildPathScopedIndex(treeEntries, 'tool', query);
 	const selfRepoToolEntries: Array<Record<string, unknown>> = [];
 	if (repoKey === getSelfRepoKey(env)) {
 		const toolCatalog = await getRepoFile(env, owner, repo, 'worker/src/tool-catalog.json', ref);
 		const parsed = toolCatalog.decoded_text ? (JSON.parse(toolCatalog.decoded_text) as { groups?: Array<{ tools?: string[]; label?: string; id?: string }> }) : null;
-		for (const group of parsed?.groups ?? []) {
-			for (const toolName of group.tools ?? []) {
-				if (normalizedQuery && !toolName.toLowerCase().includes(normalizedQuery)) continue;
-				selfRepoToolEntries.push({
-					tool_name: toolName,
-					group_id: group.id ?? null,
-					group_label: group.label ?? null,
-					path: 'worker/src/tool-catalog.json',
-					anchor: toolName,
-				});
-			}
-		}
+		const catalogEntries = (parsed?.groups ?? []).flatMap((group) =>
+			(group.tools ?? []).map((toolName) => ({
+				tool_name: toolName,
+				group_id: group.id ?? null,
+				group_label: group.label ?? null,
+				path: 'worker/src/tool-catalog.json',
+				anchor: toolName,
+			})),
+		);
+		selfRepoToolEntries.push(
+			...rankIndexMatches(
+				catalogEntries,
+				(entry) => ({
+					primaryText: String(entry.tool_name ?? ''),
+					secondaryText: [String(entry.group_label ?? ''), String(entry.path ?? '')],
+				}),
+				preparedQuery,
+			)
+				.slice(0, 50)
+				.map(({ value }) => value),
+		);
 	}
 	incrementReadCounter(pathMatches.length > 0 || selfRepoToolEntries.length > 0 ? 'tool_index_hit' : 'tool_index_miss');
 	return {
