@@ -447,7 +447,7 @@ describe('runtime mcp surface', () => {
 				tool_paths: expect.arrayContaining([
 					expect.objectContaining({ path: 'worker/src/tool-catalog.json' }),
 					expect.objectContaining({ path: 'worker/src/mcp/repo-read/navigation.ts' }),
-							)]),
+				]),
 				},
 			});
 		await client.close();
