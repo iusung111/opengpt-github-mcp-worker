@@ -76,7 +76,7 @@ export async function getRepoFile(env: AppEnv, owner: string, repo: string, path
 		params: ref ? { ref } : {},
 	})) as Record<string, unknown> & {
 		content?: string;
-		Path?: string;
+		path?: string;
 		name?: string;
 		type?: string;
 		sha?: string;
