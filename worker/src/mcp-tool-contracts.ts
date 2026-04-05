@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { repoIdentityInputSchema, resolveUnknownRepoIdentityInput } from './mcp-repo-identity';
+import { incrementReadCounter } from './read-observability';
 import { classifyRepoPathIssue } from './utils';
 
 type ToolCallback = (args: Record<string, unknown>) => unknown;
@@ -20,7 +21,40 @@ type JsonRpcToolCall = {
 	};
 };
 
+export type McpRoutePolicy = 'direct_full' | 'chatgpt_public';
+
+type PreflightOptions = {
+	routePolicy?: McpRoutePolicy;
+};
+
 const repoIdentityToolNames = new Set<string>();
+
+const CHATGPT_PUBLIC_BLOCKED_TOOLS = new Set<string>([
+	'repo_create_branch',
+	'repo_create_file',
+	'repo_update_file',
+	'repo_upsert_file',
+	'repo_upload_start',
+	'repo_upload_append',
+	'repo_upload_commit',
+	'repo_upload_abort',
+	'repo_batch_write',
+	'repo_apply_patchset',
+	'pr_create',
+	'pr_merge',
+	'comment_create',
+	'workflow_dispatch',
+	'gui_capture_run',
+	'self_deploy',
+	'self_bootstrap_repo_secrets',
+	'self_sync_mirror_secrets',
+	'job_create',
+	'job_update_status',
+	'job_append_note',
+	'job_submit_review',
+	'job_control',
+	'permission_request_resolve',
+]);
 
 function isSchemaShape(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -81,6 +115,7 @@ function getNestedRepoPathIssue(
 		return null;
 	}
 
+
 	if ('path' in argumentsObject) {
 		const directPathIssue = classifyRepoPathIssue(argumentsObject.path, 'path', { allowEmpty: true });
 		if (directPathIssue) {
@@ -102,6 +137,7 @@ function getNestedRepoPathIssue(
 			}
 		}
 	}
+
 
 	if (Array.isArray(argumentsObject.operations)) {
 		for (let index = 0; index < argumentsObject.operations.length; index += 1) {
@@ -160,7 +196,7 @@ export function decorateToolRegistration(server: McpServer): void {
 		name: string,
 		config: ToolDefinition,
 		callback: ToolCallback,
-	) => unknown;
+	)=> unknown;
 
 	server.registerTool = ((name: string, config: ToolDefinition, callback: ToolCallback) => {
 		const inputSchema = isSchemaShape(config.inputSchema) ? config.inputSchema : undefined;
@@ -174,7 +210,7 @@ export function decorateToolRegistration(server: McpServer): void {
 			description: usesRepoIdentity ? appendRepoIdentityHint(config.description) : config.description,
 			inputSchema: inputSchema ? buildRepoIdentityAwareSchema(inputSchema) : config.inputSchema,
 		};
-
+	
 		const nextCallback: ToolCallback = usesRepoIdentity
 			? (args) => callback(normalizeToolArguments(name, args))
 			: callback;
@@ -183,7 +219,11 @@ export function decorateToolRegistration(server: McpServer): void {
 	}) as typeof server.registerTool;
 }
 
-export async function preflightMcpToolCallRequest(request: Request): Promise<Request | Response> {
+export async function preflightMcpToolCallRequest(
+	request: Request,
+	options: PreflightOptions = {},
+): Promise<Request | Response> {
+	const routePolicy = options.routePolicy ?? 'direct_full';
 	if (request.method !== 'POST') {
 		return request;
 	}
@@ -192,7 +232,7 @@ export async function preflightMcpToolCallRequest(request: Request): Promise<Req
 		return request;
 	}
 
-	let payload: unknown;
+let payload: unknown;
 	try {
 		payload = await request.clone().json();
 	} catch {
@@ -215,6 +255,16 @@ export async function preflightMcpToolCallRequest(request: Request): Promise<Req
 
 	const argumentsObject = isSchemaShape(rpcPayload.params.arguments) ? rpcPayload.params.arguments : {};
 
+	if (routePolicy === 'chatgpt_public' && CHATGPT_PUBLIC_BLOCKED_TOOLS.has(toolName)) {
+		incrementReadCounter('mcp_public_blocked_count');
+		incrementReadCounter('mcp_public_blocked_tool_call_count');
+		return invalidParamsResponse(
+			rpcPayload.id,
+			`Invalid params for ${toolName}: tool "${toolName}" is not exposed on the public ChatGPT MCP route`,
+		);
+	}
+
+
 	try {
 		const normalizedArgs = normalizeToolArguments(toolName, argumentsObject);
 		const pathIssue = getNestedRepoPathIssue(toolName, normalizedArgs);
@@ -231,8 +281,8 @@ export async function preflightMcpToolCallRequest(request: Request): Promise<Req
 				params: {
 					...rpcPayload.params,
 					arguments: normalizedArgs,
-				},
-			};
+					},
+				};
 			return new Request(request, {
 				body: JSON.stringify(nextPayload),
 				headers: new Headers(request.headers),
