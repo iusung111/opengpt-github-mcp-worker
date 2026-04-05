@@ -15,8 +15,9 @@ export function handleOAuthProtectedResourceMetadata(request: Request, env: AppE
 	const origin = `${url.protocol}//${url.host}`;
 	const issuer = env.CHATGPT_MCP_ISSUER?.trim() || null;
 	const audiences = getChatgptMcpAudiences(env);
+	const resourcePath = url.pathname.endsWith('/chatgpt/mcp-admin') ? '/chatgpt/mcp-admin' : '/chatgpt/mcp';
 	return jsonResponse({
-		resource: `${origin}/chatgpt/mcp`,
+		resource: `${origin}${resourcePath}`,
 		authorization_servers: issuer ? [issuer.replace(/\/$/, '')] : [],
 		scopes_supported: ['openid', 'profile', 'email', 'offline_access'],
 		bearer_methods_supported: ['header'],
