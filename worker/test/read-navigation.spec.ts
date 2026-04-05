@@ -37,7 +37,7 @@ describe('read navigation helpers', () => {
 	});
 
 	it('builds summary metadata and chunk suggestions', () => {
-		const summary = buildFileSummary('docs/test.md', # Title\n\n## Section\nbody);
+		const summary = buildFileSummary('docs/test.md', '# Title\n\n## Section\nbody');
 		expect(summary).toMatchObject({
 			classification: 'doc',
 			title: 'Title',

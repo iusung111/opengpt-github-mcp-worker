@@ -27,7 +27,7 @@ export function tokenizeSearchQuery(query?: string): string[] {
 				.filter((token) => token.length > 1 || /\d/.test(token))
 				.filter((token) => !SEARCH_STOPWORDS.has(token)),
 		),
-	i);
+	);
 }
 
 export type PreparedSearchQuery = {

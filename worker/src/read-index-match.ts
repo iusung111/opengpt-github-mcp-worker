@@ -36,7 +36,8 @@ function scoreCandidate(candidate: string, query: PreparedSearchQuery): { score:
 	return { score: 100 + matchedTokens.length * 25, matchedTokens };
 }
 
-export function scoreSearchIndexText(	text: SearchIndexText,
+export function scoreSearchIndexText(
+	text: SearchIndexText,
 	query: PreparedSearchQuery,
 ): { score: number; matchedTokens: string[] } {
 	const candidates = [text.primaryText, ...(text.secondaryText ?? [])];
@@ -70,7 +71,7 @@ export function rankIndexMatches<T>(
 			};
 		})
 		.filter((entry) => entry.score > 0)
-.sort((left, right) => {
+		.sort((left, right) => {
 			if (right.score !== left.score) {
 				return right.score - left.score;
 			}
@@ -80,5 +81,5 @@ export function rankIndexMatches<T>(
 			value,
 			score,
 			matchedTokens,
-	}));
+		}));
 }
