@@ -235,7 +235,7 @@ describe('runtime mcp surface', () => {
 			ok: true,
 			data: {
 				gui_url: expect.stringContaining('/gui/'),
-				mssions: expect.arrayContaining([
+				missions: expect.arrayContaining([
 					expect.objectContaining({
 						mission_id: 'mission-mcp-1',
 					}),
