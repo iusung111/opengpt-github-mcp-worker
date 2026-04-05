@@ -21,6 +21,13 @@ const counters: CounterMap = {
 	chunk_read: 0,
 	full_read: 0,
 	queue_storage_list_call: 0,
+	mcp_public_rpc_count: 0,
+	mcp_public_blocked_count: 0,
+	mcp_public_blocked_tool_call_count: 0,
+	mcp_auth_fail_count: 0,
+	mcp_auth_ok_count: 0,
+	mcp_protocol_version_missing_count: 0,
+	mcp_protocol_version_invalid_count: 0,
 };
 
 const toolMetrics = new Map<string, ToolMetric>();
