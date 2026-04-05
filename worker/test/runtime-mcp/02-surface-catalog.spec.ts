@@ -410,7 +410,7 @@ describe('runtime mcp surface', () => {
 			},
 		});
 		const resolveWorkspaceText =
-			 'text' in resolveWorkspaceResult.content[0] ? resolveWorkspaceResult.content[0].text : '';
+			'text' in resolveWorkspaceResult.content[0] ? resolveWorkspaceResult.content[0].text : '';
 		expect(JSON.parse(resolveWorkspaceText)).toMatchObject({
 			ok: true,
 			data: {
