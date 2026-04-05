@@ -204,8 +204,8 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	});
 
-	it('keeps unauthenticated ChatGPT bootstrap tooling on the read-only public surface', async () => {
-		const response = await SELF.fetch('https://example.com/chatgpt/mcp', {
+	it('keeps unauthenticated ChatGPT bootstrap discovery on the full tool catalog and widget resources', async () => {
+		const toolsResponse = await SELF.fetch('https://example.com/chatgpt/mcp', {
 			method: 'POST',
 			headers: {
 				accept: 'application/json, text/event-stream',
@@ -218,13 +218,59 @@ describe('runtime mcp surface', () => {
 				params: {},
 			}),
 		});
-		expect(response.status).toBe(200);
-		const payload = (await response.json()) as { result?: { tools?: Array<{ name?: string }> } };
-		const toolNames = (payload.result?.tools ?? []).map((tool) => tool.name);
+		expect(toolsResponse.status).toBe(200);
+		const toolsPayload = (await toolsResponse.json()) as { result?: { tools?: Array<{ name?: string }> } };
+		const toolNames = (toolsPayload.result?.tools ?? []).map((tool) => tool.name);
 		expect(toolNames).toContain('repo_get_file_summary');
-		expect(toolNames).not.toContain('repo_update_file');
-		expect(toolNames).not.toContain('workflow_dispatch');
-		expect(toolNames).not.toContain('self_deploy');
+		expect(toolNames).toContain('repo_create_branch');
+		expect(toolNames).toContain('repo_update_file');
+		expect(toolNames).toContain('workflow_dispatch');
+		expect(toolNames).toContain('run_console_open');
+
+		const resourcesResponse = await SELF.fetch('https://example.com/chatgpt/mcp', {
+			method: 'POST',
+			headers: {
+				accept: 'application/json, text/event-stream',
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 'chatgpt-public-resources-list',
+				method: 'resources/list',
+				params: {},
+			}),
+		});
+		expect(resourcesResponse.status).toBe(200);
+		const resourcesPayload = (await resourcesResponse.json()) as {
+			result?: { resources?: Array<{ uri?: string }> };
+		};
+		expect((resourcesPayload.result?.resources ?? []).map((resource) => resource.uri)).toContain(
+			'ui://widget/notification-center.html',
+		);
+
+		const readResponse = await SELF.fetch('https://example.com/chatgpt/mcp', {
+			method: 'POST',
+			headers: {
+				accept: 'application/json, text/event-stream',
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 'chatgpt-public-resource-read',
+				method: 'resources/read',
+				params: {
+					uri: 'ui://widget/notification-center.html',
+				},
+			}),
+		});
+		expect(readResponse.status).toBe(200);
+		const readPayload = (await readResponse.json()) as {
+			result?: { contents?: Array<{ uri?: string; text?: string }> };
+		};
+		expect(
+			(readPayload.result?.contents ?? []).find((resource) => resource.uri === 'ui://widget/notification-center.html')
+				?.text ?? '',
+		).toContain('/gui/app.js');
 	});
 
 	it('keeps workflow write tools available over direct /mcp', async () => {

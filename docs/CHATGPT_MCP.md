@@ -30,7 +30,9 @@ Operational notes:
 
 - `repo_update_file` remains available for smaller files and compatibility flows.
 - upload chunks must be sent in order with matching `chunk_index` and `byte_offset`
+- retrying the same chunk with the same `chunk_index`, `byte_offset`, and bytes is idempotent and returns a duplicate acknowledgment instead of corrupting the session
 - upload sessions expire after a short TTL
+- failed commits keep the session open for retry and record `commit_attempts`, `last_error`, and `last_failed_at`
 - the final commit uses GitHub git data APIs instead of the contents API so the upload can be staged incrementally
 
 Workflow allowlist precedence for dispatch:
@@ -73,6 +75,8 @@ Practical implication for ChatGPT web:
 - the widget appears when ChatGPT calls one of the tools above
 - there is still no alarm-specific UI tool on main
 - if the model never chooses one of those tools, the widget will not render even though the exposure metadata is present
+- unauthenticated bootstrap discovery on `/chatgpt/mcp` still exposes the same tool catalog and widget resources as the authenticated route so ChatGPT does not cache a truncated surface
+- actual tool execution remains auth-gated, so unauthenticated `tools/call` still returns the Bearer challenge instead of performing writes
 
 ## Required Config
 
@@ -361,7 +365,9 @@ Do not describe a value without also saying exactly where to retrieve it.
 ## Runtime Behavior
 
 - unauthenticated `GET` / `HEAD` / `OPTIONS` to `/chatgpt/mcp`: bootstrap `200 OK`
-- unauthenticated MCP bootstrap RPC such as `initialize`, `notifications/initialized`, `tools/list`: allowed during connector setup
+- unauthenticated MCP bootstrap RPC such as `initialize`, `notifications/initialized`, `tools/list`, `resources/list`, and `resources/read`: allowed during connector setup
+- unauthenticated `tools/list` returns the full connector catalog, including write tools, so ChatGPT bootstrap discovery matches the authenticated route
+- bootstrap `route` and protected-resource `resource` values are generated from the incoming request path, so `/chatgpt/mcp`, `/chatgpt/mcp/`, and prefixed paths such as `/mirror/chatgpt/mcp` normalize to the correct canonical route
 - unauthenticated `tools/call`: `401` with `WWW-Authenticate` Bearer challenge and protected-resource metadata URL
 - missing bearer token: `401 unauthorized`
 - invalid signature, issuer, audience, or expiry: `401 unauthorized`

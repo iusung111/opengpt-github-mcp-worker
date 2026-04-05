@@ -70,9 +70,13 @@ export async function createUploadSession(
 		next_byte_offset: 0,
 		received_bytes: 0,
 		chunk_count: 0,
+		chunk_byte_lengths: [],
+		commit_attempts: 0,
 		created_at: createdAt,
 		expires_at: expiresAt,
 		committed_at: null,
+		last_error: null,
+		last_failed_at: null,
 	};
 	return uploadSessionFetch(env, uploadId, '/start', { session });
 }

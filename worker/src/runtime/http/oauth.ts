@@ -9,14 +9,16 @@ import {
 	ok,
 } from '../../utils';
 import { PROJECT_REPO_KEY } from '../../repo-aliases';
+import { resolveRuntimeRouteInfo } from '../mcp/handlers';
 
 export function handleOAuthProtectedResourceMetadata(request: Request, env: AppEnv): Response {
 	const url = new URL(request.url);
 	const origin = `${url.protocol}//${url.host}`;
+	const runtimeRoutes = resolveRuntimeRouteInfo(request);
 	const issuer = env.CHATGPT_MCP_ISSUER?.trim() || null;
 	const audiences = getChatgptMcpAudiences(env);
 	return jsonResponse({
-		resource: `${origin}/chatgpt/mcp`,
+		resource: `${origin}${runtimeRoutes.chatgptMcpRoute}`,
 		authorization_servers: issuer ? [issuer.replace(/\/$/, '')] : [],
 		scopes_supported: ['openid', 'profile', 'email', 'offline_access'],
 		bearer_methods_supported: ['header'],
