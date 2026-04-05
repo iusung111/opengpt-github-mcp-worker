@@ -15,7 +15,7 @@ describe('runtime mcp surface', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('serves the same read/write MCP surface over /chatgpt/mcp with bearer auth', async () => {
+	it('serves a read-only public MCP surface over /chatgpt/mcp with bearer auth', async () => {
 		const originalFetch = globalThis.fetch;
 		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = input instanceof Request ? input.url : String(input);
@@ -60,6 +60,9 @@ describe('runtime mcp surface', () => {
 		const tools = await client.listTools();
 		expect(tools.tools.some((tool) => tool.name === 'repo_list_tree')).toBe(true);
 		expect(tools.tools.some((tool) => tool.name === 'repo_get_file_summary')).toBe(true);
+		expect(tools.tools.some((tool) => tool.name === 'repo_update_file')).toBe(false);
+		expect(tools.tools.some((tool) => tool.name === 'workflow_dispatch')).toBe(false);
+		expect(tools.tools.some((tool) => tool.name === 'self_deploy')).toBe(false);
 
 		const treeResult = await client.callTool({
 			name: 'repo_list_tree',
@@ -110,7 +113,71 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	});
 
-	it('reads and updates workflow files over /chatgpt/mcp', async () => {
+	it('reads workflow files but blocks workflow write tools over /chatgpt/mcp', async () => {
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			if (url === 'https://api.github.com/app/installations/116782548/access_tokens') {
+				return new Response(
+					JSON.stringify({
+						token: 'test-installation-token',
+						expires_at: '2099-01-01T00:00:00Z',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			if (url === 'https://api.github.com/repos/iusung111/Project_OpenGPT/contents/.github/workflows/test.yml') {
+				return new Response(
+					JSON.stringify({
+						path: '.github/workflows/test.yml',
+						name: 'test.yml',
+						type: 'file',
+						content: btoa('name: test\non: workflow_dispatch\n'),
+						encoding: 'base64',
+						sha: 'workflow-blob-sha',
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } },
+				);
+			}
+			return originalFetch(input, init);
+		});
+
+		const client = await createChatgptMcpClient();
+		const workflowFileResult = await client.callTool({
+			name: 'repo_get_file',
+			arguments: {
+				repo_key: 'iusung111/OpenGPT',
+				path: '.github/workflows/test.yml',
+			},
+		});
+		const workflowFileText =
+			'text' in workflowFileResult.content[0] ? workflowFileResult.content[0].text : '';
+		expect(JSON.parse(workflowFileText)).toMatchObject({
+			ok: true,
+			data: {
+				path: '.github/workflows/test.yml',
+				decoded_text: null,
+				access_mode: 'summary_first',
+			},
+		});
+
+		await expect(
+			client.callTool({
+				name: 'repo_update_file',
+				arguments: {
+					repo_key: 'iusung111/OpenGPT',
+					branch: 'agent/workflow-edit-test',
+					path: '.github/workflows/test.yml',
+					message: 'Update workflow from MCP',
+					content_b64: btoa('name: test\non: workflow_dispatch\njobs: {}\n'),
+					expected_blob_sha: 'workflow-blob-sha',
+				},
+			}),
+		).rejects.toThrow(/not exposed on the public ChatGPT MCP route|invalid params/i);
+		await client.close();
+	});
+
+	it('keeps workflow write tools available over direct /mcp', async () => {
 		const originalFetch = globalThis.fetch;
 		vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = input instanceof Request ? input.url : String(input);
@@ -155,50 +222,38 @@ describe('runtime mcp surface', () => {
 			return originalFetch(input, init);
 		});
 
-		const client = await createChatgptMcpClient();
-		const workflowFileResult = await client.callTool({
-			name: 'repo_get_file',
-			arguments: {
-				repo_key: 'iusung111/OpenGPT',
-				path: '.github/workflows/test.yml',
-			},
-		});
-		const workflowFileText =
-			'text' in workflowFileResult.content[0] ? workflowFileResult.content[0].text : '';
-		expect(JSON.parse(workflowFileText)).toMatchObject({
-			ok: true,
-			data: {
-				path: '.github/workflows/test.yml',
-				decoded_text: null,
-				access_mode: 'summary_first',
-			},
-		});
+		const client = await createMcpClient();
+		try {
+				const tools = await client.listTools();
+				expect(tools.tools.some((tool) => tool.name === 'repo_update_file')).toBe(true);
 
-		const workflowUpdateResult = await client.callTool({
-			name: 'repo_update_file',
-			arguments: {
-				repo_key: 'iusung111/OpenGPT',
-				branch: 'agent/workflow-edit-test',
-				path: '.github/workflows/test.yml',
-				message: 'Update workflow from MCP',
-				content_b64: btoa('name: test\non: workflow_dispatch\njobs: {}\n'),
-				expected_blob_sha: 'workflow-blob-sha',
-			},
-		});
-		const workflowUpdateText =
-			'text' in workflowUpdateResult.content[0] ? workflowUpdateResult.content[0].text : '';
-		expect(JSON.parse(workflowUpdateText)).toMatchObject({
-			ok: true,
-			data: {
-				content: {
-					path: '.github/workflows/test.yml',
-				},
-				commit: {
-					message: 'Update workflow from MCP',
-				},
-			},
-		});
-		await client.close();
+				const workflowUpdateResult = await client.callTool({
+					name: 'repo_update_file',
+					arguments: {
+						repo_key: 'iusung111/OpenGPT',
+						branch: 'agent/workflow-edit-test',
+						path: '.github/workflows/test.yml',
+						message: 'Update workflow from MCP',
+						content_b64: btoa('name: test\non: workflow_dispatch\njobs: {}\n'),
+						expected_blob_sha: 'workflow-blob-sha',
+					},
+				});
+				const workflowUpdateText =
+					'text' in workflowUpdateResult.content[0] ? workflowUpdateResult.content[0].text : '';
+				expect(JSON.parse(workflowUpdateText)).toMatchObject({
+					ok: true,
+					data: {
+						content: {
+							path: '.github/workflows/test.yml',
+						},
+						commit: {
+							message: 'Update workflow from MCP',
+						},
+					},
+				});
+			} finally {
+				await client.close();
+			}
 	});
 
 	it('rejects local filesystem paths for repo read and write tools', async () => {
@@ -213,7 +268,7 @@ describe('runtime mcp surface', () => {
 						path: 'D:\\VScode\\OpenGPT\\README.md',
 					},
 				}),
-			).rejects.toThrow(/invalid repo path/i);
+			)).rejects.toThrow(/invalid repo path/i);
 
 			await expect(
 				client.callTool({
