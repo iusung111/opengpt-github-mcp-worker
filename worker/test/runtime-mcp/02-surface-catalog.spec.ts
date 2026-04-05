@@ -428,7 +428,7 @@ describe('runtime mcp surface', () => {
 		await client.close();
 	}, 10000);
 
-	it('suppresses widget metadata on /chatgpt/mcp while keeping the same tool surface', async () => {
+	it('exposes a read-only public surface on /chatgpt/mcp without widget metadata', async () => {
 		const client = await createChatgptMcpClient();
 		const tools = await client.listTools();
 		const widgetUri = 'ui://widget/notification-center.html';
