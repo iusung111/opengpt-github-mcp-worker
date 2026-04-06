@@ -39,7 +39,7 @@ function disableWidgetRegistrations(server: McpServer): void {
 								server,
 								args,
 							)) as Record<string, unknown> | null | undefined,
-						)	
+						)
 				: handler;
 		return originalRegisterTool(name, nextConfig as never, nextHandler as never);
 	}) as typeof server.registerTool;
@@ -84,7 +84,7 @@ export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {})
 		disableWidgetRegistrations(server);
 	}
 
-	\nconst readAnnotations = { readOnlyHint: true, openWorldHint: false };
+	const readAnnotations = { readOnlyHint: true, openWorldHint: false };
 	const writeAnnotations = {
 		readOnlyHint: false,
 		openWorldHint: false,
