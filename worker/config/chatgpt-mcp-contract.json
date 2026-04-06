@@ -1,0 +1,51 @@
+{
+  "route": "/chatgpt/mcp",
+  "profile_policy": "direct_full",
+  "widget_resource_uri": "ui://widget/notification-center.html",
+  "widget_mime_type": "text/html;profile=mcp-app",
+  "required_widget_tools": [
+    "run_console_open",
+    "jobs_list",
+    "job_progress",
+    "job_event_feed",
+    "request_permission_bundle",
+    "permission_request_resolve",
+    "job_control",
+    "incident_bundle_create",
+    "self_host_status"
+  ],
+  "required_write_tool_candidates": [
+    "repo_create_branch",
+    "repo_update_file",
+    "repo_upload_start",
+    "pr_create"
+  ],
+  "health_blocked_counters": [
+    "mcp_public_blocked_count",
+    "mcp_public_blocked_tool_call_count"
+  ],
+  "required_docs_snippets": [
+    "`/chatgpt/mcp` is the ChatGPT custom connector endpoint.",
+    "widget URI: `ui://widget/notification-center.html`",
+    "repo_upload_start",
+    "repo_upload_append",
+    "repo_upload_commit",
+    "self_host_status",
+    "unauthenticated `POST /chatgpt/mcp` with `tools/call` returns `401`"
+  ],
+  "canonical_runtime_expectations": {
+    "root_redirect": "/gui/",
+    "runtime_owned_prefixes": [
+      "/gui/api/",
+      "/mcp",
+      "/chatgpt/mcp",
+      "/webhooks/github",
+      "/queue/",
+      "/healthz"
+    ],
+    "static_gui_paths_delegate_to_asset_layer": [
+      "/gui",
+      "/gui/"
+    ]
+  }
+}

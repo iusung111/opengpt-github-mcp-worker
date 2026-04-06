@@ -1,0 +1,48 @@
+name: mirror-post-deploy-guard
+
+on:
+  workflow_run:
+    workflows:
+      - cloudflare-self-deploy
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: Mirror URL to verify
+        required: false
+        default: https://opengpt-github-mcp-worker-mirror.iusung111.workers.dev
+        type: string
+      expected_commit_sha:
+        description: Optional expected release commit sha
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-latest
+    env:
+      APP_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.app_url || 'https://opengpt-github-mcp-worker-mirror.iusung111.workers.dev' }}
+      EXPECTED_COMMIT_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_commit_sha || github.event.workflow_run.head_sha || '' }}
+      EXPECT_DEPLOY_ENV: mirror
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Smoke test public ChatGPT MCP exposure on mirror
+        run: node worker/scripts/smoke-chatgpt-mcp.mjs

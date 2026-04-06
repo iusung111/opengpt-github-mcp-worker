@@ -1,0 +1,44 @@
+name: premerge-chatgpt-mcp-guard
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Cloudflare types
+        run: npm run cf-typegen
+
+      - name: Verify generated tool surface docs
+        run: npm run docs:tool-surface:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Check ChatGPT MCP contract
+        run: node worker/scripts/check-chatgpt-mcp-contract.mjs
+
+      - name: Check runtime route canonicalization
+        run: node worker/scripts/check-route-canonicalization.mjs
