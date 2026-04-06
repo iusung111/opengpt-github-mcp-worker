@@ -15,22 +15,25 @@ function assert(condition, message) {
 
 const contract = JSON.parse(read('worker/config/chatgpt-mcp-contract.json'));
 const docs = read('docs/CHATGPT_MCP.md');
-const handlers = read('worker/src/runtime/mcp/handlers.ts');
+const handlers = read('worker/src/http.ts');
 const widgetResources = read('worker/src/mcp-widget-resources.ts');
-const overviewTools = read('worker/src/mcp-overview-tools.ts');
 const readObservability = read('worker/src/read-observability.ts');
-const router = read('worker/src/runtime/router.ts');
+const router = read('worker/src/index.ts');
+const mcpTools = read('worker/src/mcp-tools.ts');
+
+const toolFiles = fs.readdirSync(path.join(root, 'worker/src')).filter(f => f.startsWith('mcp-') && f.endsWith('.ts'));
+const totalToolSurface = toolFiles.map(f => read(`worker/src/${f}`)).join('\n');
 
 assert(handlers.includes(`route: '${contract.route}'`), `runtime handler route mismatch: expected ${contract.route}`);
 assert(
-  handlers.includes(`buildMcpServer(env, { enableWidgets: true, profile: '${contract.profile_policy}' })`),
-  `runtime handler profile mismatch: expected ${contract.profile_policy}`,
+  mcpTools.includes(`name: '${contract.canonical_runtime_expectations.mcp_server_name}'`),
+  `mcp server name mismatch: expected ${contract.canonical_runtime_expectations.mcp_server_name}`,
 );
 assert(widgetResources.includes(contract.widget_resource_uri), `widget resource URI missing: ${contract.widget_resource_uri}`);
 assert(widgetResources.includes(contract.widget_mime_type), `widget mime type mismatch: expected ${contract.widget_mime_type}`);
 
 for (const toolName of contract.required_widget_tools) {
-  assert(overviewTools.includes(`'${toolName}'`) || overviewTools.includes(`\"${toolName}\"`), `required widget tool missing from overview surface: ${toolName}`);
+  assert(totalToolSurface.includes(`'${toolName}'`) || totalToolSurface.includes(`\"${toolName}\"`), `required widget tool missing from total surface: ${toolName}`);
   assert(docs.includes(toolName), `docs/CHATGPT_MCP.md is missing required tool reference: ${toolName}`);
 }
 

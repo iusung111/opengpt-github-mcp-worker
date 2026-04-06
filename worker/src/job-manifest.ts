@@ -62,7 +62,7 @@ function normalizeWorkflowRunRecord(value: unknown): JobWorkflowRunRecord | null
 	};
 }
 
-function normalizeApprovalManifest(value: unknown): JobApprovalManifest | undefined {
+export function normalizeApprovalManifest(value: unknown): JobApprovalManifest | undefined {
 	if (!isRecord(value)) {
 		return undefined;
 	}

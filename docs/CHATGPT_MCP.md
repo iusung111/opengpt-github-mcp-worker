@@ -2,6 +2,8 @@
 
 `/chatgpt/mcp` is the ChatGPT custom connector endpoint.
 
+widget URI: `ui://widget/notification-center.html`
+
 It is separate from the direct `/mcp` endpoint:
 
 - `/mcp`: Cloudflare Access protected direct MCP access
@@ -398,6 +400,11 @@ After deployment, confirm `/healthz` reports:
 Then reconnect ChatGPT with a new connector and verify:
 
 1. `jobs_list`
-2. `repo_list_tree(owner="iusung111", repo="OpenGPT", path="", recursive=false)`
-3. `repo_get_file(owner="iusung111", repo="OpenGPT", path="README.md")`
-4. `repo_get_file(owner="iusung111", repo="OpenGPT", path=".github/workflows/agent-run.yml")`
+2. `job_progress`
+3. `job_event_feed`
+4. `request_permission_bundle`
+5. `incident_bundle_create`
+6. `self_host_status`
+7. `repo_list_tree(owner="iusung111", repo="OpenGPT", path="", recursive=false)`
+8. `repo_get_file(owner="iusung111", repo="OpenGPT", path="README.md")`
+9. `repo_get_file(owner="iusung111", repo="OpenGPT", path=".github/workflows/agent-run.yml")`

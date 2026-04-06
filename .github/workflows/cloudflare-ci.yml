@@ -37,5 +37,11 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+      - name: Check ChatGPT MCP contract
+        run: node worker/scripts/check-chatgpt-mcp-contract.mjs
+
+      - name: Check runtime route canonicalization
+        run: node worker/scripts/check-route-canonicalization.mjs
+
       - name: Runtime integration tests
         run: npm run test:integration:runtime

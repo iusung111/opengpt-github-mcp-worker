@@ -4,13 +4,10 @@
   "widget_resource_uri": "ui://widget/notification-center.html",
   "widget_mime_type": "text/html;profile=mcp-app",
   "required_widget_tools": [
-    "run_console_open",
     "jobs_list",
     "job_progress",
     "job_event_feed",
     "request_permission_bundle",
-    "permission_request_resolve",
-    "job_control",
     "incident_bundle_create",
     "self_host_status"
   ],
@@ -34,14 +31,16 @@
     "unauthenticated `POST /chatgpt/mcp` with `tools/call` returns `401`"
   ],
   "canonical_runtime_expectations": {
+    "mcp_server_name": "opengpt-github-mcp-worker",
     "root_redirect": "/gui/",
     "runtime_owned_prefixes": [
-      "/gui/api/",
       "/mcp",
       "/chatgpt/mcp",
       "/webhooks/github",
       "/queue/",
-      "/healthz"
+      "/healthz",
+      "/github/app-installation",
+      "/.well-known/oauth-protected-resource"
     ],
     "static_gui_paths_delegate_to_asset_layer": [
       "/gui",

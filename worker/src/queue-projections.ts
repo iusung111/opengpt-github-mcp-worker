@@ -45,8 +45,7 @@ function buildNotificationCounts(items: NotificationItem[]): NotificationCounts 
 }
 
 function getApprovalManifest(manifest: JobWorkerManifest | undefined): JobApprovalManifest | null {
-	const approval = manifest?.attention?.approval;
-	return approval && typeof approval === 'object' ? approval : null;
+	return normalizeApprovalManifest(manifest?.attention?.approval) ?? null;
 }
 
 function hasActiveManifestSection(manifest: JobWorkerManifest | undefined): boolean {
@@ -443,6 +442,11 @@ export function buildJobAudit(job: JobRecord, extra: Record<string, unknown> = {
 		work_branch: job.work_branch ?? null,
 		workflow_run_id: job.workflow_run_id ?? null,
 		auto_improve_cycle: job.auto_improve_cycle,
+		stale_reason: job.stale_reason ?? null,
+		...extra,
+	};
+}
+uto_improve_cycle: job.auto_improve_cycle,
 		stale_reason: job.stale_reason ?? null,
 		...extra,
 	};
