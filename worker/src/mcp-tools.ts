@@ -35,11 +35,11 @@ function disableWidgetRegistrations(server: McpServer): void {
 			typeof handler === 'function'
 				? async (...args: any[]) =>
 						stripNotificationWidgetResult(
-						(await (handler as (...innerArgs: any[]) => Promise<Record<string, unknown> | null | undefined>).apply(
+							(await (handler as (...innerArgs: any[]) => Promise<Record<string, unknown> | null | undefined>).apply(
 								server,
 								args,
 							)) as Record<string, unknown> | null | undefined,
-							)
+						)	
 				: handler;
 		return originalRegisterTool(name, nextConfig as never, nextHandler as never);
 	}) as typeof server.registerTool;
@@ -66,9 +66,9 @@ function registerChatgptPublicTools(
 	server: McpServer,
 	env: AppEnv,
 	readAnnotations: Record<string, unknown>,
+	writeAnnotations: Record<string, unknown>,
 ): void {
-	registerRepoReadTools(server, env, readAnnotations);
-	registerWorkflowReadTools(server, env, readAnnotations);
+	registerDirectFullTools(server, env, readAnnotations, writeAnnotations);
 }
 
 export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {}): McpServer {
@@ -79,22 +79,20 @@ export function buildMcpServer(env: AppEnv, options: McpServerBuildOptions = {})
 	});
 	decorateToolRegistration(server);
 	const enableWidgets = options.enableWidgets ?? true;
+	registerWidgetResources(server, env);
 	if (!enableWidgets) {
 		disableWidgetRegistrations(server);
 	}
 
-	const readAnnotations = { readOnlyHint: true, openWorldHint: false };
+	\nconst readAnnotations = { readOnlyHint: true, openWorldHint: false };
 	const writeAnnotations = {
 		readOnlyHint: false,
 		openWorldHint: false,
 		destructiveHint: false,
 	};
 
-	if (enableWidgets) {
-		registerWidgetResources(server, env);
-	}
 	if (profile === 'chatgpt_public') {
-		registerChatgptPublicTools(server, env, readAnnotations);
+		registerChatgptPublicTools(server, env, readAnnotations, writeAnnotations);
 	} else {
 		registerDirectFullTools(server, env, readAnnotations, writeAnnotations);
 	}
