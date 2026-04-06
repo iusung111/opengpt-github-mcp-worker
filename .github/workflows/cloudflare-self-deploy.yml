@@ -8,6 +8,10 @@ on:
       - completed
   workflow_dispatch:
     inputs:
+      checkout_ref:
+        description: Optional git ref or commit SHA to checkout for self deploy
+        required: false
+        type: string
       deploy_target:
         description: Deploy target for the self repo
         required: false
@@ -43,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     env:
+      CHECKOUT_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.checkout_ref || github.sha }}
       DEPLOY_TARGET: ${{ github.event_name == 'workflow_run' && 'mirror' || inputs.deploy_target || 'mirror' }}
       VERIFY_MIRROR_FIRST: ${{ github.event_name == 'workflow_run' && 'false' || inputs.verify_mirror_first || 'true' }}
       SYNC_SECRETS: ${{ github.event_name == 'workflow_run' && 'false' || inputs.sync_secrets || 'false' }}
@@ -57,7 +62,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Report deploy ref resolution
+        run: |
+          echo "CHECKOUT_REF=${CHECKOUT_REF}"
+          echo "EXPECTED_COMMIT_SHA=${EXPECTED_COMMIT_SHA}"
+          echo "GITHUB_SHA=${GITHUB_SHA}"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -188,10 +199,10 @@ jobs:
           fi
 
       - name: Verify mirror health before live promotion
-        if: ${{ env.DEPLOY_TARGET == 'live' && env.VERIFY_MIRROR_FIRST == 'true' }}
+        if: ${{ env.DEPLOY_TARGET == 'live' && env.VERIFY_MIRROR_FIRST== 'true' }}
         run: |
-          echo "Checking mirror health identity: ${SELF_MIRROR_URL}/healthz"
-          HEALTH_JSON=$(curl --fail --show-error --silent "${SELF_MIRROR_URL}/healthz")
+          echo "Checking mirror health identity: ${SELF_MIRROR_URL}/healtz"
+          HEALTH_JSON=$(curl --fail --show-error --silent "${SELF_MIRROR_URL}/healtz")
           echo "${HEALTH_JSON}"
           node -e 'const payload = JSON.parse(process.argv[1]); const expectedCommit = process.argv[2]; if (!payload.ok) throw new Error("mirror health reported ok=false"); if (payload.deploy_environment !== "mirror") throw new Error("mirror health deploy_environment mismatch"); if (expectedCommit && payload.release_commit_sha !== expectedCommit) throw new Error(`mirror release_commit_sha mismatch: expected ${expectedCommit}, got ${payload.release_commit_sha ?? "null"}`);' "${HEALTH_JSON}" "${EXPECTED_COMMIT_SHA}"
 
