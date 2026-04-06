@@ -59,7 +59,7 @@ function ensureChatgptMcpAcceptHeader(request: Request): Request {
 	}
 	const headers = new Headers(request.headers);
 	headers.set('accept', 'application/json, text/event-stream');
-	return new Request(request, headers) as Request;
+	return new Request(request, { headers });
 }
 
 async function getChatgptRpcMethod(request: Request): Promise<string | null> {
@@ -148,13 +148,13 @@ export async function handleChatgptMcpRequest(
 	}
 	incrementReadCounter('mcp_auth_ok_count');
 	diagnosticLog('chatgpt_mcp_auth_ok', {
-		method: request.method,
-		accept,
-		rpc_method: rpcMethod,
-		has_bearer_token: hasBearerToken,
-		email: auth.email ?? null,
-		profile: 'direct_full',
-	});
+			method: request.method,
+			accept,
+			rpc_method: rpcMethod,
+			has_bearer_token: hasBearerToken,
+			email: auth.email ?? null,
+			profile: 'direct_full',
+		});
 	const handler = getChatgptMcpHandler(env);
 	const nextRequest = await preflightMcpToolCallRequest(
 		ensureChatgptMcpAcceptHeader(request),
