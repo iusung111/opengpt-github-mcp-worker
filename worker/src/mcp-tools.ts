@@ -12,6 +12,12 @@ import { registerWorkflowDispatchTools } from './mcp-workflow-dispatch-tools';
 import { registerWorkflowReadTools } from './mcp-workflow-read-tools';
 import { registerWriteTools } from './mcp-write-tools';
 
+type ToolAnnotations = {
+	readOnlyHint: boolean;
+	openWorldHint: boolean;
+	destructiveHint?: boolean;
+};
+
 type McpServerBuildOptions = {
 	enableWidgets?: boolean;
 	profile?: 'direct_full' | 'chatgpt_public';
@@ -48,8 +54,8 @@ function disableWidgetRegistrations(server: McpServer): void {
 function registerDirectFullTools(
 	server: McpServer,
 	env: AppEnv,
-	readAnnotations: Record<string, unknown>,
-	writeAnnotations: Record<string, unknown>,
+	readAnnotations: ToolAnnotations,
+	writeAnnotations: ToolAnnotations,
 ): void {
 	registerOverviewTools(server, env, readAnnotations, writeAnnotations);
 	registerRepoReadTools(server, env, readAnnotations);
@@ -65,8 +71,8 @@ function registerDirectFullTools(
 function registerChatgptPublicTools(
 	server: McpServer,
 	env: AppEnv,
-	readAnnotations: Record<string, unknown>,
-	writeAnnotations: Record<string, unknown>,
+	readAnnotations: ToolAnnotations,
+	writeAnnotations: ToolAnnotations,
 ): void {
 	registerDirectFullTools(server, env, readAnnotations, writeAnnotations);
 }
