@@ -1,5 +1,6 @@
 import {
 	DispatchRequestRecord,
+	JobApprovalManifest,
 	JobAttentionManifest,
 	JobBrowserManifest,
 	JobDesktopManifest,
@@ -61,6 +62,48 @@ function normalizeWorkflowRunRecord(value: unknown): JobWorkflowRunRecord | null
 	};
 }
 
+function normalizeApprovalManifest(value: unknown): JobApprovalManifest | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const pending = value.pending === true;
+	const stateValue = typeof value.state === 'string' ? value.state : undefined;
+	const derivedState =
+		stateValue === 'drafted' ||
+		stateValue === 'pending' ||
+		stateValue === 'approved' ||
+		stateValue === 'rejected' ||
+		stateValue === 'superseded' ||
+		stateValue === 'resolved'
+			? stateValue
+			: pending
+				? 'pending'
+				: typeof value.resolved_at === 'string'
+					? 'resolved'
+					: typeof value.approved_at === 'string'
+						? 'approved'
+						: 'drafted';
+	return {
+		pending,
+		state: derivedState,
+		request_id: typeof value.request_id === 'string' ? value.request_id : null,
+		reason: typeof value.reason === 'string' ? value.reason : null,
+		blocked_action: typeof value.blocked_action === 'string' ? value.blocked_action : null,
+		request_surface: typeof value.request_surface === 'string' ? value.request_surface : null,
+		requested_at: typeof value.requested_at === 'string' ? value.requested_at : undefined,
+		approved_at: typeof value.approved_at === 'string' ? value.approved_at : null,
+		resolved_at: typeof value.resolved_at === 'string' ? value.resolved_at : null,
+		resolution:
+			value.resolution === 'approved' ||
+			value.resolution === 'rejected' ||
+			value.resolution === 'superseded' ||
+			value.resolution === 'resolved'
+				? value.resolution
+				: null,
+		cleared_at: typeof value.cleared_at === 'string' ? value.cleared_at : null,
+	};
+}
+
 function normalizeSection<T extends object>(value: unknown): T {
 	return (isRecord(value) ? { ...value } : {}) as T;
 }
@@ -95,6 +138,10 @@ export function normalizeWorkerManifest(value: unknown): JobWorkerManifest {
 	const lastWorkflowRun =
 		normalizeWorkflowRunRecord(execution.last_workflow_run) ??
 		normalizeWorkflowRunRecord(input.last_workflow_run);
+	const approval =
+		normalizeApprovalManifest(attention.approval) ??
+		normalizeApprovalManifest(input.approval) ??
+		normalizeApprovalManifest(input.attention && isRecord(input.attention) ? input.attention.approval : undefined);
 
 	return {
 		...input,
@@ -109,7 +156,10 @@ export function normalizeWorkerManifest(value: unknown): JobWorkerManifest {
 		browser,
 		desktop,
 		runtime,
-		attention,
+		attention: {
+			...attention,
+			approval,
+		},
 		dispatch_request: dispatchRequest,
 		last_workflow_run: lastWorkflowRun,
 	};
@@ -178,6 +228,10 @@ export function getManifestWorkflowRun(manifest: unknown): JobWorkflowRunRecord 
 	return normalizeWorkerManifest(manifest).execution?.last_workflow_run ?? null;
 }
 
+export function getManifestApproval(manifest: unknown): JobApprovalManifest | null {
+	return normalizeWorkerManifest(manifest).attention?.approval ?? null;
+}
+
 export function setManifestDispatchRequest(
 	manifest: unknown,
 	dispatchRequest: DispatchRequestRecord | null,
@@ -202,6 +256,20 @@ export function setManifestWorkflowRun(
 		execution: {
 			...(normalizeWorkerManifest(manifest).execution ?? {}),
 			last_workflow_run: workflowRun,
+		},
+	});
+}
+
+export function setManifestApproval(
+	manifest: unknown,
+	approval: JobApprovalManifest | null,
+): JobWorkerManifest {
+	const normalizedManifest = normalizeWorkerManifest(manifest);
+	return normalizeWorkerManifest({
+		...normalizedManifest,
+		attention: {
+			...(normalizedManifest.attention ?? {}),
+			approval,
 		},
 	});
 }
