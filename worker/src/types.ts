@@ -153,9 +153,15 @@ export interface JobRuntimeManifest {
 
 export interface JobApprovalManifest {
 	pending?: boolean;
+	state?: 'drafted' | 'pending' | 'approved' | 'rejected' | 'superseded' | 'resolved';
+	request_id?: string | null;
 	reason?: string | null;
 	blocked_action?: string | null;
+	request_surface?: string | null;
 	requested_at?: string;
+	approved_at?: string | null;
+	resolved_at?: string | null;
+	resolution?: 'approved' | 'rejected' | 'superseded' | 'resolved' | null;
 	cleared_at?: string | null;
 }
 
@@ -415,6 +421,15 @@ export interface UploadSessionRecord {
 	next_byte_offset: number;
 	received_bytes: number;
 	chunk_count: number;
+	duplicate_chunk_count?: number;
+	append_retry_count?: number;
+	commit_attempts?: number;
+	last_chunk_index?: number | null;
+	last_byte_offset?: number | null;
+	last_error?: string | null;
+	last_failed_at?: string | null;
+	last_commit_error_code?: string | null;
+	last_error_fingerprint?: string | null;
 	created_at: string;
 	expires_at: string;
 	committed_at?: string | null;
