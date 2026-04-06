@@ -14,7 +14,7 @@ export function getMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> 
 }
 
 export function getChatgptMcpHandler(env: AppEnv): ReturnType<typeof createMcpHandler> {
-	return createMcpHandler(buildMcpServer(env, { enableWidgets: false, profile: 'chatgpt_public' }) as never, {
+	return createMcpHandler(buildMcpServer(env, { enableWidgets: true, profile: 'direct_full' }) as never, {
 		route: '/chatgpt/mcp',
 		enableJsonResponse: true,
 	});
@@ -110,7 +110,7 @@ export async function handleChatgptMcpRequest(
 			method: request.method,
 			accept,
 			has_bearer_token: false,
-			profile: 'chatgpt_public',
+			profile: 'direct_full',
 		});
 		return chatgptMcpBootstrapResponse(request, env);
 	}
@@ -148,17 +148,17 @@ export async function handleChatgptMcpRequest(
 	}
 	incrementReadCounter('mcp_auth_ok_count');
 	diagnosticLog('chatgpt_mcp_auth_ok', {
-		method: request.method,
-		accept,
-		rpc_method: rpcMethod,
-		has_bearer_token: hasBearerToken,
-		email: auth.email ?? null,
-		profile: 'chatgpt_public',
-	});
+			method: request.method,
+			accept,
+			rpc_method: rpcMethod,
+			has_bearer_token: hasBearerToken,
+			email: auth.email ?? null,
+			profile: 'direct_full',
+		});
 	const handler = getChatgptMcpHandler(env);
 	const nextRequest = await preflightMcpToolCallRequest(
 		ensureChatgptMcpAcceptHeader(request),
-		{ routePolicy: 'chatgpt_public' },
+		{ routePolicy: 'direct_full' },
 	);
 	if (nextRequest instanceof Response) {
 		return nextRequest;
