@@ -9,6 +9,54 @@ export function diagnosticLog(event: string, payload: Record<string, unknown>): 
 	console.log(JSON.stringify({ ts: nowIso(), event, ...payload }));
 }
 
+export function normalizeErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return String(error);
+}
+
+export function buildErrorFingerprint(parts: Array<unknown>): string {
+	return parts
+		.map((value) => String(value ?? ''))
+		.map((value) => value.trim().toLowerCase().replace(/\s+/g, ' '))
+		.filter(Boolean)
+		.join('|')
+		.slice(0, 240);
+}
+
+export function recordRuntimeEvent(event: string, payload: Record<string, unknown>): void {
+	diagnosticLog(`runtime.${event}`, payload);
+}
+
+function getBooleanEnvFlag(env: unknown, key: string, fallback: boolean): boolean {
+	if (!hasRecord(env)) return fallback;
+	const raw = env[key];
+	if (typeof raw === 'boolean') return raw;
+	if (typeof raw === 'string') {
+		const normalized = raw.trim().toLowerCase();
+		if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
+		if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
+	}
+	return fallback;
+}
+
+export function isStrictMirrorVerifyEnabled(env: unknown): boolean {
+	return getBooleanEnvFlag(env, 'STRICT_MIRROR_VERIFY', false);
+}
+
+export function isStrictDocImplSyncEnabled(env: unknown): boolean {
+	return getBooleanEnvFlag(env, 'STRICT_DOC_IMPL_SYNC', false);
+}
+
+export function isStrictFingerprintBlockEnabled(env: unknown): boolean {
+	return getBooleanEnvFlag(env, 'STRICT_FINGERPRINT_BLOCK', false);
+}
+
+export function isSelfImproveSafeModeEnabled(env: unknown): boolean {
+	return getBooleanEnvFlag(env, 'SELF_IMPROVE_SAFE_MODE', true);
+}
+
 export function jsonResponse(payload: unknown, status = 200): Response {
 	return new Response(JSON.stringify(payload, null, 2), {
 		status,
@@ -75,6 +123,7 @@ export function errorCodeFor(error: unknown, fallback: string): string {
 	if (message.includes('upload session already committing')) return 'upload_session_already_committing';
 	if (message.includes('unexpected upload chunk index')) return 'upload_chunk_index_mismatch';
 	if (message.includes('unexpected upload byte offset')) return 'upload_chunk_offset_mismatch';
+	if (message.includes('duplicate upload chunk content mismatch')) return 'upload_chunk_duplicate_conflict';
 	if (message.includes('invalid upload chunk base64')) return 'upload_chunk_invalid_base64';
 	if (message.includes('upload chunk too large')) return 'upload_chunk_too_large';
 	if (message.includes('upload exceeds declared total bytes')) return 'upload_total_bytes_exceeded';

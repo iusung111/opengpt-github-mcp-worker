@@ -22,4 +22,9 @@ export interface UploadSessionRecord {
 	created_at: string;
 	expires_at: string;
 	committed_at?: string | null;
+	last_error?: string | null;
+	last_failed_at?: string | null;
+	commit_attempts?: number;
+	last_commit_error_fingerprint?: string | null;
+	last_chunk_error_fingerprint?: string | null;
 }

@@ -24,6 +24,10 @@ import {
 	getSelfMirrorUrl,
 	getSelfReleaseCommitSha,
 	getWorkingStaleAfterMs,
+	isSelfImproveSafeModeEnabled,
+	isStrictDocImplSyncEnabled,
+	isStrictFingerprintBlockEnabled,
+	isStrictMirrorVerifyEnabled,
 	jsonResponse,
 } from '../../utils';
 
@@ -55,6 +59,10 @@ export function handleHealth(env: AppEnv): Response {
 		github_credential_source: githubCredentialSource,
 		github_credential_split_configured: githubCredentialSplitReady,
 		using_mirror_github_credentials: usingMirrorCredentials,
+		strict_mirror_verify: isStrictMirrorVerifyEnabled(env),
+		strict_doc_impl_sync: isStrictDocImplSyncEnabled(env),
+		strict_fingerprint_block: isStrictFingerprintBlockEnabled(env),
+		self_improve_safe_mode: isSelfImproveSafeModeEnabled(env),
 		warnings,
 		allowed_repos: getAllowedRepos(env),
 		allowed_workflows: getAllowedWorkflows(env),
